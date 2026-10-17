@@ -1,8 +1,8 @@
 """
 YouTube Data API: upload completed task videos when poster content rating is safe or suggestive.
 
-Requires one-time admin OAuth (refresh token in youtube_credentials).
-Uses GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET and YOUTUBE_OAUTH_REDIRECT_URI from config.
+Requires AutoRig's own one-time admin OAuth (refresh token in youtube_credentials).
+The U3D provider API has separate OAuth and credentials.
 """
 from __future__ import annotations
 
@@ -29,10 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import (
     APP_URL,
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
+    AUTORIG_YOUTUBE_CLIENT_ID,
+    AUTORIG_YOUTUBE_CLIENT_SECRET,
     OPENAI_API_KEY,
-    YOUTUBE_OAUTH_REDIRECT_URI,
+    AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI,
     YOUTUBE_REFRESH_TOKEN,
     YOUTUBE_UPLOAD_PRIVACY,
 )
@@ -396,8 +396,8 @@ async def _telegram_youtube_token_notice(detail: str) -> None:
 
 def build_youtube_authorize_url(state: str) -> str:
     params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": YOUTUBE_OAUTH_REDIRECT_URI,
+        "client_id": AUTORIG_YOUTUBE_CLIENT_ID,
+        "redirect_uri": AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI,
         "response_type": "code",
         "scope": YOUTUBE_UPLOAD_SCOPE,
         "access_type": "offline",
@@ -414,9 +414,9 @@ async def exchange_youtube_code_for_tokens(code: str) -> Optional[dict]:
                 "https://oauth2.googleapis.com/token",
                 data={
                     "code": code,
-                    "client_id": GOOGLE_CLIENT_ID,
-                    "client_secret": GOOGLE_CLIENT_SECRET,
-                    "redirect_uri": YOUTUBE_OAUTH_REDIRECT_URI,
+                    "client_id": AUTORIG_YOUTUBE_CLIENT_ID,
+                    "client_secret": AUTORIG_YOUTUBE_CLIENT_SECRET,
+                    "redirect_uri": AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI,
                     "grant_type": "authorization_code",
                 },
                 timeout=30.0,
@@ -446,8 +446,8 @@ def _youtube_credentials_from_db(refresh_token: str) -> Credentials:
         token=None,
         refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
+        client_id=AUTORIG_YOUTUBE_CLIENT_ID,
+        client_secret=AUTORIG_YOUTUBE_CLIENT_SECRET,
         scopes=[YOUTUBE_UPLOAD_SCOPE],
     )
 
@@ -510,11 +510,12 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
         task = await db.scalar(select(Task).where(Task.id == task_id))
         if not task or task.status != "done":
             return
-        if not bool(getattr(task, "is_public", True)):
-            task.youtube_upload_status = "skipped"
-            task.youtube_upload_error = "private_task"
-            task.updated_at = datetime.utcnow()
-            await db.commit()
+        if task.is_public is False:      # private models (2026-10-17) never go to YouTube
+            if task.youtube_upload_status is None:
+                task.youtube_upload_status = "skipped"
+                task.youtube_upload_error = "private"
+                task.updated_at = datetime.utcnow()
+                await db.commit()
             return
         if not _youtube_task_is_in_current_window(task.created_at):
             task.youtube_upload_status = "skipped"
@@ -814,7 +815,6 @@ async def youtube_retry_worker() -> None:
                             select(Task.id)
                             .where(
                                 Task.status == "done",
-                                Task.is_public.is_(True),
                                 Task.youtube_video_id.is_(None),
                                 Task.youtube_upload_status == "deferred",
                                 Task.youtube_upload_error == "video_source_pending",

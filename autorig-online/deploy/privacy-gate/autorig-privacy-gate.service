@@ -1,0 +1,18 @@
+[Unit]
+Description=AutoRig privacy gate: nginx auth_request for private models (task_privacy.py serve)
+After=network.target
+
+[Service]
+User=autorig
+Group=autorig
+WorkingDirectory=/srv/autorig/current/autorig-online/backend
+Environment=PYTHONUNBUFFERED=1
+Environment=DATABASE_URL=sqlite+aiosqlite:////srv/autorig/data/db/autorig.db
+ExecStart=/srv/autorig/venv/bin/python3 task_privacy.py serve 8292
+Restart=always
+RestartSec=1
+MemoryMax=400M
+OOMScoreAdjust=-700
+
+[Install]
+WantedBy=multi-user.target

@@ -18,7 +18,6 @@ import json
 import base64
 import tempfile
 import zipfile
-import io
 import re
 import html
 from pathlib import Path
@@ -57,14 +56,14 @@ from config import (
     TASK_CACHE_MAX_GB,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
-    AUTORIG_SUBSCRIPTION_PRODUCT_KEY,
-    AUTORIG_SUBSCRIPTION_PRODUCT_KEYS,
-    AUTORIG_SUBSCRIPTION_PRICE_USD,
-    AUTORIG_PUBLIC_CHECKOUT_PRODUCT_KEYS,
-    GUMROAD_WEBHOOK_SECRET,
     BLENDER_PLUGIN_AB_VARIANTS,
     AUTORIG_DONATION_PRODUCT_KEYS,
-    AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS,
+    AUTORIG_SUBSCRIPTION_PRODUCT_KEYS,
+    AUTORIG_SUBSCRIPTION_PRICE_USD,
+    AUTORIG_TASK_PACK_PRODUCT_KEY,
+    AUTORIG_TASK_PACK_TASKS,
+    AUTORIG_TASK_PACK_PRICE_USD,
+    subscription_offer,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
     AUTORIG_CRYPTO_TIERS,
@@ -86,13 +85,13 @@ from config import (
 from viewer_environment import build_viewer_environment_from_settings
 from viewer_theme_contract import validate_viewer_theme_lighting
 from worker_artifact_urls import canonical_worker_artifact_url, is_viewer_artifact_url
+from worker_transport import worker_http_client
+import paid_llm
+from farm_llm_api import router as farm_llm_router
 from artifact_cache import (
     ArtifactSource,
     creation_block_reason as artifact_creation_block_reason,
-    iter_cached_archive_member,
-    lookup_cached_archive_member,
     lookup_cached_artifact,
-    read_cached_archive_member,
     run_retention as run_artifact_cache_retention,
     start_artifact_cache_workers,
     stop_artifact_cache_workers,
@@ -121,8 +120,7 @@ from database import (
 from models import (
     TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
-    UserInfo, UserNotificationSettingsUpdate, TaskVisibilityUpdate, TaskVisibilityResponse,
-    AnonInfo, AuthStatusResponse,
+    UserInfo, UserNotificationSettingsUpdate, AnonInfo, AuthStatusResponse,
     ApiKeyItem, ApiKeyListResponse, ApiKeyCreateResponse,
     AdminUserListItem, AdminUserListResponse,
     AdminBalanceUpdate, AdminBalanceResponse,
@@ -161,15 +159,9 @@ from workers import (
     quarantine_worker,
     clear_worker_quarantine,
     is_worker_quarantined,
-    normalize_worker_url_key,
     normalize_task_type,
     get_backend_worker_processing_counts,
-    get_rig_only_worker_urls,
     get_worker_effective_active,
-    filter_workers_for_dispatch,
-    mark_rig_only_workers,
-    worker_accepts_pipeline_kind,
-    WORKER_POOL_RIG_ONLY,
 )
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
 from animal_submission_policy import (
@@ -186,12 +178,6 @@ from auth import (
     get_or_create_user, get_or_create_anon_session,
     increment_anon_usage, can_create_task_anon, can_create_task_user,
     get_remaining_credits_anon, decrement_user_credits
-)
-from subscription_access import (
-    apply_subscription_event,
-    parse_gumroad_datetime,
-    subscription_summary,
-    user_has_active_subscription,
 )
 from tasks import (
     create_conversion_task, update_task_progress, start_task_on_worker,
@@ -217,7 +203,6 @@ from task_priority import (
     backfill_active_collection_tasks,
     dispatch_fifo_candidate,
     dispatch_queue_statement,
-    dispatch_released_interactive,
     dispatch_sort_key,
     metrics_snapshot as priority_metrics_snapshot,
     preempt_background_task,
@@ -247,15 +232,14 @@ from animation_correction_exports import (
 import re
 import httpx
 
+from ai_fleet import router as ai_fleet_router
+from ai_graph import router as ai_graph_router
+from ai_video_tools import router as ai_video_tools_router
+from ai_controlnet_api import router as ai_controlnet_router
+from ai_model_catalogue import router as ai_model_catalogue_router
+from ai_services import router as ai_services_router
+from ai_vision_api import router as ai_vision_router
 from namecheap_remote_api import router as namecheap_remote_router
-from workload_broker import (
-    WORKLOAD_CLASS_AUTORIG,
-    WORKLOAD_CLASS_BACKGROUND,
-    canonical_physical_resource_id,
-    normalize_reserve_role,
-    reserve_role_rank,
-    router as workload_broker_router,
-)
 from animal_animation_library import (
     ANIMAL_CLIP_IDS,
     ANIMAL_RIG_TYPES,
@@ -309,57 +293,14 @@ PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 PREFLIGHT_RENDER_MAX_BYTES = 6 * 1024 * 1024
 
 
-async def _order_workers_for_workload(
-    db: AsyncSession,
-    workers: List[Any],
-    workload_class: str,
-) -> List[Any]:
-    """Stable role-aware ordering; role capacity remains borrowable when idle."""
-    if not workers:
-        return []
-    rows = (
-        await db.execute(
-            select(WorkerEndpoint.url, WorkerEndpoint.role).where(
-                WorkerEndpoint.enabled.is_(True)
-            )
-        )
-    ).all()
-    role_by_url = {
-        normalize_worker_url_key(url): normalize_reserve_role(role)
-        for url, role in rows
-        if str(url or "").strip()
-    }
-    original_order = {normalize_worker_url_key(worker.url): index for index, worker in enumerate(workers)}
-    return sorted(
-        workers,
-        key=lambda worker: (
-            reserve_role_rank(
-                workload_class,
-                role_by_url.get(normalize_worker_url_key(worker.url), "shared"),
-            ),
-            original_order.get(normalize_worker_url_key(worker.url), 0),
-        ),
-    )
-
-
-async def get_dispatchable_workers(
-    db: AsyncSession,
-    queue_status,
-    *,
-    allow_quarantined: bool = False,
-    workload_class: str = WORKLOAD_CLASS_AUTORIG,
-) -> List[Any]:
+async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quarantined: bool = False) -> List[Any]:
     """
     Return workers that are free according to both worker API and backend DB.
     The DB overlay avoids burst dispatch races where several tasks pick the same
     worker before its live /api-converter-glb counters update.
-
-    Each returned worker carries ``pipeline_capabilities``; callers must check
-    ``worker_accepts_pipeline_kind`` before handing it a task, because a
-    ``rig_only`` box cannot run the full conversion pipeline.
     """
     backend_processing = await get_backend_worker_processing_counts(db)
-    candidates = [
+    return [
         w
         for w in (queue_status.workers if queue_status else [])
         if (
@@ -370,11 +311,6 @@ async def get_dispatchable_workers(
             and (allow_quarantined or not is_worker_quarantined(w.url))
         )
     ]
-    allowed = await filter_workers_for_dispatch(candidates)
-    # A ``rig_only`` registry row is authoritative even before (or without) the
-    # worker's own capability telemetry.
-    mark_rig_only_workers(allowed, await get_rig_only_worker_urls(db))
-    return await _order_workers_for_workload(db, allowed, workload_class)
 
 
 def _pop_preflight_render_image_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -540,7 +476,7 @@ async def send_ga4_event(client_id: str, event_name: str, params: dict = None):
     }
     
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with worker_http_client(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
             if DEBUG:
                 print(f"[GA4] Event '{event_name}' sent. Status: {resp.status_code}")
@@ -677,36 +613,6 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
         dispatch_now = datetime.utcnow()
         queued_result = await db.execute(dispatch_queue_statement(Task, dispatch_now))
         queued_tasks = sorted(queued_result.scalars().all(), key=dispatch_sort_key)
-        ambiguous_submissions = [
-            task
-            for task in queued_tasks
-            if task.workload_lease_id
-            and task.worker_api
-            and str(task.workload_lease_state or "") == "submission_unknown"
-        ]
-        if ambiguous_submissions:
-            # These rows already own durable central admission and their POST
-            # may already be running on the bound host.  Replay only the exact
-            # persisted worker/request identity before considering any fresh
-            # dispatch from this telemetry snapshot.
-            still_ambiguous = False
-            for task in ambiguous_submissions:
-                replayed, _error = await start_task_on_worker(
-                    db,
-                    task,
-                    str(task.worker_api),
-                    admission_locked=True,
-                )
-                still_ambiguous = still_ambiguous or (
-                    replayed.status == "created"
-                    and str(replayed.workload_lease_state or "")
-                    == "submission_unknown"
-                )
-            if still_ambiguous:
-                wake_task_scheduler()
-            # Re-read both host telemetry and DB bindings next cycle; the old
-            # free-worker snapshot predates these exact replays.
-            return
         interactive = [
             task for task in queued_tasks if task.queue_class != QUEUE_CLASS_BACKGROUND
         ]
@@ -715,16 +621,23 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
         ]
 
         free_workers = await get_dispatchable_workers(db, queue_status)
-        # Quarantine is admission control, not a hint. Fresh tasks must never
-        # be sent back to an endpoint that just timed out/returned 5xx. Exact
-        # submission_unknown replay is handled above on its persisted worker.
+        if not free_workers and interactive:
+            fallback_workers = await get_dispatchable_workers(
+                db, queue_status, allow_quarantined=True
+            )
+            if fallback_workers:
+                free_workers = fallback_workers
+                print(
+                    "[Priority] All free workers quarantined; degraded fallback "
+                    "is available to interactive work only"
+                )
 
         cross_background_capacity = None
         if PREEMPTION_ENABLED:
             try:
                 from renderfin import hunyuan_client
 
-                async with httpx.AsyncClient(follow_redirects=True) as client:
+                async with worker_http_client(follow_redirects=True) as client:
                     cross_background_capacity = (
                         await hunyuan_client.shared_full_background_capacity(client)
                     )
@@ -741,6 +654,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 select(Task).where(
                     Task.status == "processing",
                     Task.pipeline_kind != "generate",
+                    Task.pipeline_kind != "v3",
                     Task.queue_class == QUEUE_CLASS_BACKGROUND,
                     Task.preemption_state == "none",
                 )
@@ -774,7 +688,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             if remaining_excess:
                 from renderfin import hunyuan_client
 
-                async with httpx.AsyncClient(follow_redirects=True) as client:
+                async with worker_http_client(follow_redirects=True) as client:
                     released = await hunyuan_client.preempt_background_hunyuan_many(
                         client,
                         limit=remaining_excess,
@@ -787,25 +701,11 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             # cycle; do not dispatch from the stale over-capacity snapshot.
             return
 
-        def _worker_can_run(worker, task: Task) -> bool:
-            return worker_accepts_pipeline_kind(
-                worker, getattr(task, "pipeline_kind", None)
-            )
-
         async def _try_dispatch(worker, candidates: List[Task]) -> bool:
             async def _attempt(task: Task):
-                return await start_task_on_worker(
-                    db, task, worker.url, admission_locked=True
-                )
+                return await start_task_on_worker(db, task, worker.url)
 
-            # A rig-only box skips ``convert`` rows instead of consuming them, so
-            # a convert task at the FIFO head keeps waiting for a full converter
-            # while the next rig task uses the free rig-only slot.
-            return await dispatch_fifo_candidate(
-                candidates,
-                _attempt,
-                eligible=lambda task: _worker_can_run(worker, task),
-            )
+            return await dispatch_fifo_candidate(candidates, _attempt)
 
         used_workers: set[str] = set()
         for worker in free_workers:
@@ -820,11 +720,6 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             for worker in remaining_free
             if worker_supports_preemption(worker) and not is_worker_quarantined(worker.url)
         ]
-        background_workers = await _order_workers_for_workload(
-            db,
-            background_workers,
-            WORKLOAD_CLASS_BACKGROUND,
-        )
         background_budget = min(
             len(background),
             len(background_workers),
@@ -845,6 +740,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 select(Task).where(
                     Task.status == "processing",
                     Task.pipeline_kind != "generate",
+                    Task.pipeline_kind != "v3",
                     Task.queue_class == QUEUE_CLASS_BACKGROUND,
                     Task.preemption_state == "none",
                 )
@@ -863,7 +759,6 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                     active_background.append(task)
             victims = select_preemption_victims(active_background, len(interactive))
             released_slots = 0
-            released_worker_urls: List[str] = []
             if victims:
                 print(
                     f"[Priority] Recalling {len(victims)} background task(s) "
@@ -874,11 +769,6 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                     return_exceptions=True,
                 )
                 released_slots = sum(result is True for result in results)
-                released_worker_urls.extend(
-                    str(task.worker_api or "")
-                    for task, result in zip(victims, results)
-                    if result is True and str(task.worker_api or "").strip()
-                )
 
             # A collection Hunyuan stage can occupy a shared full-converter
             # slot without having an AutoRig Task row in processing. Recall
@@ -888,48 +778,15 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             if hunyuan_needed:
                 from renderfin import hunyuan_client
 
-                async with httpx.AsyncClient(follow_redirects=True) as client:
+                async with worker_http_client(follow_redirects=True) as client:
                     released = await hunyuan_client.preempt_background_hunyuan_many(
                         client,
                         limit=hunyuan_needed,
                         shared_full_converter_only=True,
                     )
                     released_slots += len(released)
-                    released_worker_urls.extend(
-                        str(worker.get("url") or "")
-                        for worker in released
-                        if isinstance(worker, dict)
-                        and str(worker.get("url") or "").strip()
-                    )
             if released_slots:
-                # The release proof is already terminal and this function owns
-                # the common scheduler/fleet lock.  Refresh worker telemetry and
-                # hand the oldest waiting interactive rows directly to only the
-                # slots that were just released, avoiding another up-to-5s loop.
-                fresh_queue_status = await get_global_queue_status(db=db)
-                fresh_free_workers = await get_dispatchable_workers(
-                    db, fresh_queue_status
-                )
-
-                async def _dispatch_released(task: Task, worker) -> tuple:
-                    return await start_task_on_worker(
-                        db, task, worker.url, admission_locked=True
-                    )
-
-                dispatched_now = await dispatch_released_interactive(
-                    interactive,
-                    fresh_free_workers,
-                    released_worker_urls,
-                    _dispatch_released,
-                    eligible=lambda task, worker: _worker_can_run(worker, task),
-                )
-                if dispatched_now:
-                    print(
-                        f"[Priority] Dispatched {dispatched_now} interactive "
-                        "task(s) on freshly preempted slot(s)"
-                    )
-                if interactive or dispatched_now < released_slots:
-                    wake_task_scheduler()
+                wake_task_scheduler()
 
         if queued_tasks and not free_workers and not (interactive and PREEMPTION_ENABLED):
             print(
@@ -1080,6 +937,8 @@ async def background_task_updater():
                 # a generation task has no worker progress to go stale on;
                 # its own pump owns the lifecycle until the mesh exists
                 Task.pipeline_kind != "generate",
+                # V3 rows belong to the durable V3 runtime (v3_runtime_mount)
+                Task.pipeline_kind != "v3",
             )
         )
         processing_tasks = result.scalars().all()
@@ -1343,6 +1202,43 @@ async def lifespan(app: FastAPI):
     global background_task_running
     
     # Startup
+    # Owner rule 2026-10-11 (replaces the 2026-09-27 wipe): a site restart
+    # never loses render work. Renderfin keeps its queue; the start only asks
+    # it to bring back what an older wipe cancelled moments ago.
+    # AUTORIG_RESTART_POLICY=wipe brings the old wipe back.
+    if os.getenv("AUTORIG_RESTART_POLICY", "resume").strip().lower() != "wipe":
+        async def _resume_render_queue_on_start():
+            try:
+                import ai_vision_api
+                async with worker_http_client() as client:
+                    response = await client.post(
+                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/resume", timeout=60.0)
+                data = response.json()
+                print(f"[Startup] render queue kept (restart resume): revived "
+                      f"{data.get('revived_int')} job(s) a restart had cancelled")
+            except Exception as exc:
+                print(f"[Startup] render queue resume skipped: {exc}")
+        asyncio.create_task(_resume_render_queue_on_start())
+    elif os.getenv("AUTORIG_WIPE_QUEUE_ON_START", "1").strip() not in ("0", "false", "no", ""):
+        async def _wipe_render_queue_on_start():
+            try:
+                import ai_vision_api
+                async with worker_http_client() as client:
+                    response = await client.post(
+                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/reset",
+                        params={"spare_non_graph": 1, "reason": "cancelled: server restarted — press Render again"}, timeout=120.0)
+                data = response.json()
+                print(f"[Startup] render queue wiped: {data.get('cancelled_queued_int')} queued, "
+                      f"{data.get('cancelled_running_int')} running; boxes {data.get('boxes_object')}")
+            except Exception as exc:
+                print(f"[Startup] render queue wipe skipped: {exc}")
+        asyncio.create_task(_wipe_render_queue_on_start())
+    # Deferred Civitai posting (2026-09-30): the queue drains with no tab open.
+    try:
+        import ai_civitai_post
+        ai_civitai_post.start_schedule_loop()
+    except Exception as exc:
+        print(f"[Startup] civitai schedule loop not started: {exc}")
     if AUTORIG_MIGRATION_READ_ONLY:
         # The staging database is migrated once offline before this mode is
         # enabled. Runtime startup performs no schema or filesystem writes.
@@ -1389,6 +1285,15 @@ async def lifespan(app: FastAPI):
         _artifact_cache_retention_loop(),
         name="artifact-cache-retention",
     )
+    # V3 task runtime (2026-10-10): durable outbox -> Motion Transfer /api/mt/v3.
+    # Restart-safe: unsettled bindings are re-enqueued, lost projections replayed.
+    app.state.v3_runtime = None
+    try:
+        from v3_runtime_mount import start_v3_runtime
+
+        app.state.v3_runtime = await start_v3_runtime(AsyncSessionLocal)
+    except Exception as exc:
+        print(f"[V3] runtime not started: {type(exc).__name__}: {exc}")
     
     # Send Telegram startup notification (fire-and-forget)
     try:
@@ -1414,6 +1319,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     background_task_running = False
+    try:
+        from v3_runtime_mount import stop_v3_runtime
+
+        await stop_v3_runtime(getattr(app.state, "v3_runtime", None))
+    except Exception as exc:
+        print(f"[V3] runtime stop: {type(exc).__name__}: {exc}")
     background_worker = getattr(app.state, "background_worker", None)
     youtube_worker = getattr(app.state, "youtube_retry_worker", None)
     startup_disk_maintenance = getattr(app.state, "startup_disk_maintenance", None)
@@ -1466,12 +1377,36 @@ app = FastAPI(
 
 # Add GZip compression for responses > 500 bytes.
 # GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
+from task_owner import TaskOwnerMiddleware
+
+# Inside GZip, so it reads plain JSON: records who submitted each render task.
+app.add_middleware(TaskOwnerMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
+# Civitai pages and CDN previews as media inputs (civitai_media.py).
+from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
+app.add_middleware(CivitaiMediaMiddleware)
+# Private models (owner 2026-10-17): every GET/HEAD naming a private task is 404 for everyone but its owner and
+# admins (task_privacy.py; nginx checks the files it serves itself through the same module's gate).
+from task_privacy import PrivacyMiddleware
+app.add_middleware(PrivacyMiddleware)
+app.include_router(civitai_media_router)
+# Search node: popular / random Civitai media (ai_civitai_search.py, 2026-09-28).
+from ai_civitai_search import router as civitai_search_router
+app.include_router(civitai_search_router)
 
 app.state.limiter = limiter
 
+app.include_router(ai_fleet_router)
+app.include_router(ai_graph_router)
+app.include_router(ai_video_tools_router)
+from ai_wan_image import router as ai_wan_image_router
+app.include_router(ai_wan_image_router)
+app.include_router(ai_controlnet_router)
+app.include_router(ai_model_catalogue_router)
+app.include_router(ai_services_router)
+app.include_router(ai_vision_router)
+app.include_router(farm_llm_router)
 app.include_router(namecheap_remote_router)
-app.include_router(workload_broker_router)
 
 
 @app.middleware("http")
@@ -1593,6 +1528,9 @@ def _effective_anon_id(request: Request) -> Optional[str]:
     return getattr(request.state, "api_key_anon_id", None) or request.cookies.get(ANON_COOKIE)
 
 
+import astra_owner_access as _astra_owner_access
+
+
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db)
@@ -1600,6 +1538,11 @@ async def get_current_user(
     """Session cookie user, or user resolved from API key; anon API keys set request.state.api_key_anon_id."""
     request.state.api_key_anon_id = None
     request.state.auth_via_api_key = False
+    # Astra acts as the owner's admin account (user id 2) with a one-call HMAC token from the local root broker;
+    # local connections only, never through nginx (astra_owner_access.py). A bad token is 401, never a fallback.
+    owner_via_astra = await _astra_owner_access.resolve_owner(request, db, User, is_admin_email)
+    if owner_via_astra is not None:
+        return owner_via_astra
     session_token = request.cookies.get(SESSION_COOKIE)
     if session_token:
         user = await get_user_by_session(db, session_token)
@@ -1613,6 +1556,18 @@ async def get_current_user(
 
 
 app.include_router(build_model_sale_router(get_current_user))
+from oneclick_auth_bridge import install as install_oneclick_bridge
+install_oneclick_bridge(app, get_current_user)
+# «My models» (owner 2026-10-17): the owner's gallery with per-card privacy and deletion (my_tasks_routes.py).
+import my_tasks_routes as _my_tasks_routes
+_my_tasks_routes.install(
+    app, get_current_user=get_current_user, get_db=get_db,
+    static_html_response=lambda name: _static_html_response(name),
+    thumb_url_for=lambda tid: thumb_url_for(tid),
+    delete_artifacts=lambda task: _delete_task_artifacts(task),
+    delete_record=lambda db, tid: _delete_task_record_and_related(db, tid),
+    is_admin_email=is_admin_email, user_model=User, task_model=Task)
+
 
 
 if ANIMATION_FITTING_ENABLED:
@@ -1660,6 +1615,40 @@ async def get_anon_session(
     return await get_or_create_anon_session(db, anon_id)
 
 
+async def get_avatar_owner(
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from ai_avatars import AvatarOwner
+    if user:
+        return AvatarOwner(owner_type="user", owner_id=str(user.id))
+    anon = await get_anon_session(request, response, db)
+    return AvatarOwner(owner_type="anon", owner_id=anon.anon_id)
+
+
+from ai_avatars import build_avatar_router
+from ai_avatar_assets import build_avatar_asset_router
+from ai_avatar_render import build_avatar_render_router
+from ai_avatar_video import build_avatar_video_router
+from ai_avatar_build import build_avatar_build_router
+from ai_video_reference import router as ai_video_reference_router
+from ai_graph_edits import router as ai_graph_edits_router
+from ai_pipelines_api import router as ai_pipelines_router
+
+app.include_router(build_avatar_router(get_avatar_owner))
+app.include_router(build_avatar_asset_router(get_avatar_owner))
+app.include_router(build_avatar_render_router(get_avatar_owner))
+app.include_router(build_avatar_video_router(get_avatar_owner))
+app.include_router(build_avatar_build_router(get_avatar_owner))
+from ai_avatar_ready import build_avatar_ready_router
+app.include_router(build_avatar_ready_router(get_avatar_owner))
+app.include_router(ai_video_reference_router)
+app.include_router(ai_graph_edits_router)
+app.include_router(ai_pipelines_router)
+
+
 async def require_admin(
     user: Optional[User] = Depends(get_current_user)
 ) -> User:
@@ -1677,6 +1666,40 @@ async def require_login_user(
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user
+
+
+from ai_queue_admin import build_queue_admin_router
+
+app.include_router(build_queue_admin_router(require_admin))
+
+from ai_lora_manager import build_lora_admin_router, router as ai_lora_router
+
+app.include_router(ai_lora_router)
+app.include_router(build_lora_admin_router(require_admin))
+
+from ai_character_swap import build_character_swap_router
+
+# Subgraph · Character swap (2026-10-02): admins and scripts on this server start jobs.
+app.include_router(build_character_swap_router(get_current_user, is_admin_email))
+
+from ai_civitai_post import build_civitai_post_router
+
+app.include_router(build_civitai_post_router(require_admin))
+# /queue - the phone's gallery of finished renders (owner 2026-09-30).
+from ai_queue_page import router as queue_page_router
+
+app.include_router(queue_page_router)
+# /system_prompts - the live prompt library (owner 2026-09-30).
+from ai_prompts_page import build_prompts_router
+
+app.include_router(build_prompts_router(require_admin))
+# Join texts - many small text nodes into one prompt, no model (owner 2026-09-30).
+from ai_text_join import router as text_join_router
+
+app.include_router(text_join_router)
+from ai_fleet_models import build_admin_router as build_fleet_models_admin_router, router as ai_fleet_models_router
+app.include_router(ai_fleet_models_router)
+app.include_router(build_fleet_models_admin_router(require_admin))
 
 
 ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
@@ -1832,7 +1855,9 @@ def _safe_checkout_task_id(value: Any) -> Optional[str]:
 def _checkout_pack_price_label(product_key: str) -> str:
     key = _normalize_gumroad_product_key(product_key)
     if key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
-        return f"{_format_usd_price(AUTORIG_SUBSCRIPTION_PRICE_USD)}/month"
+        return f"{_format_usd_price(subscription_offer()['price_usd'])}/month"
+    if key == AUTORIG_TASK_PACK_PRODUCT_KEY:                     # the task pack (owner 2026-10-16)
+        return _format_usd_price(AUTORIG_TASK_PACK_PRICE_USD)
     for tier_key, _credits, usd in AUTORIG_CRYPTO_TIERS:
         if _normalize_gumroad_product_key(tier_key) == key:
             if float(usd).is_integer():
@@ -1842,8 +1867,8 @@ def _checkout_pack_price_label(product_key: str) -> str:
 
 
 def _checkout_pack_label(product_key: str) -> str:
-    if _normalize_gumroad_product_key(product_key) in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
-        return "AutoRig Unlimited Monthly"
+    if _normalize_gumroad_product_key(product_key) == AUTORIG_TASK_PACK_PRODUCT_KEY:
+        return f"{AUTORIG_TASK_PACK_TASKS} task unlocks"
     credits = int(GUMROAD_PRODUCT_CREDITS.get(_normalize_gumroad_product_key(product_key), 0) or 0)
     return f"{credits} credits" if credits > 0 else "credits"
 
@@ -1894,7 +1919,11 @@ def _blender_plugin_price_label(product_key: str, price_cents: int = 0) -> str:
 
 
 def _gumroad_checkout_url(product_key: str, user_email: str) -> str:
-    base = f"https://u3d.gumroad.com/l/{quote(_normalize_gumroad_product_key(product_key))}"
+    key = _normalize_gumroad_product_key(product_key)
+    base = f"https://u3d.gumroad.com/l/{quote(key)}"
+    offer = subscription_offer() if key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS else None
+    if offer and offer["active"]:                  # the launch discount code (owner 2026-10-16): /l/<product>/<code>
+        base += f"/{quote(offer['code'])}"
     return f"{base}?{urlencode({'userid': user_email})}"
 
 
@@ -2115,7 +2144,7 @@ async def _worker_file_available(url: str) -> bool:
     if not url:
         return False
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with worker_http_client(follow_redirects=True) as client:
             resp = await client.head(url, timeout=15.0)
             if resp.status_code == 200:
                 return True
@@ -2147,7 +2176,7 @@ async def _cache_worker_file_by_ranges(
         temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
         try:
             timeout = httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
-            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            async with worker_http_client(follow_redirects=True, timeout=timeout) as client:
                 probe = None
                 for attempt in range(4):
                     probe = await client.get(url, headers={"Range": "bytes=0-0"})
@@ -2211,7 +2240,7 @@ async def _cache_worker_file_by_ranges(
 async def _download_worker_file_bytes(url: str, label: str, *, max_bytes: int = 80 * 1024 * 1024) -> bytes:
     """Download a worker file into memory for small on-demand bundles."""
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with worker_http_client(follow_redirects=True) as client:
             resp = await client.get(url, timeout=120.0)
             if resp.status_code != 200:
                 raise HTTPException(status_code=404, detail=f"{label} is unavailable")
@@ -2288,7 +2317,7 @@ async def _fetch_worker_animation_file_urls(worker_root: str, guid: str) -> List
     files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
     out: List[str] = []
     try:
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             resp = await client.get(files_url, timeout=5.0)
         if resp.status_code != 200:
             return []
@@ -2526,7 +2555,7 @@ async def _fetch_worker_model_files(task: Task) -> Tuple[bool, List[Dict[str, An
     files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
 
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
             resp = await client.get(files_url)
         if resp.status_code != 200:
             return False, [], {}, f"HTTP {resp.status_code}"
@@ -2675,32 +2704,13 @@ async def _ensure_full_task_unlock(
 
 def resolve_worker_full_bundle_zip_url(task: Task) -> Optional[str]:
     """
-    Absolute URL to the worker-built full bundle.
-
-    Current full converters publish the archive inside the task directory as
-    ``{worker_root}/{guid}/{guid}.zip`` and declare that exact URL in
-    ``ready_urls``.  Older workers published ``{worker_root}/{guid}.zip``.
-    Prefer the worker-declared nested URL and retain the legacy root-level
-    fallback for old tasks whose declared artifact list has no bundle.
+    Absolute URL to the worker-built full bundle: {worker_root}/{guid}.zip
+    (worker_root is http://host/converter/glb — same inference as gallery / artifacts).
     """
     worker_root, inferred_guid = _infer_worker_root_and_guid(task)
     guid = ((getattr(task, "guid", None) or "") or "").strip() or inferred_guid
     if not worker_root or not guid:
         return None
-
-    expected_name = f"{guid}.zip".casefold()
-    nested_prefix = f"{worker_root.rstrip('/')}/{guid}/"
-    declared_urls = [
-        *(getattr(task, "ready_urls", None) or []),
-        *(getattr(task, "output_urls", None) or []),
-    ]
-    for raw_url in declared_urls:
-        value = str(raw_url or "").strip()
-        if not value or not value.startswith(nested_prefix):
-            continue
-        name = Path(unquote(urlsplit(value).path or "")).name.casefold()
-        if name == expected_name:
-            return value
     return f"{worker_root.rstrip('/')}/{guid}.zip"
 
 
@@ -2826,9 +2836,15 @@ async def _claim_anonymous_task_for_user(
 async def auth_login(request: Request, next: Optional[str] = None):
     """Redirect to Google OAuth"""
     state = str(uuid.uuid4())
-    auth_url = get_google_auth_url(state)
+    # site_mode (NSFW split, 2026-10-11): the adult domain signs in on its own callback.
+    import site_mode as _site_mode
+    _sm_redirect = _site_mode.oauth_redirect_uri(request, None)
+    auth_url = _site_mode.google_auth_url(state, _sm_redirect) if _sm_redirect else get_google_auth_url(state)
     
     response = RedirectResponse(url=auth_url)
+    if _sm_redirect:
+        response.set_cookie(_site_mode.OAUTH_STATE_COOKIE, state, max_age=600, httponly=True, secure=True,
+                            samesite="lax")
     # Save return URL in cookie (max 5 minutes) for redirect after OAuth
     if next and next.startswith("/"):  # Security: only allow relative URLs
         response.set_cookie("auth_next", next, max_age=300, httponly=True, samesite="lax")
@@ -2851,7 +2867,12 @@ async def auth_callback(
         return RedirectResponse(url="/?error=no_code")
     
     # Exchange code for tokens
-    tokens = await exchange_code_for_tokens(code)
+    import site_mode as _site_mode  # site_mode (NSFW split, 2026-10-11)
+    _sm_redirect = _site_mode.oauth_redirect_uri(request, None)
+    if _sm_redirect and not _site_mode.oauth_state_ok(request):
+        return RedirectResponse(url="/?error=state")
+    tokens = await (_site_mode.exchange_code(code, _sm_redirect) if _sm_redirect
+                    else exchange_code_for_tokens(code))
     if not tokens:
         return RedirectResponse(url="/?error=token_exchange_failed")
     
@@ -2905,6 +2926,52 @@ async def auth_callback(
     return redirect
 
 
+# Keep video uploads behind administrator authentication.
+from youtube_api import build_youtube_upload_api_router
+app.include_router(build_youtube_upload_api_router(require_admin, get_db))
+@app.get("/api/admin/u3d-youtube/oauth/start")
+async def admin_u3d_youtube_oauth_start(admin: User = Depends(require_admin)):
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    from youtube_upload import YOUTUBE_UPLOAD_SCOPE
+    if not U3D_YOUTUBE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="U3D YouTube OAuth client is not configured")
+    state = secrets.token_urlsafe(32)
+    query = urlencode({"client_id": U3D_YOUTUBE_CLIENT_ID, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "response_type": "code", "scope": YOUTUBE_UPLOAD_SCOPE, "access_type": "offline", "prompt": "consent", "state": state})
+    response = RedirectResponse(url=f"https://accounts.google.com/o/oauth2/auth?{query}")
+    response.set_cookie("u3d_yt_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="lax")
+    return response
+
+
+@app.get("/api/oauth/u3d-youtube/callback")
+async def admin_u3d_youtube_oauth_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None, db: AsyncSession = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
+    if error:
+        return RedirectResponse(url=f"/dev/youtube?u3d_youtube_error={quote(error)}")
+    if not user or not is_admin_email(user.email):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=not_admin")
+    if not state or state != request.cookies.get("u3d_yt_oauth_state"):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=state")
+    if not code:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    async with worker_http_client() as client:
+        token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": U3D_YOUTUBE_CLIENT_ID, "client_secret": U3D_YOUTUBE_CLIENT_SECRET, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "grant_type": "authorization_code"}, timeout=30.0)
+    if token_response.status_code != 200:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=token_exchange")
+    refresh = token_response.json().get("refresh_token")
+    if not refresh:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_refresh_token")
+    from database import U3dYoutubeCredentials
+    row = await db.get(U3dYoutubeCredentials, 1)
+    now = datetime.utcnow()
+    if row:
+        row.refresh_token, row.updated_at = refresh, now
+    else:
+        db.add(U3dYoutubeCredentials(id=1, refresh_token=refresh, updated_at=now))
+    await db.commit()
+    response = RedirectResponse(url="/dev/youtube?u3d_youtube_connected=1")
+    response.delete_cookie("u3d_yt_oauth_state")
+    return response
+
 @app.get("/api/admin/youtube/oauth/start")
 async def admin_youtube_oauth_start(
     request: Request,
@@ -2953,6 +3020,8 @@ async def admin_youtube_oauth_callback(
     refresh = tokens.get("refresh_token")
     if not refresh:
         return RedirectResponse(url="/?youtube_error=no_refresh_token_reauthorize_with_prompt")
+    # The Google Brand Account chooser selects the channel. The first upload
+    # response reports channelId so the client can verify the destination.
     await save_youtube_refresh_token(db, refresh)
     response = RedirectResponse(url="/?youtube_connected=1")
     response.delete_cookie("yt_oauth_state")
@@ -3006,10 +3075,14 @@ async def auth_me(
     db: AsyncSession = Depends(get_db)
 ):
     """Get current auth status"""
+    from user_language import subject_language_fields as _i18n_subject_language
+
     if user:
-        plan = subscription_summary(user)
+        _lang = await _i18n_subject_language(db, request, user=user)
         return AuthStatusResponse(
             authenticated=True,
+            language=_lang["language"],
+            language_code=_lang["language_code"],
             user=UserInfo(
                 id=user.id,
                 email=user.email,
@@ -3020,11 +3093,6 @@ async def auth_me(
                 youtube_bonus_received=user.youtube_bonus_received,
                 is_admin=user.is_admin,
                 email_task_completed=user.email_task_completed,
-                subscription_active=plan["active"],
-                subscription_status=plan["status"],
-                subscription_plan=plan["plan"],
-                subscription_current_period_end=plan["current_period_end"],
-                subscription_cancel_at_period_end=plan["cancel_at_period_end"],
             ),
             credits_remaining=user.balance_credits,
             login_required=False
@@ -3034,8 +3102,11 @@ async def auth_me(
     anon_session = await get_anon_session(request, response, db)
     remaining = get_remaining_credits_anon(anon_session)
     
+    _lang = await _i18n_subject_language(db, request, anon=anon_session)
     return AuthStatusResponse(
         authenticated=False,
+        language=_lang["language"],
+        language_code=_lang["language_code"],
         anon=AnonInfo(
             anon_id=anon_session.anon_id,
             free_used=anon_session.free_used,
@@ -3058,7 +3129,6 @@ async def api_user_notification_settings(
     user.email_task_completed = body.email_task_completed
     await db.commit()
     await db.refresh(user)
-    plan = subscription_summary(user)
     return UserInfo(
         id=user.id,
         email=user.email,
@@ -3069,11 +3139,6 @@ async def api_user_notification_settings(
         youtube_bonus_received=user.youtube_bonus_received,
         is_admin=user.is_admin,
         email_task_completed=user.email_task_completed,
-        subscription_active=plan["active"],
-        subscription_status=plan["status"],
-        subscription_plan=plan["plan"],
-        subscription_current_period_end=plan["current_period_end"],
-        subscription_cancel_at_period_end=plan["cancel_at_period_end"],
     )
 
 
@@ -3336,6 +3401,12 @@ def _campaign_click_destination(campaign_key: str, link_key: str) -> Optional[st
         return f"{base}/?{utm}"
     if link_key == "youtube_short":
         return f"https://www.youtube.com/shorts/vEn7laZijOI?{utm}"
+    # Downloads · V3 (2026-10-12): task links of the completion email and the backfill digest
+    task_link = re.fullmatch(r"task:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", link_key or "")
+    if task_link:
+        medium = "backfill" if campaign.startswith("backfill") else "task_ready"
+        task_utm = urlencode({"utm_source": "email", "utm_medium": medium, "utm_campaign": campaign})
+        return f"{base}/task?id={task_link.group(1)}&{task_utm}"
     return None
 
 
@@ -3604,15 +3675,9 @@ async def buy_credits_checkout(
     db: AsyncSession = Depends(get_db),
 ):
     """Server-owned checkout redirect so payment clicks do not depend on JS fetches."""
-    requested_key = _normalize_gumroad_product_key(permalink)
-    # Old task-page caches and bookmarks should land on the replacement offer,
-    # never on a retired credit pack.
-    if requested_key in AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS:
-        product_key = AUTORIG_SUBSCRIPTION_PRODUCT_KEY
-    else:
-        product_key = requested_key
-    if product_key not in AUTORIG_PUBLIC_CHECKOUT_PRODUCT_KEYS:
-        raise HTTPException(status_code=404, detail="Unknown AutoRig subscription product")
+    product_key = _normalize_gumroad_product_key(permalink)
+    if product_key not in AUTORIG_DONATION_PRODUCT_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown AutoRig credit product")
 
     if not user:
         next_path = request.url.path
@@ -3626,7 +3691,10 @@ async def buy_credits_checkout(
     if required_credits is not None and required_credits <= 0:
         required_credits = None
     page_url_clean = _clamp_text(page_url or request.headers.get("referer") or str(request.url), 1024)
-    package_label = _checkout_pack_label(product_key)
+    package_label = (
+        "AutoRig Unlimited Monthly" if product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
+        else _checkout_pack_label(product_key)
+    )
     price_label = _checkout_pack_price_label(product_key)
     intent_id = None
 
@@ -3634,7 +3702,7 @@ async def buy_credits_checkout(
         intent = PurchaseCheckoutIntent(
             user_email=user.email,
             product_permalink=product_key,
-            product_kind="subscription",
+            product_kind="credits",
             source=source_clean,
             task_id=task_id_clean,
             required_credits=required_credits,
@@ -3662,7 +3730,7 @@ async def buy_credits_checkout(
                 price=price_label,
                 user_email=user.email,
                 anon_id=None,
-                product_kind="subscription",
+                product_kind="credits",
                 permalink=product_key,
                 source=source_clean,
                 page_url=page_url_clean,
@@ -3970,6 +4038,21 @@ def _feedback_avatar_url(email: str, oauth_picture: Optional[str]) -> str:
     return f"https://www.gravatar.com/avatar/{h}?d=identicon&s=96"
 
 
+def _feedback_public_name(name: Optional[str], email: Optional[str]) -> str:
+    """A feedback author's public name: the stored name unless it is (or contains) an e-mail, else User-XXXX."""
+    import public_identity
+    text = str(name or "").strip()
+    if text and not public_identity.looks_like_email(text):
+        return text[:60]
+    return public_identity.display_name(_feedback_public_seed(email)[:10], "user")
+
+
+def _feedback_public_seed(email: Optional[str]) -> str:
+    """A stable public stand-in for an e-mail (the author handle), so the default avatar is not a hash of the address."""
+    import public_identity
+    return public_identity.handle_of_author(public_identity.hkey_for_email(str(email or "")))
+
+
 def _feedback_parent_preview(text: str, max_len: int = 100) -> str:
     t = (text or "").strip().replace("\n", " ")
     if len(t) <= max_len:
@@ -4002,17 +4085,17 @@ async def get_feedback_list(
         pid = getattr(fb, "parent_id", None)
         if pid and pid in parent_map:
             par = parent_map[pid]
-            parent_user_name = par.user_name or par.user_email
+            parent_user_name = _feedback_public_name(par.user_name, par.user_email)
             parent_preview = _feedback_parent_preview(par.text)
         out.append(
             FeedbackItem(
                 id=fb.id,
-                user_email=fb.user_email,
-                user_name=fb.user_name,
+                user_email="",                       # never public (2026-10-11): the name below is a plain name
+                user_name=_feedback_public_name(fb.user_name, fb.user_email),
                 text=fb.text,
                 created_at=fb.created_at,
                 parent_id=pid,
-                user_picture=_feedback_avatar_url(fb.user_email, user_picture),
+                user_picture=_feedback_avatar_url(_feedback_public_seed(fb.user_email), user_picture),
                 parent_user_name=parent_user_name,
                 parent_preview=parent_preview,
             )
@@ -4156,6 +4239,17 @@ async def api_support_chat_session_post(
     email = getattr(user, "email", None) if user else None
 
     row = await _get_or_create_support_chat_session(db, visitor, email, page)
+    _support_lang = None
+    try:  # Localization V3: the visitor's language lives on the session (support_ai answers in it)
+        from user_language import record_support_session_language
+
+        _support_lang = await record_support_session_language(
+            db, row, request, user=user,
+            widget_language=getattr(body, "language_string", None),
+            browser_languages=getattr(body, "browser_languages_string", None),
+        )
+    except Exception as exc:
+        print(f"[SupportChat] language: {type(exc).__name__}: {exc}")
 
     topic_ready_bool = row.telegram_thread_id is not None
     configured = bool(await support_forum_configured_bool(db))
@@ -4167,6 +4261,8 @@ async def api_support_chat_session_post(
         support_configured_bool=configured,
         page_url_string=row.page_url,
         user_email_string=row.user_email,
+        language_string=_support_lang.code if _support_lang else getattr(row, "language", None),
+        language=_support_lang.payload() if _support_lang else None,
     )
 
 
@@ -4262,9 +4358,18 @@ async def api_support_chat_message_post(
         p = html.escape((sess.page_url or "")[:500])
         page_snip = f"\n🌐 {p}"
 
+    lang_snip = ""
+    try:  # Localization V3: the operator sees which language to answer in
+        from user_language import record_support_session_language, support_language_line
+
+        await record_support_session_language(db, sess, request, user=user, only_if_missing=True)
+        lang_snip = support_language_line(sess)
+    except Exception as exc:
+        print(f"[SupportChat] language line: {type(exc).__name__}: {exc}")
+
     tg_html = (
         f"💬 <b>Support session</b> <code>{int(sess.id)}</code>\n"
-        f"👤 <b>Visitor</b> {who}{page_snip}\n\n{escaped_text}"
+        f"👤 <b>Visitor</b> {who}{page_snip}{lang_snip}\n\n{escaped_text}"
     )
 
     try:
@@ -4534,6 +4639,7 @@ async def api_create_task(
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
             file = fu
 
+    explicit_v3 = pipeline == "v3"
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
     input_type = normalize_task_type(input_type)
@@ -4581,12 +4687,58 @@ async def api_create_task(
         # Generate public URL (URL-encode filename for special chars, spaces, cyrillic)
         from urllib.parse import quote
         final_url = f"{APP_URL}/u/{upload_token}/{quote(filename)}"
+
+        # ASCII FBX (owner 2026-10-10): the converters reject it and Blender cannot
+        # import it, so it becomes a GLB here for legacy and V3 alike. The original
+        # upload stays beside the GLB; a failure is told in the visitor's language.
+        import fbx_ascii
+
+        if fbx_ascii.is_ascii_fbx(Path(filepath)):
+            glb_name = os.path.splitext(os.path.basename(filename))[0] + ".glb"
+            try:
+                receipt = await asyncio.to_thread(
+                    fbx_ascii.ascii_fbx_to_glb, Path(filepath), Path(upload_dir) / glb_name)
+            except Exception as exc:
+                print(f"[Upload] ASCII FBX {upload_token}/{filename} not convertible: {exc}")
+                from user_language import user_error_detail
+                raise HTTPException(status_code=422, detail=user_error_detail("fbx_unreadable"))
+            print(f"[Upload] ASCII FBX {upload_token}/{filename} -> {glb_name} "
+                  f"({receipt['inserted_a_keys']} array key(s) repaired, {receipt['bytes']} bytes)")
+            final_url = f"{APP_URL}/u/{upload_token}/{quote(glb_name)}"
+            uploaded_bytes = int(receipt["bytes"])
     
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
 
     if not disk_headroom_checked:
         await ensure_request_disk_headroom(db, context="task_create")
+
+    # V3 conveyor (2026-10-10): the route switch picks V3; a V3 task never
+    # falls back to the legacy rig (v3_intake.route_enabled, AUTORIG_V3_ROUTES).
+    from v3_intake import route_enabled as _v3_route_enabled
+
+    if _v3_route_enabled("api" if via_api else "website",
+                         is_admin=bool(user and is_admin_email(user.email)), explicit=explicit_v3):
+        from v3_intake import V3IntakeError, admit_upload as _v3_admit_upload, local_upload_path
+
+        v3_source = local_upload_path(final_url)
+        if v3_source is None:
+            raise HTTPException(status_code=400, detail={
+                "code": "v3_upload_required",
+                "message": "V3 needs the model file itself (GLB, FBX or OBJ upload).",
+            })
+        try:
+            task = await _v3_admit_upload(
+                db, path=v3_source, original_url=final_url, filename=v3_source.name,
+                owner_type=owner_type, owner_id=owner_id, origin="api" if via_api else "website",
+                created_via_api=via_api, requested_intent="convert" if pipeline == "convert" else "rig",
+                input_type=input_type, input_bytes=uploaded_bytes,
+            )
+        except V3IntakeError as exc:
+            raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.detail})
+        _save_preflight_render_image(task.id, preflight_render_image_data_url
+                                     or _pop_preflight_render_image_from_meta(rig_v2_detection_meta))
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
 
     preflight_render_image_data_url = (
         preflight_render_image_data_url
@@ -4713,6 +4865,9 @@ async def api_create_task(
         input_bytes=uploaded_bytes,
     )
     
+    if error == "classic_pipeline_off" and not task:
+        from user_language import user_error_detail
+        raise HTTPException(status_code=409, detail=user_error_detail("classic_pipeline_off"))
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
 
@@ -4901,7 +5056,9 @@ def _rig_v2_load_vision_config() -> Dict[str, Any]:
     configured_prompt = str(cfg.get("prompt") or "").strip()
     if safety_contract not in configured_prompt:
         cfg["prompt"] = f"{configured_prompt}\n\n{safety_contract}".strip()
-    return cfg
+    # Owner 2026-10-11: no paid LLM APIs. While AUTORIG_PAID_LLM is off this swaps OpenAI/OpenRouter for the shim
+    # in front of the fleet's Qwen (farm_llm_api.py); the file itself is never rewritten.
+    return paid_llm.vision_cfg(cfg)
 
 
 def _rig_v2_normalize_image_data_url(image_value: str) -> str:
@@ -4994,7 +5151,7 @@ async def _rig_v2_list_openai_models(cfg: Dict[str, Any]) -> List[str]:
         return []
     models_url = str(cfg.get("open_ai_models_url_string") or "https://api.openai.com/v1/models").strip()
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=15.0, follow_redirects=True) as client:
             resp = await client.get(models_url, headers={"Authorization": f"Bearer {api_key}"})
         if resp.status_code != 200:
             return []
@@ -5038,7 +5195,7 @@ async def _rig_v2_discover_free_vision_models(cfg: Dict[str, Any], api_key: str)
     if not models_url:
         return []
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=10.0, follow_redirects=True) as client:
             resp = await client.get(
                 models_url,
                 headers={
@@ -5075,7 +5232,7 @@ async def _rig_v2_call_openrouter_vision(
     image_data_url: str,
     prompt_override: str = "",
 ) -> Dict[str, Any]:
-    api_key = str(cfg.get("open_router_api_key") or "").strip()
+    api_key = str(cfg.get("open_router_api_key") or cfg.get("open_router_free_key") or "").strip()
     if not api_key:
         raise HTTPException(status_code=500, detail="OpenRouter API key is not configured")
     api_url = str(cfg.get("open_router_api_url_string") or "").strip()
@@ -5098,6 +5255,8 @@ async def _rig_v2_call_openrouter_vision(
     for model in configured_models + discovered_models:
         if model not in models:
             models.append(model)
+    if cfg.get("paid_llm_off_bool"):
+        models = paid_llm.free_only(models)[:3]     # owner 2026-10-11: a non-:free id never goes out; 3 tries per call keep the daily allowance
     if not models:
         raise HTTPException(status_code=500, detail="No OpenRouter vision models configured or discovered")
 
@@ -5123,8 +5282,11 @@ async def _rig_v2_call_openrouter_vision(
                 }
             ],
         }
+        if cfg.get("paid_llm_off_bool") and not paid_llm.openrouter_free_take():
+            last_error = "OpenRouter free daily allowance spent"
+            break
         try:
-            async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            async with worker_http_client(timeout=45.0, follow_redirects=True) as client:
                 resp = await client.post(api_url, headers=headers, json=payload)
             if resp.status_code != 200:
                 last_error = f"{model}: HTTP {resp.status_code} {resp.text[:240]}"
@@ -5168,6 +5330,10 @@ async def _rig_v2_call_openrouter_vision(
         "error_string": last_error[:500],
         "server_time_unix_int": _rig_v2_server_time(),
     }
+
+
+def _rig_v2_model_label(cfg: Dict[str, Any], model: str) -> str:
+    return f"farm/{model}" if cfg.get("paid_llm_off_bool") else f"openai/{model}"
 
 
 async def _rig_v2_call_openai_vision(
@@ -5224,7 +5390,7 @@ async def _rig_v2_call_openai_vision(
         "Content-Type": "application/json",
     }
     try:
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=45.0, follow_redirects=True) as client:
             resp = await client.post(api_url, headers=headers, json=payload)
         if resp.status_code != 200:
             return {
@@ -5253,9 +5419,9 @@ async def _rig_v2_call_openai_vision(
                 "status_string": (
                     "unsupported"
                     if assessment.get("status_string") == "unsupported"
-                    else "ok_openai_fallback"
+                    else ("ok" if cfg.get("paid_llm_off_bool") else "ok_openai_fallback")
                 ),
-                "model_used_string": f"openai/{model}",
+                "model_used_string": _rig_v2_model_label(cfg, model),
                 "view_id_string": view_id,
                 "fallback_reason_string": fallback_reason[:500],
                 "server_time_unix_int": _rig_v2_server_time(),
@@ -5361,11 +5527,29 @@ async def api_rig_v2_vision_animal_type(request: Request):
             prompt_override=prompt_override,
             model_override=model_override,
         )
-    openrouter_result = await _rig_v2_call_openrouter_vision(
-        cfg=cfg,
-        image_data_url=image_data_url,
-        prompt_override=prompt_override,
-    )
+    # Owner 2026-10-11: no paid LLM. OpenRouter FREE models first (low volume, quality-critical), the fleet's Qwen
+    # behind the shim when they fail or the daily allowance is spent.
+    try:
+        openrouter_result = await _rig_v2_call_openrouter_vision(
+            cfg=cfg,
+            image_data_url=image_data_url,
+            prompt_override=prompt_override,
+        )
+    except HTTPException:
+        if not cfg.get("paid_llm_off_bool"):
+            raise
+        openrouter_result = {"success_bool": False, "status_string": "vision_failed",
+                             "error_string": "OpenRouter free models are not configured"}
+    if cfg.get("paid_llm_off_bool") and not openrouter_result.get("success_bool"):
+        return await _rig_v2_call_openai_vision(
+            cfg=cfg,
+            image_data_url=image_data_url,
+            fallback_reason="openrouter_free_failed: " + str(openrouter_result.get("error_string")
+                                                              or openrouter_result.get("status_string") or ""),
+            view_id=view_id,
+            prompt_override=prompt_override,
+            model_override=model_override,
+        )
     if openrouter_result.get("status_string") == "vision_rate_limited":
         fallback_reason = str(openrouter_result.get("error_string") or openrouter_result.get("status_string") or "")
         return await _rig_v2_call_openai_vision(
@@ -5377,6 +5561,97 @@ async def api_rig_v2_vision_animal_type(request: Request):
             model_override=model_override,
         )
     return openrouter_result
+
+@app.post("/api/rig-v2/vision/appearance")
+@limiter.limit("20/minute")
+async def api_rig_v2_vision_appearance(request: Request):
+    """Hair, loose clothing, tail and pose of an uploaded model, from one sheet of views.
+
+    Decides which rig pipeline to offer before the task exists: the simple rig,
+    or the AI pipeline that animates hair and cloth. The upload page tiles the
+    four side renders it already takes for the rig-type check into one picture.
+    """
+    import rig_appearance
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    image_data_url = _rig_v2_normalize_image_data_url(str(body.get("image_jpg_base64_string") or ""))
+    cfg = _rig_v2_load_vision_config()
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    api_url = str(cfg.get("open_ai_api_url_string") or "").strip()
+    model = str(cfg.get("open_ai_strong_vision_model_string")
+                or cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    if not api_key or not api_url:
+        return {"success_bool": False, "status_string": "vision_not_configured",
+                "server_time_unix_int": _rig_v2_server_time()}
+    started = time.time()
+    try:
+        result = await rig_appearance.assess(api_url=api_url, api_key=api_key,
+                                             model=model, image_data_url=image_data_url,
+                                             lang=str(body.get("lang_string") or "en"))
+    except Exception as exc:  # the page falls back to manual choice
+        print(f"[rig-v2] appearance check failed: {exc}")
+        return {"success_bool": False, "status_string": "vision_failed",
+                "error_string": str(exc)[:300], "server_time_unix_int": _rig_v2_server_time()}
+    return {"success_bool": True, "status_string": "ok", **result,
+            "model_used_string": _rig_v2_model_label(cfg, model),
+            "elapsed_seconds_float": round(time.time() - started, 2),
+            "server_time_unix_int": _rig_v2_server_time()}
+
+
+@app.post("/api/rig-v2/vision/appearance-depth")
+@limiter.limit("6/minute")
+async def api_rig_v2_vision_appearance_depth(request: Request):
+    """Appearance of an untextured model, judged on a repaint of its Z-depth.
+
+    Grey clay hides the difference between hair and a hood, a robe and a body.
+    The page sends the model's front depth map; the farm paints a character
+    over exactly that silhouette, and the painting is judged. Takes about a
+    minute, so the page asks for it only when the model has no textures.
+    """
+    import rig_appearance
+    from ai_vision_api import _decode_inline_image, _publish_inline_image
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    depth = str(body.get("depth_png_base64_string") or "")
+    if not depth:
+        raise HTTPException(status_code=400, detail="depth_png_base64_string is required")
+    cfg = _rig_v2_load_vision_config()
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    api_url = str(cfg.get("open_ai_api_url_string") or "").strip()
+    model = str(cfg.get("open_ai_strong_vision_model_string")
+                or cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    if not api_key or not api_url:
+        return {"success_bool": False, "status_string": "vision_not_configured",
+                "server_time_unix_int": _rig_v2_server_time()}
+    started = time.time()
+    try:
+        async with worker_http_client() as client:
+            depth_url = await _publish_inline_image(client, _decode_inline_image(depth))
+        painted = await rig_appearance.paint_from_depth(
+            site_base="http://127.0.0.1:8200", depth_url=depth_url)
+        result = await rig_appearance.assess(
+            api_url=api_url, api_key=api_key, model=model, image_data_url=painted,
+            lang=str(body.get("lang_string") or "en"), front_only=True)
+    except HTTPException:
+        raise
+    except Exception as exc:  # the page keeps the clay result
+        print(f"[rig-v2] depth appearance check failed: {exc}")
+        return {"success_bool": False, "status_string": "depth_check_failed",
+                "error_string": str(exc)[:300], "server_time_unix_int": _rig_v2_server_time()}
+    return {"success_bool": True, "status_string": "ok", **result,
+            "painted_url_string": painted, "depth_url_string": depth_url,
+            "model_used_string": _rig_v2_model_label(cfg, model),
+            "elapsed_seconds_float": round(time.time() - started, 2),
+            "server_time_unix_int": _rig_v2_server_time()}
+
 
 @app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
@@ -5450,6 +5725,9 @@ async def api_create_convert_from_rig_task(
         input_bytes=getattr(parent, "input_bytes", None),
     )
 
+    if error == "classic_pipeline_off" and not task:
+        from user_language import user_error_detail
+        raise HTTPException(status_code=409, detail=user_error_detail("classic_pipeline_off"))
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
 
@@ -5496,12 +5774,10 @@ def _normalize_gumroad_product_key(raw_value: str | None) -> str:
 
 def _gumroad_product_key_from_payload(product: str | None, product_name: str | None) -> str:
     product_key = _normalize_gumroad_product_key(product)
-    if product_key in GUMROAD_PRODUCT_CREDITS or product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
+    if product_key in GUMROAD_PRODUCT_CREDITS:
         return product_key
 
     name = (product_name or "").strip().lower()
-    if "autorig" in name and ("unlimited" in name or "subscription" in name):
-        return AUTORIG_SUBSCRIPTION_PRODUCT_KEY
     if "autorig" not in name or "credit" not in name:
         return product_key
     if re.search(r"\b1000\b", name):
@@ -5537,11 +5813,7 @@ def _gumroad_credit_target_email(parsed_form: Dict[str, Any]) -> str:
 
 
 def _is_autorig_credit_product(product_key: str) -> bool:
-    return (product_key or "").strip().lower() in AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS
-
-
-def _is_autorig_subscription_product(product_key: str) -> bool:
-    return (product_key or "").strip().lower() in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
+    return (product_key or "").strip().lower() in AUTORIG_DONATION_PRODUCT_KEYS
 
 
 @app.post("/api-gumroad")
@@ -5582,112 +5854,118 @@ async def api_gumroad_ping(
     product_key = _gumroad_product_key_from_payload(product, product_name)
     local_credits_added = 0
     is_plugin_product = _is_blender_plugin_product(product_key, product_name)
-    is_subscription_product = _is_autorig_subscription_product(product_key)
-    if is_subscription_product:
-        supplied_secret = str(request.query_params.get("token") or "")
-        if not GUMROAD_WEBHOOK_SECRET:
-            print("[Gumroad] Subscription webhook rejected: server secret is not configured", flush=True)
-            raise HTTPException(status_code=503, detail="Subscription webhook is not configured")
-        if not hmac.compare_digest(supplied_secret, GUMROAD_WEBHOOK_SECRET):
-            print(f"[Gumroad] Subscription webhook rejected: invalid token sale={sale_id}", flush=True)
-            raise HTTPException(status_code=403, detail="Invalid webhook token")
     known_product = (
         product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
-        or is_subscription_product
         or is_plugin_product
     )
     should_notify_purchase = False
+    # The monthly membership is not a credit pack: it gets its own branch below
+    # and must never be paid out as credits.
+    is_subscription_product = product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
 
-    if (_is_autorig_credit_product(product_key) or is_subscription_product) and email and email != "unknown":
+    if (
+        _is_autorig_credit_product(product_key)
+        and not is_subscription_product
+        and email and email != "unknown"
+    ):
         try:
             async with AsyncSessionLocal() as db:
-                purchase = await db.scalar(
-                    select(GumroadPurchase).where(GumroadPurchase.sale_id == sale_id)
+                purchase = GumroadPurchase(
+                    sale_id=sale_id,
+                    email=email,
+                    product_permalink=product_key,
+                    product_name=product_name,
+                    price=price_cents,
+                    refunded=refunded,
+                    is_recurring_charge=is_recurring_charge,
+                    subscription_id=subscription_id,
+                    license_key=license_key,
+                    test=is_test,
+                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
+                    credited=False,
+                    credits_added=0,
                 )
-                is_new_purchase = purchase is None
-                if purchase is None:
-                    purchase = GumroadPurchase(
-                        sale_id=sale_id,
-                        email=email,
-                        product_permalink=product_key,
-                        product_name=product_name,
-                        price=price_cents,
-                        refunded=refunded,
-                        is_recurring_charge=is_recurring_charge,
-                        subscription_id=subscription_id,
-                        license_key=license_key,
-                        test=is_test,
-                        raw_payload=raw_body.decode("utf-8", errors="ignore"),
-                        credited=False,
-                        credits_added=0,
-                    )
-                    db.add(purchase)
+                db.add(purchase)
+                try:
                     await db.flush()
-                else:
-                    purchase.email = email
-                    purchase.product_permalink = product_key
-                    purchase.product_name = product_name
-                    purchase.price = price_cents
-                    purchase.refunded = refunded
-                    purchase.is_recurring_charge = is_recurring_charge
-                    purchase.subscription_id = subscription_id or purchase.subscription_id
-                    purchase.license_key = license_key or purchase.license_key
-                    purchase.test = is_test
-                    purchase.raw_payload = raw_body.decode("utf-8", errors="ignore")
+                except IntegrityError:
+                    await db.rollback()
+                    purchase = None
 
-                credits_to_add = 0
-                if _is_autorig_credit_product(product_key) and is_new_purchase and not refunded and not is_test:
-                    credits_to_add = int(GUMROAD_PRODUCT_CREDITS.get(product_key, 0) or 0)
-                user_result = await db.execute(
-                    select(User).where(func.lower(User.email) == email.lower())
+                if purchase is not None:
+                    credits_to_add = 0 if refunded else int(GUMROAD_PRODUCT_CREDITS.get(product_key, max(price_cents, 0)))
+                    user_result = await db.execute(
+                        select(User).where(func.lower(User.email) == email.lower())
+                    )
+                    user = user_result.scalar_one_or_none()
+                    if user and credits_to_add > 0:
+                        user.balance_credits = max(0, int(user.balance_credits or 0) + credits_to_add)
+                        user.gumroad_email = checkout_email if checkout_email != "unknown" else email
+                        purchase.credited = True
+                        purchase.credits_added = credits_to_add
+                        local_credits_added = credits_to_add
+                        auto_unlock = await _try_auto_unlock_pending_checkout(db, user, sale_id)
+                        if auto_unlock:
+                            print(
+                                f"[Gumroad] Checkout auto-unlock result sale={sale_id} "
+                                f"status={auto_unlock.get('status')} task={auto_unlock.get('task_id')} "
+                                f"credits_spent={auto_unlock.get('credits_spent')}",
+                                flush=True,
+                            )
+                    await db.commit()
+                    should_notify_purchase = True
+        except Exception as e:
+            print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
+
+    if is_subscription_product and email and email != "unknown":
+        # Every membership event (first sale, monthly renewal, cancellation,
+        # refund) is stored in the ledger, then the ledger is replayed onto the
+        # user with the same code that runs at login, so a buyer who is already
+        # signed in gets the plan at once and one who signs up later gets it then.
+        try:
+            from auth import apply_pending_gumroad_credits
+
+            async with AsyncSessionLocal() as db:
+                purchase = GumroadPurchase(
+                    sale_id=sale_id,
+                    email=email,
+                    product_permalink=product_key,
+                    product_name=product_name,
+                    price=price_cents,
+                    refunded=refunded,
+                    is_recurring_charge=is_recurring_charge,
+                    subscription_id=subscription_id,
+                    license_key=license_key,
+                    test=is_test,
+                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
+                    credited=False,
+                    credits_added=0,
                 )
-                user = user_result.scalar_one_or_none()
-                if user and is_subscription_product and not is_test:
-                    cancelled_at = parse_gumroad_datetime(parsed_form.get("subscription_cancelled_at"))
-                    failed_at = parse_gumroad_datetime(parsed_form.get("subscription_failed_at"))
-                    ended_at = parse_gumroad_datetime(parsed_form.get("subscription_ended_at"))
-                    subscription_event_at = (
-                        datetime.utcnow()
-                        if is_recurring_charge
-                        else parse_gumroad_datetime(
-                            parsed_form.get("sale_timestamp") or parsed_form.get("created_at")
-                        )
+                db.add(purchase)
+                try:
+                    await db.flush()
+                except IntegrityError:
+                    await db.rollback()
+                    purchase = None
+                if purchase is not None:
+                    user_result = await db.execute(
+                        select(User).where(func.lower(User.email) == email.lower())
                     )
-                    state = apply_subscription_event(
-                        user,
-                        subscription_id=subscription_id,
-                        sale_at=subscription_event_at,
-                        cancelled_at=cancelled_at,
-                        failed_at=failed_at,
-                        ended_at=ended_at,
-                        refunded=refunded,
-                    )
-                    user.gumroad_email = checkout_email if checkout_email != "unknown" else email
-                    purchase.credited = True
-                    purchase.credits_added = 0
-                    print(
-                        f"[Gumroad] Subscription entitlement sale={sale_id} state={state} "
-                        f"period_end={user.autorig_subscription_period_end}",
-                        flush=True,
-                    )
-                elif user and credits_to_add > 0:
-                    user.balance_credits = max(0, int(user.balance_credits or 0) + credits_to_add)
-                    user.gumroad_email = checkout_email if checkout_email != "unknown" else email
-                    purchase.credited = True
-                    purchase.credits_added = credits_to_add
-                    local_credits_added = credits_to_add
-                    auto_unlock = await _try_auto_unlock_pending_checkout(db, user, sale_id)
-                    if auto_unlock:
+                    user = user_result.scalar_one_or_none()
+                    if user:
+                        await apply_pending_gumroad_credits(db, user)
+                        if checkout_email != "unknown":
+                            user.gumroad_email = checkout_email
                         print(
-                            f"[Gumroad] Checkout auto-unlock result sale={sale_id} "
-                            f"status={auto_unlock.get('status')} task={auto_unlock.get('task_id')} "
-                            f"credits_spent={auto_unlock.get('credits_spent')}",
+                            f"[Gumroad] Subscription event sale={sale_id} user={email} "
+                            f"status={user.autorig_subscription_status} "
+                            f"until={user.autorig_subscription_period_end}",
                             flush=True,
                         )
-                await db.commit()
-                should_notify_purchase = is_new_purchase or refunded
+                    await db.commit()
+                    should_notify_purchase = True
         except Exception as e:
-            print(f"[Gumroad] Local AutoRig entitlement update failed for {sale_id}: {e}", flush=True)
+            print(f"[Gumroad] Subscription handling failed for {sale_id}: {e}", flush=True)
 
     if is_plugin_product:
         try:
@@ -5728,22 +6006,17 @@ async def api_gumroad_ping(
 
     from telegram_bot import broadcast_credits_purchased
     if should_notify_purchase:
-        notice_kind = "plugin" if is_plugin_product else ("subscription" if is_subscription_product else "credits")
-        notice_price = (
-            _blender_plugin_price_label(product_key, price_cents)
-            if is_plugin_product
-            else (
-                f"{_format_usd_price(AUTORIG_SUBSCRIPTION_PRICE_USD)}/month"
-                if is_subscription_product
-                else str(price_raw)
-            )
-        )
+        notice_kind = "plugin" if is_plugin_product else "credits"
+        notice_price = _blender_plugin_price_label(product_key, price_cents) if is_plugin_product else str(price_raw)
         notice_package = (
             f"Blender Plugin ABCD {notice_price}" if is_plugin_product else _checkout_pack_label(product_key)
         )
+        if is_subscription_product:
+            notice_kind = "subscription"
+            notice_package = "AutoRig Unlimited Monthly" + (" (renewal)" if is_recurring_charge else "")
         asyncio.create_task(
             broadcast_credits_purchased(
-                credits=0 if (is_plugin_product or is_subscription_product) else local_credits_added,
+                credits=0 if (is_plugin_product or is_subscription_product) else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
                 price=notice_price,
                 user_email=email,
                 product=product_key or product,
@@ -5757,7 +6030,7 @@ async def api_gumroad_ping(
         )
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=10.0, follow_redirects=True) as client:
             upstream = await client.post(
                 GUMROAD_PROXY_TARGET,
                 content=raw_body,
@@ -5950,12 +6223,6 @@ async def api_get_task(
 
     can_download_task = _can_download_task(task=task, user=user, request=request)
     is_admin_viewer = bool(user and is_admin_email(user.email))
-    is_user_owner = bool(user and task.owner_type == "user" and task.owner_id == user.email)
-    task_is_public = bool(getattr(task, "is_public", True))
-    can_manage_visibility = bool(
-        is_admin_viewer
-        or (is_user_owner and (user_has_active_subscription(user) or not task_is_public))
-    )
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
     blueprint_skeleton_url, blueprint_rig_preview_url = await _resolve_task_blueprint_urls(task)
     response_video_ready = bool(task.video_ready or blueprint_rig_preview_url)
@@ -6010,11 +6277,18 @@ async def api_get_task(
         downloadable_output_urls,
         downloadable_ready_urls,
     )
+    from user_language import task_language_fields as _i18n_task_language
+
+    _owner_lang = await _i18n_task_language(db, task)
+    from subscription_access import user_has_active_subscription as _has_sub
+    _is_admin_viewer = bool(user and is_admin_email(user.email))
     return TaskStatusResponse(
+        owner_language=_owner_lang["owner_language"],
+        owner_language_code=_owner_lang["owner_language_code"],
         task_id=task.id,
-        is_public=task_is_public,
-        is_owner=is_user_owner,
-        can_manage_visibility=can_manage_visibility,
+        is_public=task.is_public is not False,
+        is_owner=bool(can_download_task),
+        can_manage_visibility=bool(can_download_task) and (_is_admin_viewer or _has_sub(user)),
         status=task.status,
         progress=task.progress,
         ready_count=downloadable_ready_count,
@@ -6078,46 +6352,6 @@ async def api_get_task(
     )
 
 
-@app.patch("/api/task/{task_id}/visibility", response_model=TaskVisibilityResponse)
-async def api_update_task_visibility(
-    task_id: str,
-    body: TaskVisibilityUpdate,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Hide or republish a model without deleting its task or artifacts."""
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    is_admin = is_admin_email(user.email)
-    is_owner = task.owner_type == "user" and task.owner_id == user.email
-    if not (is_admin or is_owner):
-        raise HTTPException(status_code=403, detail="Only the task owner can change gallery visibility")
-    if not body.is_public and not (is_admin or user_has_active_subscription(user)):
-        raise HTTPException(
-            status_code=402,
-            detail="An active Unlimited Monthly subscription is required for private models",
-        )
-
-    task.is_public = bool(body.is_public)
-    task.updated_at = datetime.utcnow()
-    await db.commit()
-    try:
-        from seo_gallery import invalidate_sitemap_indexable_cache, invalidate_sitemap_public_cache
-        invalidate_sitemap_indexable_cache()
-        invalidate_sitemap_public_cache()
-    except Exception as exc:
-        print(f"[Visibility] sitemap cache invalidation failed task={task.id}: {exc}", flush=True)
-    return TaskVisibilityResponse(
-        task_id=task.id,
-        is_public=bool(task.is_public),
-        can_manage_visibility=bool(is_admin or user_has_active_subscription(user) or not task.is_public),
-    )
-
-
 @app.get("/api/task/{task_id}/progress_log")
 async def api_task_progress_log(
     task_id: str,
@@ -6140,7 +6374,7 @@ async def api_task_progress_log(
     
     try:
         import httpx
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             resp = await client.get(log_url, timeout=5.0)
             
             if resp.status_code == 404:
@@ -6280,7 +6514,7 @@ async def _fetch_animal_variant_matrix(task: Task, file_map: Dict[str, Dict[str,
 
     for url in dict.fromkeys(candidate_urls):
         try:
-            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            async with worker_http_client(timeout=5.0, follow_redirects=True) as client:
                 resp = await client.get(url)
             if resp.status_code != 200:
                 continue
@@ -6552,7 +6786,7 @@ async def _fetch_exact_animal_animation_manifest_actions(
     manifest_url, expected_artifact_name = selected
     owns_client = client is None
     if client is None:
-        client = httpx.AsyncClient(timeout=5.0, follow_redirects=False)
+        client = worker_http_client(timeout=5.0, follow_redirects=False)
     response = None
     try:
         request = client.build_request("GET", manifest_url)
@@ -6839,7 +7073,7 @@ async def _fetch_animal_variant_progress_line(task: Task) -> Optional[str]:
         return None
     log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=5.0, follow_redirects=True) as client:
             resp = await client.get(log_url)
         if resp.status_code != 200:
             return None
@@ -7381,7 +7615,7 @@ async def _probe_stable_remote_file(
     """Reject an obvious write race; two samples do not prove publication completeness."""
     owns_client = client is None
     if client is None:
-        client = httpx.AsyncClient(
+        client = worker_http_client(
             timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
             follow_redirects=False,
         )
@@ -7565,6 +7799,11 @@ async def api_retry_task(
     
     if not is_owner:
         raise HTTPException(status_code=403, detail="Not authorized to retry this task")
+    if str(getattr(task, "pipeline_kind", "") or "") == "v3":
+        from v3_runtime_mount import v3_retry
+
+        await v3_retry(db, task)
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
     
     # Check if task is eligible for retry
     if task.status == "done":
@@ -7583,6 +7822,32 @@ async def api_retry_task(
     if not task.input_url:
         raise HTTPException(status_code=400, detail="No input URL to retry")
     
+    # Downloads · V3: with the classic converter closed to new tasks, a retry of a classic task
+    # enters the V3 conveyor with the same uploaded file.
+    from v3_intake import classic_new_tasks_enabled as _classic_on
+
+    if not _classic_on():
+        from v3_intake import V3IntakeError, admit_upload as _v3_admit_upload, local_upload_path
+        from user_language import user_error_detail
+
+        v3_source = local_upload_path(task.input_url)
+        if v3_source is None:
+            raise HTTPException(status_code=409, detail=user_error_detail("classic_pipeline_off"))
+        try:
+            new_task = await _v3_admit_upload(
+                db, path=v3_source, original_url=task.input_url, filename=v3_source.name,
+                owner_type=task.owner_type, owner_id=task.owner_id, origin="retry",
+                created_via_api=bool(getattr(task, "created_via_api", False)),
+                requested_intent="convert" if (task.pipeline_kind or "rig") == "convert" else "rig",
+                input_type=task.input_type or "t_pose", input_bytes=getattr(task, "input_bytes", None),
+            )
+        except V3IntakeError as exc:
+            raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.detail})
+        task.status = "error"
+        task.error_message = f"Retried as V3 task {new_task.id}"
+        await db.commit()
+        return TaskCreateResponse(task_id=new_task.id, status=new_task.status, message="Task resubmitted successfully")
+
     # Create new task (don't deduct credits - it's a retry)
     new_task, error = await create_conversion_task(
         db,
@@ -7594,6 +7859,9 @@ async def api_retry_task(
         input_bytes=getattr(task, "input_bytes", None),
     )
     
+    if error == "classic_pipeline_off" and not new_task:
+        from user_language import user_error_detail
+        raise HTTPException(status_code=409, detail=user_error_detail("classic_pipeline_off"))
     if error and not new_task:
         raise HTTPException(status_code=500, detail=error)
     
@@ -7634,6 +7902,12 @@ async def api_restart_task(
     )
     if not (is_owner or is_admin):
         raise HTTPException(status_code=403, detail="Not authorized to restart this task")
+
+    if str(getattr(task, "pipeline_kind", "") or "") == "v3":
+        from v3_runtime_mount import v3_retry
+
+        await v3_retry(db, task)
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
 
     # Age gate: 1 minute
     task_age = datetime.utcnow() - task.created_at
@@ -7846,17 +8120,17 @@ async def api_restart_task(
     await db.commit()
     await db.refresh(task)
 
-    pk_restart = getattr(task, "pipeline_kind", None) or "rig"
-    if pk_restart not in ("rig", "convert"):
-        pk_restart = "rig"
-
     # Start pipeline for the same task_id without blocking on FBX pre-conversion.
-    worker_url = await select_best_worker(db=db, pipeline_kind=pk_restart)
+    worker_url = await select_best_worker(db=db)
     if not worker_url:
         raise HTTPException(status_code=500, detail="No workers available")
 
     task.worker_api = worker_url
     task.status = "processing"
+
+    pk_restart = getattr(task, "pipeline_kind", None) or "rig"
+    if pk_restart not in ("rig", "convert"):
+        pk_restart = "rig"
 
     # Parse transform params from request body (rig pipeline only)
     transform_params = None
@@ -8295,7 +8569,7 @@ async def api_preview_animation(
         raise HTTPException(status_code=404, detail="Animation file not ready")
 
     file_url = resolved["url"]
-    client = httpx.AsyncClient(timeout=120.0)
+    client = worker_http_client(timeout=120.0)
     try:
         req = client.build_request("GET", file_url)
         worker_resp = await client.send(req, stream=True)
@@ -8384,7 +8658,7 @@ async def api_download_animation(
         )
 
     async def stream_file():
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             async with client.stream("GET", file_url, timeout=120.0) as response:
                 if response.status_code != 200:
                     raise HTTPException(status_code=404, detail="Animation file is unavailable")
@@ -8516,7 +8790,7 @@ async def api_get_history(
                 created_at=t.created_at,
                 input_url=t.input_url,
                 video_ready=t.video_ready,
-                thumbnail_url=f"/thumb/{t.id}" if t.status == "done" and t.video_ready else None,
+                thumbnail_url=thumb_url_for(t.id) if t.status == "done" and t.video_ready else None,
                 content_rating=getattr(t, "content_rating", None),
             )
             for t in tasks
@@ -8539,22 +8813,37 @@ async def api_get_gallery(
     db: AsyncSession = Depends(get_db)
 ):
     """Get public gallery of completed tasks with videos"""
-    from sqlalchemy import func, desc, distinct
+    from sqlalchemy import func, desc, distinct, and_
     from database import Task, TaskFilePurchase
 
     # Get current user email for liked_by_me check
     user_email = user.email if user else None
 
     # Build base conditions (must have poster URLs in DB or /api/thumb 404s in the grid)
+    # Gallery · V3 only (owner, 2026-10-11): a V3 task is listed by its V3 capture and turntable (made by
+    # autorig-gallery-poster for done and needs_review tasks), no classic video needed; V3 tasks come first.
+    # V2-only tasks stay until they are re-rigged on open.
     base_conditions = [
-        Task.status == "done",
-        Task.video_ready == True,
-        Task.is_public.is_(True),
-        _gallery_task_has_poster_sql(),
+        Task.is_public.is_(True),        # private models (2026-10-17): never listed
+        or_(
+            and_(Task.status == "done", Task.video_ready == True, _gallery_task_has_poster_sql()),
+            and_(Task.pipeline_kind == "v3", Task.status.in_(("done", "needs_review")), Task.is_public.is_(True),
+                 Task.id.in_(_seo_social.v3_poster_ids())),          # only once its V3 poster exists
+        ),
     ]
+    _v3_first = desc(Task.pipeline_kind == "v3")
+    # site_mode (NSFW split, 2026-10-11): adult tasks are listed only on the adult domain.
+    import site_mode as _site_mode
+    base_conditions.extend(_site_mode.listing_conditions(request, Task))
     if author:
-        base_conditions.append(Task.owner_type == "user")
-        base_conditions.append(Task.owner_id == author)
+        # Privacy (2026-10-11): authors are addressed by their public handle, never by e-mail.
+        import public_identity
+        _owner = await public_identity.owner_for_handle(db, author)
+        if _owner is None:
+            base_conditions.append(Task.id == "")
+        else:
+            base_conditions.append(Task.owner_type == _owner[0])
+            base_conditions.append(Task.owner_id == _owner[1])
 
     sort = (sort or "date").strip().lower()
     if sort not in {"date", "likes", "sales"}:
@@ -8563,6 +8852,14 @@ async def api_get_gallery(
     if rig_filter not in GALLERY_RIG_TYPES:
         rig_filter = "all"
     should_filter_rig = rig_filter != "all"
+    import gallery_categories as _gallery_categories
+    if should_filter_rig:
+        # V3 categories: filter in SQL on tasks.v3_category, so offset/limit, total and has_more are exact.
+        # (None = the column is not there yet: the Python filter below stays in charge.)
+        _rig_sql = _gallery_categories.rig_filter_condition(Task, rig_filter)
+        if _rig_sql is not None:
+            base_conditions.append(_rig_sql)
+            should_filter_rig = False
 
     # Get task IDs with like counts
     offset = (page - 1) * per_page
@@ -8579,7 +8876,7 @@ async def api_get_gallery(
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
-            .order_by(desc('like_count'), desc(Task.created_at))
+            .order_by(_v3_first, desc('like_count'), desc(Task.created_at))
         )
     elif sort == "sales":
         # Sort by sales count (descending), then by date
@@ -8593,7 +8890,7 @@ async def api_get_gallery(
             .outerjoin(TaskFilePurchase, Task.id == TaskFilePurchase.task_id)
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
-            .order_by(desc('sales_count'), desc(Task.created_at))
+            .order_by(_v3_first, desc('sales_count'), desc(Task.created_at))
         )
     else:
         # Sort by date (newest first) - default
@@ -8605,7 +8902,7 @@ async def api_get_gallery(
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
-            .order_by(desc(Task.created_at))
+            .order_by(_v3_first, desc(Task.created_at))
         )
 
     if page_offset:
@@ -8652,12 +8949,16 @@ async def api_get_gallery(
     
     # Get author nicknames for user-owned tasks
     author_nicknames = {}
+    author_user_ids = {}
     owner_emails = [row[0].owner_id for row in rows if row[0].owner_type == "user"]
     if owner_emails:
         users_result = await db.execute(
-            select(User.email, User.nickname).where(User.email.in_(owner_emails))
+            select(User.email, User.nickname, User.id).where(User.email.in_(owner_emails))
         )
-        author_nicknames = {r[0]: r[1] for r in users_result.all()}
+        _user_rows = users_result.all()
+        author_nicknames = {r[0]: r[1] for r in _user_rows}
+        author_user_ids = {r[0]: r[2] for r in _user_rows}
+    import public_identity
     
     items = []
     for row in rows:
@@ -8665,17 +8966,24 @@ async def api_get_gallery(
         like_count = row[1] if len(row) > 1 else 0
         items.append(GalleryItem(
             task_id=t.id,
-            video_url=f"/api/video/{t.id}",
-            thumbnail_url=f"/thumb/{t.id}",
+            # V3 preview clip first (seo_social: the same turntable as og:video and the Telegram notice).
+            video_url=_seo_social.v3_clip_url(t.id) or f"/api/video/{t.id}",
+            thumbnail_url=thumb_url_for(t.id),
             created_at=t.created_at,
             time_ago=format_time_ago(t.created_at),
             like_count=like_count,
             liked_by_me=t.id in user_likes,
             sales_count=sales_counts.get(t.id, 0),
-            author_email=t.owner_id if t.owner_type == "user" else None,
-            author_nickname=author_nicknames.get(t.owner_id) if t.owner_type == "user" else None,
+            author_email=None,
+            **public_identity.card_fields(
+                "user" if t.owner_type == "user" else "guest",
+                (public_identity.handle_for_user(author_user_ids[t.owner_id])
+                 if t.owner_type == "user" and t.owner_id in author_user_ids
+                 else (public_identity.handle_for_anon(t.owner_id) if t.owner_type == "anon" else None)),
+                author_nicknames.get(t.owner_id) if t.owner_type == "user" else None),
             content_rating=getattr(t, "content_rating", None),
             rig_icon_key=_gallery_rig_icon_key(t),
+            category=_gallery_categories.category_for_task(t),
         ))
     
     has_more = (page * per_page) < total
@@ -8731,25 +9039,26 @@ async def api_get_task_card(
     sales_count = sales_result.scalar() or 0
     
     # Get author info
-    author_email = None
-    author_nickname = None
+    # Privacy (2026-10-11): the public card carries the author's handle and name, never the e-mail.
+    import public_identity
+    author_fields = public_identity.card_fields(None, None)
     if task.owner_type == "user":
-        author_email = task.owner_id
-        # Get nickname from User
         user_result = await db.execute(
-            select(User.nickname).where(User.email == task.owner_id)
+            select(User.nickname, User.id).where(User.email == task.owner_id)
         )
         row = user_result.first()
         if row:
-            author_nickname = row[0]
+            author_fields = public_identity.card_fields("user", public_identity.handle_for_user(row[1]), row[0])
+    elif task.owner_type == "anon" and task.owner_id:
+        author_fields = public_identity.card_fields("guest", public_identity.handle_for_anon(task.owner_id))
     
     return TaskCardInfo(
         task_id=task_id,
         like_count=like_count,
         liked_by_me=liked_by_me,
         sales_count=sales_count,
-        author_email=author_email,
-        author_nickname=author_nickname,
+        author_email=None,
+        **author_fields,
         time_ago=format_time_ago(task.created_at),
         version=(task.restart_count or 0) + 1,
         content_rating=getattr(task, "content_rating", None),
@@ -8759,6 +9068,7 @@ async def api_get_task_card(
 @app.get("/api/task/{task_id}/owner_tasks")
 async def api_get_owner_tasks(
     task_id: str,
+    request: Request,
     page: int = 1,
     per_page: int = 12,
     db: AsyncSession = Depends(get_db)
@@ -8771,6 +9081,14 @@ async def api_get_owner_tasks(
         raise HTTPException(status_code=404, detail="Task not found")
     
     tasks, total = await get_user_tasks(db, task.owner_type, task.owner_id, page, per_page)
+    import site_mode as _site_mode  # site_mode (NSFW split, 2026-10-11)
+    tasks = [t for t in tasks if not _site_mode.hides(request, t)]
+    # Private models (2026-10-17): another visitor never sees the owner's private tasks in this list.
+    import task_privacy as _tp
+    _hdrs = {k.lower(): v for k, v in request.headers.items()}
+    _ip = _hdrs.get("x-real-ip") or (request.client.host if request.client else None)
+    tasks = [t for t in tasks if t.is_public is not False
+             or _tp.decide("/t/" + t.id, _hdrs.get("cookie", ""), _hdrs, _ip)[0]]
     
     # Get author nicknames if needed
     author_nicknames = {}
@@ -8787,10 +9105,10 @@ async def api_get_owner_tasks(
                 "status": t.status,
                 "progress": t.progress,
                 "created_at": t.created_at,
-                "thumbnail_url": f"/thumb/{t.id}" if t.status == "done" else None,
+                "thumbnail_url": thumb_url_for(t.id) if t.status == "done" else None,
                 "content_rating": getattr(t, "content_rating", None),
                 "owner_type": t.owner_type,
-                "owner_id": t.owner_id if t.owner_type == "user" else "anon"
+                "owner_id": "user" if t.owner_type == "user" else "anon"      # never the e-mail (2026-10-11)
             }
             for t in tasks
         ],
@@ -8900,77 +9218,18 @@ async def api_admin_scheduler_priority(
         for queue_class, status, count in rows.all()
     }
     queue_status = await get_global_queue_status(db=db)
-    rig_only_urls = await get_rig_only_worker_urls(db)
     healthy_full = sum(
         1
         for worker in queue_status.workers
-        if worker.available
-        and not is_worker_quarantined(worker.url)
-        and normalize_worker_url_key(worker.url) not in rig_only_urls
+        if worker.available and not is_worker_quarantined(worker.url)
     )
     return priority_metrics_snapshot(
         interactive_queued=counts.get((QUEUE_CLASS_INTERACTIVE, "created"), 0),
         background_queued=counts.get((QUEUE_CLASS_BACKGROUND, "created"), 0),
         interactive_active=counts.get((QUEUE_CLASS_INTERACTIVE, "processing"), 0),
         background_active=counts.get((QUEUE_CLASS_BACKGROUND, "processing"), 0),
-        reserved_full_slots=min(2, healthy_full),
+        reserved_full_slots=1 if healthy_full > 0 else 0,
     )
-
-
-_WORKER_POOLS = {
-    "full_converter",
-    # Auto Rig only: no retopo/3ds Max/Maya/C4D toolchain, so it may receive
-    # pipeline_kind == "rig" and never "convert".
-    WORKER_POOL_RIG_ONLY,
-    "hunyuan_only",
-    "comfy",
-    "ai_vision",
-    "shared_gpu",
-}
-_WORKER_ROLES = {
-    "shared",
-    "autorig_primary",
-    "ai_vision_primary",
-    "background_only",
-    "maintenance",
-}
-
-
-def _worker_pool(value: Any) -> str:
-    normalized = str(value or "full_converter").strip().lower()
-    if normalized not in _WORKER_POOLS:
-        raise HTTPException(status_code=422, detail="Invalid worker pool")
-    return normalized
-
-
-def _worker_role(value: Any) -> str:
-    normalized = str(value or "shared").strip().lower()
-    if normalized == "ai_primary":
-        normalized = "ai_vision_primary"
-    if normalized not in _WORKER_ROLES:
-        raise HTTPException(status_code=422, detail="Invalid worker role")
-    return normalized
-
-
-def _worker_capabilities(value: Any) -> Dict[str, Any]:
-    if not isinstance(value, dict):
-        raise HTTPException(status_code=422, detail="Worker capabilities must be an object")
-    result: Dict[str, Any] = {}
-    for key, child in list(value.items())[:64]:
-        safe_key = str(key or "").strip()[:80]
-        if not safe_key or re.search(r"token|secret|password|authorization|cookie|api.?key", safe_key, re.I):
-            continue
-        if isinstance(child, (str, int, float, bool)) or child is None:
-            result[safe_key] = child if not isinstance(child, str) else child[:240]
-    return result
-
-
-def _worker_capabilities_from_json(raw: Any) -> Dict[str, Any]:
-    try:
-        value = json.loads(str(raw or "{}"))
-    except Exception:
-        return {}
-    return value if isinstance(value, dict) else {}
 
 
 @app.get("/api/admin/workers", response_model=AdminWorkerListResponse)
@@ -9031,10 +9290,6 @@ async def api_admin_workers(
                 url=w.url,
                 enabled=bool(w.enabled),
                 weight=int(w.weight or 0),
-                physical_resource_id=w.physical_resource_id,
-                pool=str(w.pool or "full_converter"),
-                role=str(w.role or "shared"),
-                capabilities=_worker_capabilities_from_json(w.capabilities_json),
                 created_at=w.created_at,
                 updated_at=w.updated_at,
                 done_tasks=int(stats_by_url.get(_norm(w.url), {}).get("done_tasks", 0)),
@@ -9060,14 +9315,7 @@ async def api_admin_create_worker(
     worker = WorkerEndpoint(
         url=url,
         enabled=bool(data.enabled),
-        weight=int(data.weight or 0),
-        physical_resource_id=(
-            canonical_physical_resource_id(data.physical_resource_id)
-            if data.physical_resource_id else None
-        ),
-        pool=_worker_pool(data.pool),
-        role=_worker_role(data.role),
-        capabilities_json=json.dumps(_worker_capabilities(data.capabilities), separators=(",", ":")),
+        weight=int(data.weight or 0)
     )
     db.add(worker)
     try:
@@ -9082,10 +9330,6 @@ async def api_admin_create_worker(
         url=worker.url,
         enabled=bool(worker.enabled),
         weight=int(worker.weight or 0),
-        physical_resource_id=worker.physical_resource_id,
-        pool=str(worker.pool or "full_converter"),
-        role=str(worker.role or "shared"),
-        capabilities=_worker_capabilities_from_json(worker.capabilities_json),
         created_at=worker.created_at,
         updated_at=worker.updated_at,
         done_tasks=0,
@@ -9113,19 +9357,6 @@ async def api_admin_update_worker(
         worker.enabled = bool(data.enabled)
     if data.weight is not None:
         worker.weight = int(data.weight)
-    if data.physical_resource_id is not None:
-        worker.physical_resource_id = (
-            canonical_physical_resource_id(data.physical_resource_id)
-            if str(data.physical_resource_id or "").strip() else None
-        )
-    if data.pool is not None:
-        worker.pool = _worker_pool(data.pool)
-    if data.role is not None:
-        worker.role = _worker_role(data.role)
-    if data.capabilities is not None:
-        worker.capabilities_json = json.dumps(
-            _worker_capabilities(data.capabilities), separators=(",", ":")
-        )
 
     try:
         await db.commit()
@@ -9139,10 +9370,6 @@ async def api_admin_update_worker(
         url=worker.url,
         enabled=bool(worker.enabled),
         weight=int(worker.weight or 0),
-        physical_resource_id=worker.physical_resource_id,
-        pool=str(worker.pool or "full_converter"),
-        role=str(worker.role or "shared"),
-        capabilities=_worker_capabilities_from_json(worker.capabilities_json),
         created_at=worker.created_at,
         updated_at=worker.updated_at,
         done_tasks=0,
@@ -9920,9 +10147,12 @@ async def api_admin_restart_incomplete_tasks(
     """
     from database import Task
     
-    # Count incomplete tasks
+    # Count incomplete tasks (V3 rows restart only as a new V3 attempt)
     result = await db.execute(
-        select(Task).where(Task.status.in_(["created", "processing", "error"]))
+        select(Task).where(
+            Task.status.in_(["created", "processing", "error"]),
+            Task.pipeline_kind != "v3",
+        )
     )
     incomplete_tasks = result.scalars().all()
     task_count = len(incomplete_tasks)
@@ -9979,21 +10209,21 @@ async def api_admin_restart_incomplete_tasks(
                     task.viewer_prepared_glb_url = None
                     task.viewer_animations_glb_url = None
                     
-                    pk_ad = getattr(task, "pipeline_kind", None) or "rig"
-                    if pk_ad not in ("rig", "convert"):
-                        pk_ad = "rig"
-
                     # Select worker and send task
-                    worker_url = await select_best_worker(db=bg_db, pipeline_kind=pk_ad)
+                    worker_url = await select_best_worker(db=bg_db)
                     if not worker_url:
                         task.status = "error"
                         task.error_message = "No workers available"
                         errors.append(f"{task_id[:8]}: no workers")
                         await bg_db.commit()
                         continue
-
+                    
                     task.worker_api = worker_url
                     task.status = "processing"
+                    
+                    pk_ad = getattr(task, "pipeline_kind", None) or "rig"
+                    if pk_ad not in ("rig", "convert"):
+                        pk_ad = "rig"
                     send_result = await send_task_to_worker(
                         worker_url,
                         task.input_url,
@@ -10151,7 +10381,7 @@ async def proxy_video(
     if if_range:
         upstream_headers["If-Range"] = if_range
 
-    client = httpx.AsyncClient(timeout=120.0)
+    client = worker_http_client(timeout=120.0)
     try:
         req = client.build_request("GET", source_video_url, headers=upstream_headers)
         worker_resp = await client.send(req, stream=True)
@@ -10269,54 +10499,6 @@ def _x_accel_artifact_response(
     if entry.get("last_modified"):
         headers["Last-Modified"] = str(entry["last_modified"])
     return Response(status_code=200, headers=headers, media_type=media_type)
-
-
-def _cached_archive_member_response(
-    entry: Dict[str, Any],
-    request: Request,
-    *,
-    filename: str,
-    media_type: str,
-    as_attachment: bool = False,
-) -> StreamingResponse:
-    """Serve a byte-range directly from a central cached ZIP member."""
-    total_size = int(entry["member_size"])
-    try:
-        start, end, is_partial = _parse_single_http_byte_range(
-            request.headers.get("range"),
-            total_size,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=416,
-            detail=str(exc),
-            headers={"Content-Range": f"bytes */{total_size}"},
-        ) from exc
-    etag = str(entry.get("etag") or "")
-    if etag and _request_etag_matches(request, etag):
-        return Response(status_code=304, headers={"ETag": etag})
-    disposition = "attachment" if as_attachment else "inline"
-    headers = {
-        "Content-Disposition": f'{disposition}; filename="{Path(filename).name}"',
-        "Content-Type": media_type,
-        "Content-Encoding": "identity",
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(end - start + 1),
-        "Cache-Control": "private, max-age=0" if as_attachment else "public, max-age=86400",
-        "Access-Control-Allow-Origin": "*",
-        "X-Content-Type-Options": "nosniff",
-        "X-Artifact-Cache": "archive-member",
-    }
-    if is_partial:
-        headers["Content-Range"] = f"bytes {start}-{end}/{total_size}"
-    if etag:
-        headers["ETag"] = etag
-    return StreamingResponse(
-        iter_cached_archive_member(entry, start=start, end=end),
-        status_code=206 if is_partial else 200,
-        media_type=media_type,
-        headers=headers,
-    )
 
 
 def _x_accel_glb_cache_response(
@@ -10455,7 +10637,7 @@ async def proxy_file(
         )
     
     async def stream_file():
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             async with client.stream("GET", file_url, timeout=120.0) as response:
                 if response.status_code != 200:
                     return
@@ -10577,7 +10759,7 @@ async def proxy_file_by_name(
         )
     
     async def stream_file():
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             async with client.stream("GET", file_url, timeout=120.0) as response:
                 if response.status_code != 200:
                     return
@@ -10759,7 +10941,7 @@ def _write_cached_task_bundle_meta(task_id: str, meta: Dict[str, Any]) -> None:
 
 async def _worker_bundle_zip_available(zip_url: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
             # A one-byte Range can succeed through the public gateway even when
             # a normal full response is rejected as too large.
             async with client.stream("GET", zip_url) as response:
@@ -10796,7 +10978,7 @@ async def _load_task_bundle_meta(
         worker_zip_available = await _worker_bundle_zip_available(zip_url)
         meta_url = f"{zip_url}.meta.json"
         try:
-            async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
                 response = await client.get(meta_url, headers={"Accept": "application/json"})
             if response.status_code == 200:
                 worker_meta = _normalize_bundle_meta(
@@ -10861,7 +11043,7 @@ async def task_download_recovery_state(task: Task) -> Dict[str, Any]:
     if _has_complete_primary_task_cache(task):
         return state
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=8.0, follow_redirects=True) as client:
             if await _probe_http_asset_reachable(client, urls[0]):
                 return state
     except Exception:
@@ -11042,7 +11224,7 @@ async def _ensure_purchased_worker_bundle_zip_url(
 
     if verify_worker_byte and zip_url:
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with worker_http_client(timeout=30.0) as client:
                 async with client.stream(
                     "GET",
                     zip_url,
@@ -11092,20 +11274,11 @@ def _parse_single_http_byte_range(range_header: Optional[str], total_size: int) 
 
 
 async def _probe_worker_file_range(url: str) -> Dict[str, Any]:
-    """Probe a finalized ZIP before publishing its size to the download client.
-
-    Some workers write directly to the public ZIP path.  A successful one-byte
-    probe can therefore describe a growing archive, not a downloadable bundle.
-    Check the bounded ZIP footer and the same representation before sending any
-    response headers, so the caller can use its normal cached-file fallback.
-    """
+    """Get worker artifact size without asking the relay to buffer the full body."""
     timeout = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            async with client.stream(
-                "GET", url,
-                headers={"Range": "bytes=0-0", "Accept-Encoding": "identity"},
-            ) as response:
+        async with worker_http_client(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("GET", url, headers={"Range": "bytes=0-0"}) as response:
                 if response.status_code != 206:
                     raise HTTPException(
                         status_code=404 if response.status_code == 404 else 502,
@@ -11115,37 +11288,12 @@ async def _probe_worker_file_range(url: str) -> Dict[str, Any]:
                 match = re.fullmatch(r"bytes\s+0-0/(\d+)", content_range, flags=re.IGNORECASE)
                 if not match or int(match.group(1)) <= 0:
                     raise HTTPException(status_code=502, detail="Worker bundle returned invalid Content-Range")
-                probe = {
+                return {
                     "total_size": int(match.group(1)),
                     "content_type": response.headers.get("Content-Type") or "application/zip",
                     "etag": response.headers.get("ETag"),
                     "last_modified": response.headers.get("Last-Modified"),
                 }
-            total_size = int(probe["total_size"])
-            if total_size < 22:
-                raise HTTPException(status_code=503, detail="Worker bundle is not finalized yet")
-            # EOCD (22 bytes) plus the maximum 16-bit ZIP comment.  Zip64 end
-            # records immediately precede EOCD and are handled by zipfile.
-            tail_start = max(0, total_size - (65535 + 22))
-            headers = {
-                "Range": f"bytes={tail_start}-{total_size - 1}",
-                "Accept-Encoding": "identity",
-            }
-            etag = str(probe.get("etag") or "")
-            if etag and not etag.startswith("W/"):
-                headers["If-Match"] = etag
-            async with client.stream("GET", url, headers=headers) as response:
-                expected_range = f"bytes {tail_start}-{total_size - 1}/{total_size}"
-                if (
-                    response.status_code != 206
-                    or str(response.headers.get("Content-Range") or "").lower()
-                    != expected_range.lower()
-                ):
-                    raise HTTPException(status_code=503, detail="Worker bundle changed during finalization")
-                tail = await response.aread()
-                if len(tail) != total_size - tail_start or not zipfile.is_zipfile(io.BytesIO(tail)):
-                    raise HTTPException(status_code=503, detail="Worker bundle is not finalized yet")
-            return probe
     except HTTPException:
         raise
     except Exception as exc:
@@ -11159,12 +11307,11 @@ async def _iter_worker_file_ranges(
     *,
     total_size: int,
     chunk_bytes: int = _WORKER_BUNDLE_RANGE_CHUNK_BYTES,
-    etag: Optional[str] = None,
 ):
     """Yield verified relay-friendly ranges, buffering one chunk before publishing it."""
     timeout = httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0)
     position = start
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with worker_http_client(timeout=timeout, follow_redirects=True) as client:
         while position <= end:
             range_end = min(end, position + max(1, int(chunk_bytes)) - 1)
             expected_length = range_end - position + 1
@@ -11172,25 +11319,17 @@ async def _iter_worker_file_ranges(
             last_error: Optional[Exception] = None
             for _attempt in range(_WORKER_BUNDLE_RANGE_ATTEMPTS):
                 try:
-                    headers = {
-                        "Range": f"bytes={position}-{range_end}",
-                        "Accept-Encoding": "identity",
-                    }
-                    if etag and not etag.startswith("W/"):
-                        headers["If-Match"] = etag
                     async with client.stream(
                         "GET",
                         url,
-                        headers=headers,
+                        headers={"Range": f"bytes={position}-{range_end}"},
                     ) as response:
                         if response.status_code != 206:
                             raise RuntimeError(f"range request returned HTTP {response.status_code}")
                         content_range = str(response.headers.get("Content-Range") or "")
                         expected_range = f"bytes {position}-{range_end}/{total_size}"
                         if content_range.lower() != expected_range.lower():
-                            raise RuntimeError(
-                                f"unexpected Content-Range {content_range!r}; expected {expected_range!r}"
-                            )
+                            raise RuntimeError(f"unexpected Content-Range {content_range!r}")
                         candidate = await response.aread()
                         if len(candidate) != expected_length:
                             raise RuntimeError(
@@ -11241,35 +11380,11 @@ async def _proxy_worker_bundle_by_ranges(url: str, filename: str, request: Reque
     if probe.get("last_modified"):
         headers["Last-Modified"] = str(probe["last_modified"])
     return StreamingResponse(
-        _iter_worker_file_ranges(url, start, end, total_size=total_size, etag=probe.get("etag")),
+        _iter_worker_file_ranges(url, start, end, total_size=total_size),
         status_code=206 if is_partial else 200,
         media_type=str(probe.get("content_type") or "application/zip"),
         headers=headers,
     )
-
-
-def _durable_primary_task_files(task: Task) -> Dict[str, Path]:
-    """Return every primary deliverable from the verified durable cache.
-
-    Artifact-cache rows are checksum-verified before publication.  When all
-    primary files are already present there, a flaky worker ZIP must not remain
-    on the owner download path.
-    """
-    resolved: Dict[str, Path] = {}
-    expected_names = _task_primary_download_names(task)
-    if not expected_names:
-        return {}
-    for source_url in _task_primary_download_urls(task):
-        filename = _clean_filename_for_cache(source_url, task.guid)
-        entry = lookup_cached_artifact(task.id, source_url=source_url)
-        path = Path(entry.get("path")) if entry and entry.get("path") else None
-        if not path or not path.is_file():
-            return {}
-        resolved[filename] = path
-    return resolved if set(resolved) == expected_names else {}
-
-
-_TASK_BUNDLE_BUILD_LOCKS: Dict[str, asyncio.Lock] = {}
 
 
 async def _build_task_bundle_zip_from_cache(task: Task) -> Response:
@@ -11278,25 +11393,19 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> Response:
     cache_dir = TASK_CACHE_DIR / task.id
     recovery_files = _materialize_task_recovery_files(task)
     bundle_names = expected_names | set(recovery_files)
-    durable_files = _durable_primary_task_files(task)
-    if urls_to_cache and not recovery_files and not durable_files:
+    if urls_to_cache and not recovery_files:
         await cache_task_files(task.id, urls_to_cache, task.guid)
 
-    bundle_sources: Dict[str, Path] = dict(durable_files)
-    if not bundle_sources:
-        bundle_sources.update({
-            p.name: p
-            for p in sorted(cache_dir.iterdir())
-            if (
-                p.is_file()
-                and p.name in bundle_names
-                and not p.name.endswith(".tmp")
-                and not p.name.startswith(".")
-            )
-        } if cache_dir.exists() else {})
-    for name, path in recovery_files.items():
-        bundle_sources.setdefault(name, path)
-    if not bundle_sources:
+    files = [
+        p for p in sorted(cache_dir.iterdir())
+        if (
+            p.is_file()
+            and p.name in bundle_names
+            and not p.name.endswith(".tmp")
+            and not p.name.startswith(".")
+        )
+    ] if cache_dir.exists() else []
+    if not files:
         recovery = await task_download_recovery_state(task)
         raise HTTPException(
             status_code=404,
@@ -11313,37 +11422,16 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> Response:
     bundle_dir = cache_dir / ".meta"
     bundle_dir.mkdir(parents=True, exist_ok=True)
     zip_path = bundle_dir / "primary-bundle.zip"
-    lock = _TASK_BUNDLE_BUILD_LOCKS.setdefault(str(task.id), asyncio.Lock())
-    async with lock:
-        expected_archive_names = set(bundle_sources)
-        archive_ready = False
-        if zip_path.is_file():
-            try:
-                with zipfile.ZipFile(zip_path, "r") as existing_zip:
-                    archive_ready = (
-                        set(existing_zip.namelist()) == expected_archive_names
-                        and existing_zip.testzip() is None
-                    )
-            except (OSError, zipfile.BadZipFile):
-                archive_ready = False
-        if not archive_ready:
-            temp_zip_path = bundle_dir / f".primary-bundle.{uuid.uuid4().hex}.tmp"
-
-            def _write_bundle() -> None:
-                try:
-                    with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                        for archive_name, file_path in sorted(bundle_sources.items()):
-                            zf.write(file_path, arcname=archive_name)
-                    os.replace(temp_zip_path, zip_path)
-                finally:
-                    temp_zip_path.unlink(missing_ok=True)
-
-            await asyncio.to_thread(_write_bundle)
+    temp_zip_path = bundle_dir / f".primary-bundle.{uuid.uuid4().hex}.tmp"
+    with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for file_path in files:
+            zf.write(file_path, arcname=file_path.name)
+    os.replace(temp_zip_path, zip_path)
 
     fallback_meta = _bundle_meta_response(
         ready=True,
-        source="durable_artifact_cache" if durable_files else "fallback_cache",
-        file_count=len(bundle_sources),
+        source="fallback_cache",
+        file_count=len(files),
         total_size=zip_path.stat().st_size if zip_path.exists() else None,
         generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
     )
@@ -11422,8 +11510,6 @@ async def _stream_purchased_task_bundle_zip(
             media_type="application/zip",
             as_attachment=True,
         )
-    if _durable_primary_task_files(task):
-        return await _build_task_bundle_zip_from_cache(task)
     if _has_complete_primary_task_cache(task):
         return await _build_task_bundle_zip_from_cache(task)
     if zip_url:
@@ -11486,7 +11572,7 @@ async def api_proxy_viewer(
     worker_base = f"{parsed.scheme}://{parsed.netloc}"
     
     # Proxy the HTML file
-    async with httpx.AsyncClient() as client:
+    async with worker_http_client() as client:
         try:
             response = await client.get(viewer_url, timeout=30.0, follow_redirects=True)
             response.raise_for_status()
@@ -11622,7 +11708,7 @@ async def api_proxy_viewer_resource(
     resource_url = f"{worker_base}{path}"
     
     # Proxy the resource
-    async with httpx.AsyncClient() as client:
+    async with worker_http_client() as client:
         try:
             response = await client.get(resource_url, timeout=30.0, follow_redirects=True)
             response.raise_for_status()
@@ -11731,7 +11817,7 @@ def _find_cached_blueprint_file(task_id: str, guid: Optional[str], suffix: str) 
 
 async def _remote_file_exists(url: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=4.0, follow_redirects=True) as client:
             resp = await client.head(url)
             if 200 <= resp.status_code < 400:
                 return True
@@ -11772,7 +11858,7 @@ async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str
 
     files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
             resp = await client.get(files_url)
         if resp.status_code != 200:
             return None
@@ -11856,7 +11942,7 @@ async def _resolve_task_blueprint_model_url(task: Task) -> Optional[str]:
 
     files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
             resp = await client.get(files_url)
         if resp.status_code != 200:
             return None
@@ -11924,8 +12010,17 @@ def _gallery_task_has_poster_sql():
     return or_(*[func.instr(col, p) > 0 for col in cols for p in pats])
 
 
+# V3 category slugs first (gallery_categories.V3_CATEGORIES), then the old V2 animal presets, which stay accepted.
 GALLERY_RIG_TYPES = (
     "humanoid",
+    "quadruped",
+    "equine",
+    "bird",
+    "serpent",
+    "monster",
+    "multilimb",
+    "hands",
+    "vehicle",
     "dog",
     "bear",
     "cat",
@@ -11945,7 +12040,8 @@ def _gallery_rig_icon_key(task: Task) -> str:
     """Humanoid vs animal rig key for gallery UI icons and filters."""
     input_type = str(getattr(task, "input_type", "") or "").strip().lower()
     if input_type != "animal":
-        return "humanoid"
+        import gallery_categories as _gallery_categories
+        return _gallery_categories.icon_key_for_task(task)  # V3: quadruped -> dog, equine -> horse, else humanoid
     try:
         settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
     except Exception:
@@ -11968,7 +12064,7 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
         "guides": "Guides",
         "kicker": "Rig type SEO guide",
         "overview": "What this rig type is for",
-        "workflow": "Online workflow",
+        "workflow": "How it works",
         "prep": "Model preparation tips",
         "examples": "Real AutoRig examples",
         "faq": "FAQ",
@@ -11984,7 +12080,7 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
         "guides": "Руководства",
         "kicker": "SEO-статья по типу рига",
         "overview": "Для чего нужен этот тип рига",
-        "workflow": "Онлайн workflow",
+        "workflow": "Как это работает",
         "prep": "Как подготовить модель",
         "examples": "Реальные примеры AutoRig",
         "faq": "FAQ",
@@ -12000,7 +12096,7 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
         "guides": "指南",
         "kicker": "绑定类型 SEO 指南",
         "overview": "这个绑定类型适合什么",
-        "workflow": "在线工作流",
+        "workflow": "工作方式",
         "prep": "模型准备建议",
         "examples": "真实 AutoRig 示例",
         "faq": "FAQ",
@@ -12016,7 +12112,7 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
         "guides": "Guides",
         "kicker": "Rig type SEO guide",
         "overview": "यह rig type किसके लिए है",
-        "workflow": "Online workflow",
+        "workflow": "यह कैसे काम करता है",
         "prep": "Model preparation tips",
         "examples": "Real AutoRig examples",
         "faq": "FAQ",
@@ -12050,31 +12146,31 @@ RIG_ARTICLE_EXAMPLE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
 
 RIG_ARTICLE_STATIC_EXAMPLES: Dict[str, Dict[str, str]] = {
     "cat": {
-        "title": "Cat V2 animal rig animation example",
-        "image": "/static/videos/animal-rig/cat-v2-rig-poster-20260516.png",
+        "title": "Quadruped rig: cat family animation example",
+        "image": "/static/images/animal-rig/cat-quadruped.jpg",
         "url": "/animal-rig#examples",
     },
     "horse": {
-        "title": "Quadruped animal rig animation example",
-        "image": "/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png",
+        "title": "Equine rig: horse gallop animation example",
+        "image": "/static/images/animal-rig/cat-equine.jpg",
         "url": "/animal-rig#examples",
     },
     "rabbit": {
-        "title": "Rabbit V2 animal rig animation example",
-        "image": "/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png",
+        "title": "Quadruped rig: small animal animation example",
+        "image": "/static/images/animal-rig/cat-quadruped.jpg",
         "url": "/animal-rig#examples",
     },
     "turtle": {
-        "title": "Turtle V2 low-body rig animation example",
-        "image": "/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png",
+        "title": "Low-body quadruped rig animation example",
+        "image": "/static/images/animal-rig/g-bear.jpg",
         "url": "/animal-rig#examples",
     },
 }
 
 DEFAULT_RIG_ARTICLE_STATIC_EXAMPLE: Dict[str, str] = {
-    "title": "AutoRig V2 animal rig presentation",
-    "image": "/static/videos/animal-rig/after-poster-20260516.png",
-    "url": "/animal-rig#presentation",
+    "title": "AutoRig V3 animal rig categories",
+    "image": "/static/images/animal-rig/cat-quadruped.jpg",
+    "url": "/animal-rig#examples",
 }
 
 
@@ -12083,7 +12179,7 @@ RIG_ARTICLE_TYPES: Dict[str, Dict[str, Any]] = {
         "labels": {"en": "humanoid character", "ru": "humanoid-персонаж", "zh": "人形角色", "hi": "humanoid character"},
         "shape": {"en": "biped characters with arms, legs, hands, head, and animation-ready proportions", "ru": "двуногие персонажи с руками, ногами, кистями, головой и animation-ready пропорциями", "zh": "带有手臂、腿部、手、头部和动画比例的人形角色", "hi": "arms, legs, hands, head और animation-ready proportions वाले biped characters"},
         "use": {"en": "game heroes, NPCs, stylized people, robots, and human-like creatures", "ru": "игровых героев, NPC, stylized people, роботов и human-like creatures", "zh": "游戏主角、NPC、风格化人物、机器人和类人生物", "hi": "game heroes, NPCs, stylized people, robots और human-like creatures"},
-        "tip": {"en": "Use a clear T-pose or relaxed A-pose, keep arms away from the torso, and avoid fused fingers if hand motion matters.", "ru": "Используйте чистую T-pose или relaxed A-pose, держите руки отдельно от тела и не склеивайте пальцы, если важна анимация кистей.", "zh": "使用清晰的 T-pose 或放松的 A-pose，让手臂离开身体；如果需要手部动画，避免手指粘连。", "hi": "Clear T-pose या relaxed A-pose रखें, arms को torso से अलग रखें, और hand motion चाहिए तो fused fingers से बचें।"},
+        "tip": {"en": "Any pose works, because the rig is fitted to the model as it is. Keep arms and legs clear of the torso, and avoid fused fingers if hand motion matters.", "ru": "Подойдёт любая поза: риг подгоняется под модель как есть. Держите руки и ноги отдельно от корпуса и не склеивайте пальцы, если важна анимация кистей.", "zh": "任意姿势都可以，因为绑定会按模型当前的样子拟合。让手臂和腿离开躯干；如果需要手部动画，避免手指粘连。", "hi": "कोई भी पोज़ चलता है, क्योंकि रिग मॉडल पर वैसे ही फ़िट होता है जैसा वह है। हाथ-पैर धड़ से अलग रखें, और हाथ की गति चाहिए तो उँगलियाँ आपस में न जुड़ी हों।"},
     },
     "dog": {
         "labels": {"en": "dog and wolf", "ru": "собака и wolf", "zh": "狗和狼", "hi": "dog और wolf"},
@@ -12172,6 +12268,44 @@ def _rig_article_localized_urls(base: str, rig_key: str) -> Dict[str, str]:
     }
 
 
+# Site refresh to V3 (2026-10-16): the per-animal pages describe the V3 conveyor and the category the engine
+# really uses: quadruped for most animals, the equine template for horse and deer, a low-body quadruped for the
+# turtle (there is no turtle template), biped for the humanoid page. Value: (short phrase, one sentence).
+RIG_ARTICLE_V3_CATEGORIES: Dict[str, Dict[str, Tuple[str, str]]] = {
+    "quadruped": {
+        "en": ("quadruped category", "The rig uses the quadruped category, with a skeleton template, fit rules, skin rules and a clip library made for four-legged bodies."),
+        "ru": ("категория четвероногих", "Риг строится в категории четвероногих: свой шаблон скелета, правила подгонки и скина и библиотека клипов для четвероногих тел."),
+        "zh": ("四足动物类别", "绑定使用四足动物类别：拥有专为四足身体准备的骨架模板、拟合规则、蒙皮规则和动画库。"),
+        "hi": ("चौपाए श्रेणी", "रिग चौपाए श्रेणी का इस्तेमाल करता है: चार पैरों वाले शरीरों के लिए बना कंकाल टेम्पलेट, फ़िट नियम, स्किन नियम और क्लिप लाइब्रेरी।"),
+    },
+    "equine": {
+        "en": ("equine template", "The rig uses the equine template: scapula, elbow, mid-neck and leg profile joints, and planted-hoof gaits (walk, trot, gallop) that keep the hooves on the ground."),
+        "ru": ("шаблон лошадиных", "Риг строится по шаблону лошадиных: лопатка, локоть, середина шеи и профильные суставы ноги, а походки (шаг, рысь, галоп) держат копыта на земле."),
+        "zh": ("马科模板", "绑定使用马科模板：肩胛、肘部、颈中段和腿部轮廓关节，步态（行走、小跑、飞奔）让蹄子始终踩稳地面。"),
+        "hi": ("अश्व टेम्पलेट", "रिग अश्व टेम्पलेट का इस्तेमाल करता है: स्कैपुला, कोहनी, गर्दन का मध्य और पैर की रूपरेखा वाले जोड़, और चालें (चलना, ट्रॉट, गैलप) जिनमें खुर ज़मीन पर टिके रहते हैं।"),
+    },
+    "turtle": {
+        "en": ("low-body quadruped rig", "The rig is a low-body quadruped: four short legs, a neck and a tail around a rigid shell volume. There is no separate turtle template."),
+        "ru": ("риг низкого четвероногого", "Риг строится как у низкого четвероногого: четыре короткие ноги, шея и хвост вокруг жёсткого объёма панциря. Отдельного шаблона черепахи нет."),
+        "zh": ("低身体四足动物绑定", "绑定按低身体四足动物构建：四条短腿、脖子和尾巴围绕刚性的龟壳体积。没有单独的乌龟模板。"),
+        "hi": ("कम ऊँचाई वाले चौपाए का रिग", "रिग कम ऊँचाई वाले चौपाए की तरह बनता है: कठोर कवच के आसपास चार छोटे पैर, गर्दन और पूँछ। कछुए का अलग टेम्पलेट नहीं है।"),
+    },
+    "biped": {
+        "en": ("biped category", "The rig uses the biped category, which also covers primates. If the legs do not stand side by side, the leg on the floor sets the bone lengths for the other leg."),
+        "ru": ("категория двуногих", "Риг строится в категории двуногих, куда входят и приматы. Если ноги стоят не рядом, нога на полу задаёт длины костей для другой ноги."),
+        "zh": ("双足类别", "绑定使用双足类别，灵长类也属于此类。如果双腿没有并排站立，踩在地面上的那条腿会决定另一条腿的骨骼长度。"),
+        "hi": ("द्विपाद श्रेणी", "रिग द्विपाद श्रेणी का इस्तेमाल करता है, जिसमें प्राइमेट भी आते हैं। अगर पैर साथ-साथ नहीं खड़े, तो ज़मीन पर टिका पैर दूसरे पैर की हड्डियों की लंबाई तय करता है।"),
+    },
+}
+RIG_ARTICLE_V3_CATEGORY_BY_KEY: Dict[str, str] = {"horse": "equine", "deer": "equine", "turtle": "turtle", "humanoid": "biped"}
+
+
+def _rig_article_v3_category(rig_key: str, lang: str) -> Tuple[str, str]:
+    """V3 rig category of a per-animal page: (short phrase, one sentence) in the page language."""
+    texts = RIG_ARTICLE_V3_CATEGORIES[RIG_ARTICLE_V3_CATEGORY_BY_KEY.get(rig_key, "quadruped")]
+    return texts.get(lang, texts["en"])
+
+
 def _rig_article_text(rig_key: str, lang: str) -> Dict[str, Any]:
     ui = RIG_ARTICLE_LANGS.get(lang, RIG_ARTICLE_LANGS["en"])
     info = RIG_ARTICLE_TYPES[rig_key]
@@ -12179,53 +12313,54 @@ def _rig_article_text(rig_key: str, lang: str) -> Dict[str, Any]:
     shape = info["shape"].get(lang, info["shape"]["en"])
     use = info["use"].get(lang, info["use"]["en"])
     tip = info["tip"].get(lang, info["tip"]["en"])
+    cat_short, cat_line = _rig_article_v3_category(rig_key, lang)
     if lang == "ru":
         title = f"AI auto rigging online: {label} | AutoRig.online"
-        description = f"Онлайн AI-риггинг для типа {label}: загрузите GLB, FBX или OBJ и получите rigged модель с animation-ready preview для Blender, Unity и Unreal Engine."
+        description = f"Онлайн авториг для типа «{label}»: риг за секунды, клипы сразу, вьювер с режимом чертежа, экспорт GLB/FBX для Blender, Unity и Unreal."
         h1 = f"AI auto rigging online: {label}"
-        lead = f"AutoRig.online автоматически строит rig для {label}: {shape}. Страница сфокусирована на задачах, где пользователю нужно быстро получить готовый rig онлайн без ручной расстановки костей."
-        workflow = f"Загрузите GLB, FBX или OBJ, дождитесь обработки, откройте task preview и скачайте результат для Blender, Unity, Unreal Engine или web viewers. Такой workflow подходит для {use}."
+        lead = f"AutoRig.online ригует модели «{label}» одним конвейером: {shape}. {cat_line} Скелет и скин строятся за секунды, клипы анимации сразу переносятся на модель, а всё открывается в одном вьювере."
+        workflow = f"Перетащите GLB, FBX, OBJ, ZIP с текстурами или картинку в зону загрузки. Быстрый риг строит скелет и скин за секунды, а клипы из библиотеки категории сразу переносятся на модель. Вьювер предлагает подтвердить скелет (это никогда не обязательно), создаёт текстуры для модели без них и запускает проверки качества в фоне. Затем скачайте GLB, FBX, USDZ, ZIP, пакет Unity или файл Blender для Blender, Unity, Unreal Engine или веба. Процесс рассчитан на {use}."
         prep = tip
         faq = [
-            (f"Можно ли сделать auto rig для {label} онлайн?", f"Да. AutoRig.online принимает GLB, FBX и OBJ модели и запускает AI-assisted rigging workflow для {label}, если геометрия подходит для выбранного типа."),
-            (f"Какие файлы подходят для {label} rigging?", "Лучше всего подходят чистые GLB, FBX или OBJ модели с разделёнными конечностями, читаемым силуэтом и достаточной topology в местах сгиба."),
-            (f"Можно ли использовать результат в Blender, Unity и Unreal Engine?", "Да. После обработки можно открыть preview, скачать rigged файлы и использовать их в Blender, Unity, Unreal Engine и других 3D pipelines."),
+            (f"Можно ли сделать auto rig для {label} онлайн?", f"Да. Загрузите GLB, FBX или OBJ, ZIP с текстурами или картинку. Движок сам выбирает категорию рига ({cat_short}), за секунды строит скелет и скин и сразу переносит клипы анимации."),
+            (f"Какие файлы подходят для {label} rigging?", "Ничего особенного. Риг подгоняется под модель как есть, в любой позе. Чистый силуэт, разделённые конечности и достаточная топология у суставов дают самый чистый результат, а вьювер предлагает подтвердить скелет, что можно пропустить."),
+            (f"Можно ли использовать результат в Blender, Unity и Unreal Engine?", "Да. Скачайте GLB, FBX, USDZ, ZIP, пакет Unity или файл Blender из вьювера и используйте их в обычных 3D-пайплайнах и пайплайнах игр."),
         ]
     elif lang == "zh":
         title = f"{label} AI 在线自动绑定 | AutoRig.online"
-        description = f"面向 {label} 的在线 AI 自动绑定。上传 GLB、FBX 或 OBJ，生成适合 Blender、Unity、Unreal Engine 和网页预览的可动画 rigged 模型。"
+        description = f"在线为{label}自动绑定：几秒内完成绑定，动画片段即时生成，查看器带蓝图模式，可导出 GLB/FBX 用于 Blender、Unity 和 Unreal。"
         h1 = f"{label} AI 在线自动绑定"
-        lead = f"AutoRig.online 为 {label} 自动生成 rig：{shape}。此页面面向需要在线自动绑定特定动物或模型类型的创作者。"
-        workflow = f"上传 GLB、FBX 或 OBJ，等待处理，打开 task preview，并导出到 Blender、Unity、Unreal Engine 或网页查看器。该流程适合 {use}。"
+        lead = f"AutoRig.online 用一条流水线为 {label} 完成绑定：{shape}。{cat_line}骨架和蒙皮在几秒内生成，动画片段立即重定向，所有内容在同一个查看器中打开。"
+        workflow = f"把 GLB、FBX、OBJ、带贴图的 ZIP 或一张图片放入上传区。快速绑定在几秒内生成骨架和蒙皮，类别动画库中的片段立即重定向。查看器会提示确认骨架（绝不强制），为没有贴图的模型补全贴图，并在后台运行质量检查。之后可下载 GLB、FBX、USDZ、ZIP、Unity 包或 Blender 文件，用于 Blender、Unity、Unreal Engine 或网页。该流程适合 {use}。"
         prep = tip
         faq = [
-            (f"可以在线自动绑定 {label} 吗？", f"可以。AutoRig.online 支持上传 GLB、FBX 或 OBJ，并为 {label} 运行 AI-assisted rigging workflow。"),
-            (f"{label} 绑定前模型应该怎样准备？", "保持轮廓清晰、四肢分离，并在关节和弯曲区域保留足够拓扑。"),
-            ("结果可以用于 Blender、Unity 和 Unreal Engine 吗？", "可以。处理完成后可打开 preview，下载 rigged 文件，并用于常见 3D 和游戏开发流程。"),
+            (f"可以在线自动绑定 {label} 吗？", f"可以。上传 GLB、FBX 或 OBJ、带贴图的 ZIP 或一张图片。引擎会选择绑定类别（{cat_short}），几秒内生成骨架和蒙皮，并立即重定向动画片段。"),
+            (f"{label} 绑定前模型应该怎样准备？", "不需要特别准备。绑定会按模型当前的样子、在任意姿势下拟合。干净的轮廓、分离的四肢和关节周围足够的拓扑会得到最干净的结果，查看器会提示确认骨架，你也可以跳过。"),
+            ("结果可以用于 Blender、Unity 和 Unreal Engine 吗？", "可以。从查看器下载 GLB、FBX、USDZ、ZIP、Unity 包或 Blender 文件，并用于常见的 3D 和游戏开发流程。"),
         ]
     elif lang == "hi":
         title = f"{label} AI auto rigging online | AutoRig.online"
-        description = f"{label} के लिए online AI auto rigging. GLB, FBX या OBJ upload करें और Blender, Unity, Unreal Engine तथा web previews के लिए rigged animation-ready model export करें."
+        description = f"{label} को online auto rig करें: सेकंडों में रिग, तुरंत क्लिप, ब्लूप्रिंट मोड वाला व्यूअर, Blender, Unity और Unreal के लिए GLB/FBX एक्सपोर्ट।"
         h1 = f"{label} AI auto rigging online"
-        lead = f"AutoRig.online {label} के लिए automatically rig बनाता है: {shape}. यह page उन creators के लिए है जिन्हें specific rig type के लिए online automatic rigging चाहिए."
-        workflow = f"GLB, FBX या OBJ upload करें, processing complete होने दें, task preview खोलें, और Blender, Unity, Unreal Engine या web viewers के लिए result download करें. यह workflow {use} के लिए useful है."
+        lead = f"AutoRig.online {label} मॉडल को एक ही कन्वेयर पर रिग करता है: {shape}। {cat_line} कंकाल और स्किन सेकंडों में बनते हैं, एनिमेशन क्लिप तुरंत रीटारगेट होते हैं, और सब कुछ एक व्यूअर में खुलता है।"
+        workflow = f"GLB, FBX, OBJ, टेक्सचर वाली ZIP या एक तस्वीर अपलोड ज़ोन में डालें। तेज़ रिग सेकंडों में कंकाल और स्किन बनाता है, और श्रेणी की लाइब्रेरी के क्लिप तुरंत रीटारगेट होते हैं। व्यूअर कंकाल की पुष्टि का सुझाव देता है (यह कभी अनिवार्य नहीं), बिना टेक्सचर वाले मॉडल को टेक्सचर देता है और बैकग्राउंड में गुणवत्ता जाँच चलाता है। फिर Blender, Unity, Unreal Engine या वेब के लिए GLB, FBX, USDZ, ZIP, Unity पैकेज या Blender फ़ाइल डाउनलोड करें। यह प्रक्रिया {use} के लिए बनी है।"
         prep = tip
         faq = [
-            (f"क्या {label} को online auto rig किया जा सकता है?", f"हाँ. AutoRig.online GLB, FBX और OBJ uploads लेकर {label} के लिए AI-assisted rigging workflow चलाता है."),
-            (f"{label} rigging के लिए model कैसे prepare करें?", "Clear silhouette, separated limbs और bending areas में enough topology रखें ताकि animation preview साफ रहे।"),
-            ("क्या result Blender, Unity और Unreal Engine में काम करेगा?", "हाँ. Processing के बाद preview खोलें, rigged files download करें, और उन्हें common 3D/game pipelines में use करें।"),
+            (f"क्या {label} को online auto rig किया जा सकता है?", f"हाँ। GLB, FBX या OBJ, टेक्सचर वाली ZIP या एक तस्वीर अपलोड करें। इंजन रिग श्रेणी चुनता है ({cat_short}), सेकंडों में कंकाल और स्किन बनाता है और एनिमेशन क्लिप तुरंत रीटारगेट करता है।"),
+            (f"{label} rigging के लिए model कैसे prepare करें?", "कुछ ख़ास नहीं। रिग मॉडल पर वैसे ही फ़िट होता है जैसा वह है, किसी भी पोज़ में। साफ़ सिल्हूट, अलग अंग और जोड़ों के आसपास पर्याप्त टोपोलॉजी सबसे साफ़ नतीजा देती है, और व्यूअर कंकाल की पुष्टि का सुझाव देता है, जिसे आप छोड़ सकते हैं।"),
+            ("क्या result Blender, Unity और Unreal Engine में काम करेगा?", "हाँ। व्यूअर से GLB, FBX, USDZ, ZIP, Unity पैकेज या Blender फ़ाइल डाउनलोड करें और उन्हें सामान्य 3D और गेम डेवलपमेंट पाइपलाइन में इस्तेमाल करें।"),
         ]
     else:
         title = f"{label.title()} AI auto rigging online | AutoRig.online"
-        description = f"Online AI auto rigging for {label} 3D models. Upload GLB, FBX, or OBJ and export a rigged, animation-ready result for Blender, Unity, Unreal Engine, and web previews."
+        description = f"Auto rig a {label} 3D model online: rig in seconds, clips at once, a viewer with blueprint mode, GLB/FBX exports for Blender, Unity and Unreal."
         h1 = f"{label.title()} AI auto rigging online"
-        lead = f"AutoRig.online automatically builds rigs for {label} models: {shape}. This page targets creators who need a fast online workflow for a specific rig type, not only generic humanoid character rigging."
-        workflow = f"Upload a GLB, FBX, or OBJ file, wait for the AI-assisted rigging task, open the task preview, and export the rigged result for Blender, Unity, Unreal Engine, or web viewers. The workflow is designed for {use}."
+        lead = f"AutoRig.online rigs {label} models on one conveyor: {shape}. {cat_line} The skeleton and the skin are built in seconds, animation clips are retargeted at once, and everything opens in one viewer."
+        workflow = f"Drop a GLB, FBX, OBJ, a ZIP with textures or a picture on the upload zone. The fast rig builds the skeleton and the skin in seconds, and clips from the category library are retargeted at once. The viewer offers to confirm the skeleton, which is never required, textures a model that has none, and runs quality checks in the background. Then download GLB, FBX, USDZ, a ZIP, a Unity package or a Blender file for Blender, Unity, Unreal Engine or the web. The workflow is designed for {use}."
         prep = tip
         faq = [
-            (f"Can I auto rig a {label} model online?", f"Yes. AutoRig.online accepts GLB, FBX, and OBJ uploads and runs an AI-assisted rigging workflow for {label} models when the geometry matches the supported rig type."),
-            (f"What should I prepare before {label} auto rigging?", "Use a clean silhouette, separated limbs, and enough topology around bending areas so the generated rig and animation preview can deform cleanly."),
-            ("Can I use the result in Blender, Unity, and Unreal Engine?", "Yes. After processing, open the preview, download the rigged files, and use them in common 3D and game development pipelines."),
+            (f"Can I auto rig a {label} model online?", f"Yes. Upload a GLB, FBX or OBJ, a ZIP with textures or a picture. The engine picks the rig category ({cat_short}), builds the skeleton and the skin in seconds and retargets animation clips at once."),
+            (f"What should I prepare before {label} auto rigging?", "Nothing special. The rig is fitted to the model as it is, in any pose. A clean silhouette, separated limbs and enough topology around the joints give the cleanest result, and the viewer offers to confirm the skeleton, which you can skip."),
+            ("Can I use the result in Blender, Unity, and Unreal Engine?", "Yes. Download GLB, FBX, USDZ, a ZIP, a Unity package or a Blender file from the viewer and use them in common 3D and game development pipelines."),
         ]
     return {
         "title": title,
@@ -12254,9 +12389,9 @@ def _rig_article_text(rig_key: str, lang: str) -> Dict[str, Any]:
 
 async def _rig_article_examples(db: AsyncSession, rig_key: str, limit: int = 6) -> List[Task]:
     base_conditions = [
+        Task.is_public.is_(True),
         Task.status == "done",
         Task.video_ready == True,
-        Task.is_public.is_(True),
         _gallery_task_has_poster_sql(),
         or_(Task.content_rating.is_(None), Task.content_rating != "adult"),
     ]
@@ -12427,7 +12562,7 @@ def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> st
                             <img src="{html.escape(static_example["image"], quote=True)}" alt="{static_title}" loading="lazy" width="640" height="360">
                         </span>
                         <span class="rig-article-example-title">{static_title}</span>
-                        <span class="rig-article-example-link">Open V2 animal rig examples</span>
+                        <span class="rig-article-example-link">Open animal rig examples</span>
                     </a>"""
 
     faq_html = "\n".join(
@@ -12642,7 +12777,7 @@ async def _proxy_model_file(
     
     # Large ZIP bundles: allow long reads from worker (nginx should use long proxy_read_timeout too).
     allow_redirects = required_snapshot is None
-    client = httpx.AsyncClient(
+    client = worker_http_client(
         timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=60.0),
         follow_redirects=allow_redirects,
     )
@@ -13016,6 +13151,7 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
     r = await db.execute(
         select(Task).where(
             Task.status == "processing",
+            Task.pipeline_kind != "v3",
             Task.preemption_state.notin_(("requested", "stopping")),
         )
     )
@@ -13336,6 +13472,59 @@ async def ensure_disk_headroom_for_new_task(
     return summary
 
 
+# Downloads · V3 (owner bug 2026-10-12: from 19:24 to 05:55 UTC every upload got 503 and nobody knew): one DEV
+# alert when the disk guard starts refusing new work, one when it lets work in again. The episode lives in a file so
+# a restart neither repeats nor loses it.
+NEW_WORK_PAUSE_STATE = Path(os.getenv("AUTORIG_NEW_WORK_PAUSE_STATE", "/srv/autorig/data/var/funnel/new-work-pause.json"))
+
+
+def _dev_alert_text(text: str) -> None:
+    import urllib.request
+
+    boundary = "pause" + os.urandom(8).hex()
+    parts = []
+    for name, value in (("agent", "Downloads · V3"), ("project", "AutoRig V3"), ("kind", "text"), ("caption", text)):
+        parts.append((f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n"
+                      f"Content-Type: text/plain; charset=utf-8\r\n\r\n").encode("utf-8") + value.encode("utf-8") + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    req = urllib.request.Request(os.getenv("AUTORIG_DEV_SEND", "https://autorig.online/dev/api/send"),
+                                 data=b"".join(parts), method="POST",
+                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                                          "User-Agent": "autorig-storage/1"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            print(f"[Request Disk] DEV alert sent ({resp.status})")
+    except Exception as exc:
+        print(f"[Request Disk] DEV alert failed: {exc}")
+
+
+def _new_work_pause_event(paused: bool, reason: str = "") -> None:
+    """Called on every guarded request: alerts only when the paused/open state changes."""
+    try:
+        exists = NEW_WORK_PAUSE_STATE.is_file()
+        if paused and not exists:
+            NEW_WORK_PAUSE_STATE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = NEW_WORK_PAUSE_STATE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"since": datetime.utcnow().isoformat() + "Z", "reason": reason[:300]}))
+            os.replace(tmp, NEW_WORK_PAUSE_STATE)
+            text = (f"🛑 AutoRig: new tasks are PAUSED by the disk guard — every upload gets 503 until it clears. "
+                    f"{reason[:240]}")
+        elif not paused and exists:
+            try:
+                since = json.loads(NEW_WORK_PAUSE_STATE.read_text()).get("since", "?")
+            except (OSError, ValueError):
+                since = "?"
+            NEW_WORK_PAUSE_STATE.unlink(missing_ok=True)
+            text = f"✅ AutoRig: new tasks accepted again (paused since {since})."
+        else:
+            return
+        import threading
+
+        threading.Thread(target=_dev_alert_text, args=(text,), daemon=True).start()
+    except Exception as exc:  # an alert never breaks the request path
+        print(f"[Request Disk] pause alert bookkeeping failed: {exc}")
+
+
 async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dict[str, Any]:
     """
     Request-path disk guard. It may remove regenerable bundle ZIPs, stale terminal
@@ -13346,19 +13535,16 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
         await asyncio.to_thread(run_artifact_cache_retention)
         cache_block = artifact_creation_block_reason()
     if cache_block:
-        free_gb = shutil.disk_usage("/").free / (1024**3)
-        if free_gb < NEW_TASK_MIN_FREE_GB:
-            raise HTTPException(
-                status_code=503,
-                detail=cache_block,
-                headers={"Retry-After": "600"},
-            )
-        # The artifact marker pauses background cache writes.  It must not
-        # reject an interactive task while the filesystem is above the hard
-        # 60 GB floor (for example after a stale marker survived a restart).
-        print(
-            f"[Request Disk] Ignoring background artifact-cache marker for "
-            f"{context}: {free_gb:.2f}GB free"
+        # The storage numbers are for the log; the visitor gets a sentence in their language
+        # (Localization V3: a Persian customer once saw this raw string in an alert).
+        print(f"[Request Disk] new work paused before {context}: {cache_block}")
+        _new_work_pause_event(True, f"artifact cache: {cache_block}")
+        from user_language import user_error_detail
+
+        raise HTTPException(
+            status_code=503,
+            detail=user_error_detail("storage_paused", retry_after_seconds=600),
+            headers={"Retry-After": "600"},
         )
     try:
         await enforce_task_cache_max_size(db)
@@ -13375,14 +13561,19 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
 
     free_gb = shutil.disk_usage("/").free / (1024**3)
     if free_gb < NEW_TASK_MIN_FREE_GB:
+        print(
+            f"[Request Disk] new work paused before {context}: {free_gb:.2f}GB free, "
+            f"target is {NEW_TASK_MIN_FREE_GB:.2f}GB"
+        )
+        _new_work_pause_event(True, f"free {free_gb:.1f} GB < {NEW_TASK_MIN_FREE_GB:.0f} GB")
+        from user_language import user_error_detail
+
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Server disk is under pressure. "
-                f"{free_gb:.2f}GB free, target is {NEW_TASK_MIN_FREE_GB:.2f}GB. "
-                "Please try again later."
-            ),
+            detail=user_error_detail("storage_paused", retry_after_seconds=600),
+            headers={"Retry-After": "600"},
         )
+    _new_work_pause_event(False)
     return result
 
 
@@ -13485,7 +13676,7 @@ async def _task_cache_dir_is_last_copy(db: AsyncSession, task_id: str) -> bool:
     if not urls:
         return False
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=8.0, follow_redirects=True) as client:
             return not await _probe_http_asset_reachable(client, urls[0])
     except Exception:
         # Undecidable. A file kept by mistake costs disk space; a file deleted
@@ -13728,7 +13919,6 @@ async def purge_gallery_upstream_dead_tasks(
         .where(
             Task.status == "done",
             Task.video_ready.is_(True),
-            Task.is_public.is_(True),
             _gallery_task_has_poster_sql(),
         )
         .order_by(Task.created_at.asc())
@@ -13740,7 +13930,7 @@ async def purge_gallery_upstream_dead_tasks(
         return {"deleted": 0, "scanned": 0, "upstream": True, "offset": offset}
 
     deleted = 0
-    async with httpx.AsyncClient() as client:
+    async with worker_http_client() as client:
         for task in rows:
             poster_url = resolve_poster_url_for_task(task)
             if not poster_url:
@@ -13841,7 +14031,7 @@ async def _get_cached_glb(
         # Bound the complete optional-artifact transfer so a slow trickle cannot
         # block the valid original GLB fallback indefinitely.
         async with asyncio.timeout(timeout_seconds):
-            async with httpx.AsyncClient() as client:
+            async with worker_http_client() as client:
                 async with client.stream(
                     "GET",
                     url,
@@ -13881,14 +14071,9 @@ async def _get_cached_glb(
         return None
 
 
-_CACHED_SOURCE_GLB_MAX_BYTES = 1024 * 1024 * 1024
-_CACHED_RIG_JSON_MAX_BYTES = 2 * 1024 * 1024
-
-
 @app.get("/api/task/{task_id}/model.glb")
 async def api_proxy_model_glb(
     task_id: str,
-    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy the main model GLB file from worker"""
@@ -13914,95 +14099,8 @@ async def api_proxy_model_glb(
             media_type="model/gltf-binary",
             as_attachment=False,
         )
-
-    archived_model = lookup_cached_archive_member(
-        task_id,
-        basename=f"{task.guid}.glb",
-        max_uncompressed_bytes=_CACHED_SOURCE_GLB_MAX_BYTES,
-    )
-    if archived_model:
-        header = bytes(archived_model.get("prefix") or b"")
-        declared_size = int(archived_model.get("member_size") or 0)
-        if (
-            len(header) >= 12
-            and header[:4] == b"glTF"
-            and int.from_bytes(header[4:8], "little") == 2
-            and int.from_bytes(header[8:12], "little") == declared_size
-        ):
-            return _cached_archive_member_response(
-                archived_model,
-                request,
-                filename=f"{task_id}_model.glb",
-                media_type="model/gltf-binary",
-            )
     
     return await _proxy_model_file(model_url, f"{task_id}_model.glb")
-
-
-@app.get("/api/task/{task_id}/rig.json")
-async def api_task_rig_json(
-    task_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Return converter rig metadata from durable central storage."""
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if task.status != "done" or not task.guid:
-        raise HTTPException(status_code=404, detail="Rig metadata is not available yet")
-
-    rig_name = f"{task.guid}_rig.json"
-    durable_rig = lookup_cached_artifact(task_id, basename=rig_name)
-    if durable_rig:
-        return _x_accel_artifact_response(
-            durable_rig,
-            filename=rig_name,
-            media_type="application/json",
-            as_attachment=False,
-        )
-    archived_rig = lookup_cached_archive_member(
-        task_id,
-        basename=rig_name,
-        max_uncompressed_bytes=_CACHED_RIG_JSON_MAX_BYTES,
-    )
-    if not archived_rig:
-        raise HTTPException(status_code=404, detail="Rig metadata is not available")
-    try:
-        raw = read_cached_archive_member(
-            archived_rig,
-            max_bytes=_CACHED_RIG_JSON_MAX_BYTES,
-        )
-        payload = json.loads(raw.decode("utf-8"))
-    except (OSError, RuntimeError, UnicodeDecodeError, ValueError, zipfile.BadZipFile) as exc:
-        print(f"[ArtifactCache] Invalid cached rig metadata for task {task_id}: {exc}")
-        raise HTTPException(status_code=503, detail="Cached rig metadata is invalid") from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=503, detail="Cached rig metadata is invalid")
-    task_collection_guid = str(getattr(task, "collection_guid", None) or "").strip()
-    if task_collection_guid and str(payload.get("collection_guid") or "").strip() != task_collection_guid:
-        raise HTTPException(status_code=503, detail="Cached rig collection metadata does not match task")
-    task_collection_index = getattr(task, "collection_index", None)
-    if task_collection_index is not None:
-        try:
-            index_matches = int(payload.get("collection_index")) == int(task_collection_index)
-        except (TypeError, ValueError):
-            index_matches = False
-        if not index_matches:
-            raise HTTPException(status_code=503, detail="Cached rig collection metadata does not match task")
-    etag = str(archived_rig.get("etag") or "")
-    if etag and _request_etag_matches(request, etag):
-        return Response(status_code=304, headers={"ETag": etag})
-    headers = {
-        "Content-Disposition": f'inline; filename="{rig_name}"',
-        "Cache-Control": "public, max-age=86400",
-        "Access-Control-Allow-Origin": "*",
-        "X-Content-Type-Options": "nosniff",
-        "X-Artifact-Cache": "archive-member",
-    }
-    if etag:
-        headers["ETag"] = etag
-    return Response(content=raw, media_type="application/json", headers=headers)
 
 
 async def _resolve_task_matrix_animation_artifact(
@@ -14076,7 +14174,7 @@ MAX_STRICT_ANIMATION_GLB_BYTES = 512 * 1024 * 1024
 
 async def _fetch_strict_animation_manifest(artifact, version) -> Tuple[dict, str]:
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=8.0, follow_redirects=True) as client:
             upstream = await client.get(artifact.animation_manifest_url)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Animation manifest source unavailable: {exc}") from exc
@@ -14139,7 +14237,7 @@ async def _strict_animation_glb_response(task_id: str, artifact, manifest: dict,
 
     temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with worker_http_client(follow_redirects=True) as client:
             async with client.stream(
                 "GET",
                 artifact.animation_glb_url,
@@ -14301,27 +14399,6 @@ async def api_proxy_animations_glb(
             cache_path.unlink()
         except OSError:
             pass
-
-    # The durable cache may still hold the worker's 100k/10k/1k animation GLB
-    # after the converter has evicted its public directory. Prefer the highest
-    # available LOD and serve it through nginx without copying it back.
-    cached_animation_name = f"{task.guid}_all_animations.glb"
-    for lod in ("100k", "10k", "1k"):
-        durable_animations = lookup_cached_artifact(
-            task_id,
-            role="primary_glb",
-            basename=cached_animation_name,
-            relative_path_fragment=f"_{lod}/",
-        )
-        if durable_animations and _validate_viewer_animation_glb_file(
-            Path(durable_animations["path"])
-        ):
-            return _x_accel_artifact_response(
-                durable_animations,
-                filename=f"{task_id}_animations.glb",
-                media_type="model/gltf-binary",
-                as_attachment=False,
-            )
     
     # Try to find animations GLB in ready_urls (must end with .glb, not .blend).
     animations_url = _find_file_in_ready_urls(task.ready_urls or [], "_all_animations", ".glb")
@@ -14432,7 +14509,7 @@ async def api_proxy_animations_fbx(
                 },
             )
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with worker_http_client(follow_redirects=True) as client:
             upstream = await client.get(
                 animations_url,
                 headers={"Range": range_header, "Accept-Encoding": "identity"},
@@ -14664,18 +14741,71 @@ async def api_proxy_blueprint_model_glb(
     raise HTTPException(status_code=404, detail="Blueprint model not available yet")
 
 
+# Gallery · V3 (2026-10-11): one V3 capture per public task, made by autorig-gallery-poster
+# (deploy/gallery-poster/gallery_poster.py). /thumb/<task> serves it first, so the homepage gallery, /gallery, the
+# author pages, the chat cards and og:image all show the same viewer-style picture; a task without one keeps its
+# old poster. The URL of a capture carries ?v=<mtime> so a new capture is never hidden by a browser cache.
+V3_POSTER_DIR = Path(os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/posters-v3"))
+_V3_POSTER_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def v3_poster_path(task_id: str) -> Optional[Path]:
+    if not _V3_POSTER_ID.match(str(task_id or "")):
+        return None
+    path = V3_POSTER_DIR / f"{task_id}.jpg"
+    try:
+        return path if path.stat().st_size > 8000 else None
+    except OSError:
+        return None
+
+
+SMALL_POSTER_DIR = Path(os.getenv("AUTORIG_SMALL_POSTER_DIR", "/srv/autorig/data/static/posters-s"))
+
+
+def thumb_url_for(task_id: str) -> str:
+    # Gallery perf (2026-10-15): cards get the small static WebP poster (nginx /pw/, immutable, ?v=<mtime>)
+    # made by autorig-gallery-small-poster; /thumb stays the full-size picture (og:image, task page).
+    if _V3_POSTER_ID.match(str(task_id or "")):
+        try:
+            small = SMALL_POSTER_DIR / f"{task_id}.webp"
+            st = small.stat()
+            if st.st_size > 500:
+                return f"/pw/{task_id}.webp?v={int(st.st_mtime):x}"
+        except OSError:
+            pass
+    path = v3_poster_path(task_id)
+    if path is None:
+        return f"/thumb/{task_id}"
+    try:
+        return f"/thumb/{task_id}?v={int(path.stat().st_mtime):x}"
+    except OSError:
+        return f"/thumb/{task_id}"
+
+
 @app.head("/thumb/{task_id}")
 @app.get("/thumb/{task_id}")
 @app.head("/api/thumb/{task_id}")
 @app.get("/api/thumb/{task_id}")
 async def api_proxy_thumb(
     task_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy video poster/thumbnail image from worker"""
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    v3_poster = v3_poster_path(task_id)
+    if v3_poster is not None and getattr(task, "is_public", True) is not False \
+            and getattr(task, "content_rating", None) != "adult":
+        return FileResponse(
+            v3_poster,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=604800, immutable" if request.query_params.get("v")
+                     else "public, max-age=300, must-revalidate",
+                     "Access-Control-Allow-Origin": "*"},
+        )
 
     poster_url = resolve_poster_url_for_task(task)
     if not poster_url:
@@ -14694,7 +14824,7 @@ async def api_proxy_thumb(
     
     # Download and return the image (not streaming - more compatible with HTTP/2)
     try:
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             response = await client.get(poster_url, timeout=30.0, follow_redirects=True)
             if response.status_code != 200:
                 raise HTTPException(status_code=404, detail="Thumbnail not available")
@@ -14809,7 +14939,7 @@ async def api_free3d_search(
     for attempt in range(3):
         timeout = 8.0 if attempt == 0 else 12.0
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with worker_http_client(timeout=timeout) as client:
                 resp = await client.get(f"{FREE3D_BASE_URL}{endpoint}", params=params)
                 resp.raise_for_status()
                 payload = resp.json()
@@ -14875,7 +15005,7 @@ async def api_free3d_image(guid: str, filename: str):
     url = f"{FREE3D_BASE_URL}/data/{guid}/{filename}"
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with worker_http_client(timeout=30.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             
@@ -14899,7 +15029,7 @@ async def api_free3d_glb(guid: str, filename: str):
     url = f"{FREE3D_BASE_URL}/data/{guid}/{filename}"
     
     async def stream_file():
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with worker_http_client(timeout=120.0) as client:
             async with client.stream("GET", url) as resp:
                 if resp.status_code != 200:
                     return
@@ -15582,7 +15712,7 @@ async def _viewer_theme_select_with_openai(image_data_url: str, themes: List[Dic
 
     try:
 
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=45.0, follow_redirects=True) as client:
 
             resp = await client.post(api_url, headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json=payload)
 
@@ -15813,7 +15943,15 @@ async def api_get_viewer_default_settings():
     data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
     if not data:
         data = DEFAULT_VIEWER_SETTINGS
-    return data
+    def _no_admin_email(obj):
+        # the admin's e-mail (`saved_by`, also nested) is not public (2026-10-11)
+        if isinstance(obj, dict):
+            return {k: _no_admin_email(v) for k, v in obj.items() if k != "saved_by"}
+        if isinstance(obj, list):
+            return [_no_admin_email(v) for v in obj]
+        return obj
+
+    return _no_admin_email(data)
 
 
 @app.post("/api/admin/viewer-default-settings")
@@ -16104,6 +16242,15 @@ async def api_apply_task_animation_correction_export_result(
     return {"ok": True, "taskId": task_id, "revision": revision, "status": status}
 
 
+def _public_viewer_settings(obj):
+    """Viewer settings as visitors may see them: the admin's e-mail (`saved_by`, also nested) is dropped (2026-10-11)."""
+    if isinstance(obj, dict):
+        return {k: _public_viewer_settings(v) for k, v in obj.items() if k != "saved_by"}
+    if isinstance(obj, list):
+        return [_public_viewer_settings(v) for v in obj]
+    return obj
+
+
 @app.get("/api/task/{task_id}/viewer-settings")
 async def api_get_task_viewer_settings(
     task_id: str,
@@ -16136,7 +16283,7 @@ async def api_get_task_viewer_settings(
                 global_camera = _read_global_viewer_camera_preset()
                 if global_camera:
                     data = {**data, "camera": global_camera}
-                return data
+                return _public_viewer_settings(data)
         except Exception:
             # Corrupt JSON in DB: ignore and fallback to defaults.
             pass
@@ -16144,7 +16291,7 @@ async def api_get_task_viewer_settings(
     data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
     if not data:
         data = DEFAULT_VIEWER_SETTINGS
-    return data
+    return _public_viewer_settings(data)
 
 
 @app.post("/api/task/{task_id}/viewer-settings")
@@ -16263,7 +16410,7 @@ async def api_proxy_face_rig_analyze_head(
                 ))
 
             timeout = httpx.Timeout(connect=20.0, read=240.0, write=240.0, pool=20.0)
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with worker_http_client(timeout=timeout, follow_redirects=True) as client:
                 upstream = await client.post(
                     FACE_RIG_ANALYZE_HEAD_PROXY_URL,
                     data={"metadata": metadata},
@@ -16380,22 +16527,8 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
     """Build the verified cache contract from task URLs and model-files."""
     candidates: List[ArtifactSource] = []
 
-    declared_task_urls = list(dict.fromkeys(
-        [
-            *(task.ready_urls or []),
-            *(task.output_urls or []),
-        ]
-    ))
     bundle_url = resolve_worker_full_bundle_zip_url(task)
-    bundle_is_declared = bool(
-        bundle_url
-        and any(
-            str(value or "").strip() == str(bundle_url).strip()
-            for value in declared_task_urls
-            if str(value or "").strip()
-        )
-    )
-    if bundle_is_declared:
+    if bundle_url:
         safe_guid = str(task.guid or task.id)
         candidates.append(
             ArtifactSource(
@@ -16410,20 +16543,13 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
 
     declared_urls = list(dict.fromkeys(
         [
-            *declared_task_urls,
+            *(task.ready_urls or []),
+            *(task.output_urls or []),
             str(task.viewer_prepared_glb_url or ""),
             str(task.viewer_animations_glb_url or ""),
             str(task.video_url or ""),
         ]
     ))
-    if bundle_is_declared:
-        # The full bundle already has a durable cache role/path above.  Current
-        # workers also declare the same ZIP in ready_urls; caching it again as
-        # a generic model file doubles both worker traffic and central storage.
-        declared_urls = [
-            value for value in declared_urls
-            if str(value or "").strip() != bundle_url
-        ]
     poster_url = resolve_poster_url_for_task(task)
     if poster_url:
         declared_urls.append(poster_url)
@@ -16489,7 +16615,6 @@ STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
     "fbx-auto-rig.html": "/fbx-auto-rig",
     "obj-auto-rig.html": "/obj-auto-rig",
     "how-it-works.html": "/how-it-works",
-    "rig.html": "/rig",
     "faq.html": "/faq",
     "terms-of-use.html": "/terms",
     "user-agreement.html": "/user-agreement",
@@ -16530,6 +16655,16 @@ STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
     "image-to-rigged-3d-character-ru.html": "/image-to-rigged-3d-character-ru",
     "image-to-rigged-3d-character-zh.html": "/image-to-rigged-3d-character-zh",
     "image-to-rigged-3d-character-hi.html": "/image-to-rigged-3d-character-hi",
+    # Deliberately absent from every sitemap: a saved composition is whatever
+    # its author wired up, and the library is for people who have the link.
+    "workflows.html": "/workflows",
+    # The support matrix names the farm's computers and what each one
+    # cost today: operational detail for whoever is running work on it,
+    # of no use in a search result.
+    "models.html": "/models",
+    # The farm's LoRA manager: operational, like /models, so it is left out
+    # of the sitemaps too.
+    "lora.html": "/lora",
 }
 
 PUBLIC_QUERY_NOINDEX_PATHS = {"/", "/gallery"}
@@ -16624,19 +16759,44 @@ def _inject_static_layout(html_content: str, canonical_path: Optional[str] = Non
             flags=re.IGNORECASE,
         )
 
+    # Localization V3: lang/dir, data-i18n text, hreflang and canonical for the request's language.
+    try:
+        from user_language import localize_page
+
+        html_content = localize_page(html_content, canonical_path)
+    except Exception as exc:
+        print(f"[i18n] localize_page: {type(exc).__name__}: {exc}")
+
+    # SEO · social (2026-10-11): fill the Open Graph / Twitter tags a page left out (seo_social.py).
+    try:
+        import seo_social
+
+        html_content = seo_social.complete_social_head(html_content)
+    except Exception as exc:
+        print(f"[seo] complete_social_head: {type(exc).__name__}: {exc}")
+
     return html_content
 
 
 def _static_html_response(filename: str) -> HTMLResponse:
-    path = STATIC_DIR / filename
+    # Follow the same immutable release switch as nginx. A static-only release
+    # must not require restarting active API connections to refresh its HTML.
+    live_static = Path("/srv/autorig/current/autorig-online/static")
+    path = (live_static if live_static.is_dir() else STATIC_DIR) / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Not found")
-    return HTMLResponse(
-        content=_inject_static_layout(
-            path.read_text(encoding="utf-8"),
-            canonical_path=STATIC_PAGE_CANONICAL_PATHS.get(filename),
-        )
+    content = _inject_static_layout(
+        path.read_text(encoding="utf-8"),
+        canonical_path=STATIC_PAGE_CANONICAL_PATHS.get(filename),
     )
+    try:
+        # Gallery perf (2026-10-15): a live JS/CSS edit must reach home/gallery at once, so every /static
+        # reference carries its current content stamp (as on /task) instead of a stale ?v= from the file.
+        import task_page_live as _tpl
+        content = _tpl.stamp_static_assets(content)
+    except Exception as exc:
+        print(f"[static] stamp: {type(exc).__name__}: {exc}")
+    return HTMLResponse(content=content)
 
 
 def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:
@@ -16761,7 +16921,7 @@ async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> 
     errors = []
     
     from urllib.parse import quote
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with worker_http_client(timeout=120.0) as client:
         for url in ready_urls:
             try:
                 filename = _clean_filename_for_cache(url, guid)
@@ -17174,6 +17334,83 @@ async def serve_llms_txt():
     raise HTTPException(status_code=404, detail="llms.txt not found")
 
 
+# Experimental V3 pipeline viewer.  The implementation lives in a separate
+# module so this hook stays reviewable in the heavily shared main.py.
+from v3_viewer_routes import build_v3_viewer_router
+
+app.include_router(
+    build_v3_viewer_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+        static_dir=STATIC_DIR,
+    )
+)
+
+# V3 conveyor read API for the task page: /api/task/{id}/v3-shell and /api/task/{id}/v3.
+from v3_runtime_mount import build_v3_read_router
+
+app.include_router(
+    build_v3_read_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+    )
+)
+
+# Task page V3 (Task page · V3 agent, 2026-10-10): the live task page, its
+# state API and the feed that opens a task's own models in the Unity viewer.
+import task_page_live
+from task_page_v3_routes import build_task_page_v3_router
+
+app.include_router(
+    build_task_page_v3_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+        glb_cache_dir=GLB_CACHE_DIR,
+    )
+)
+
+# Downloads · V3 (2026-10-10): the task page's download mode. V3 files only, exported on request
+# (FBX by the Blender export workers), every download and export behind the unlimited subscription.
+from task_downloads_v3 import build_task_downloads_v3_router
+
+# Conversion funnel (2026-10-12): page events and the per-day funnel report for admins.
+from funnel import build_funnel_router
+
+app.include_router(build_funnel_router(get_db=get_db, get_current_user=get_current_user, is_admin_email=is_admin_email))
+
+app.include_router(
+    build_task_downloads_v3_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+        glb_cache_dir=GLB_CACHE_DIR,
+        effective_anon_id=_effective_anon_id,
+        has_task_purchase=_has_full_task_download_purchase,   # a task pack unlock (owner 2026-10-16)
+        unlock_task=_ensure_full_task_unlock,
+    )
+)
+
+# Texturing · V3 (2026-10-11, «Every Model Gets Textures»): the texture status of a V3 task and the upload of the
+# missing texture / material files (or a ZIP) into the same task, which then runs a new attempt with them.
+from v3_textures import build_v3_textures_router
+
+app.include_router(
+    build_v3_textures_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+        effective_anon_id=_effective_anon_id,
+    )
+)
+
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -17188,33 +17425,85 @@ async def favicon_ico():
     return FileResponse(str(FAVICON_SVG), media_type="image/svg+xml")
 
 
+# Gallery · V3 (2026-10-11): the homepage's «Recent Rigged Models» cards are in the first HTML the server sends
+# (SEO-critical: crawlers see the links, the thumbnails and their alt text without running app.js). The same cards
+# as TaskCard.render() draws, newest first, cached for a minute; app.js replaces them with the live ones.
+_HOME_GALLERY_CACHE: Dict[str, Any] = {"at": 0.0, "cards": ""}
+
+
+async def _home_gallery_cards(request: Request, db: AsyncSession) -> str:
+    if _HOME_GALLERY_CACHE["cards"] and time.time() - float(_HOME_GALLERY_CACHE["at"]) < 60:
+        return str(_HOME_GALLERY_CACHE["cards"])
+    from database import Task
+    data = await api_get_gallery(request=request, page=1, per_page=12, sort="date", rig_type="all", author=None,
+                                 user=None, db=db)
+    ids = [item.task_id for item in data.items]
+    titles = {}
+    if ids:
+        rows = await db.execute(select(Task.id, Task.poster_llm_title).where(Task.id.in_(ids)))
+        titles = {row[0]: str(row[1] or "").strip()[:120] for row in rows.all()}
+    cards = []
+    for item in data.items:
+        title = titles.get(item.task_id) or "Rigged 3D character"
+        src = html.escape(item.thumbnail_url or f"/thumb/{item.task_id}", quote=True)
+        cards.append(
+            f'<a href="/task?id={item.task_id}" class="tc-card" data-task-id="{item.task_id}"><div class="tc-media">'
+            f'<img class="tc-thumb loaded" src="{src}" alt="{html.escape(title, quote=True)}" width="360" height="640" '
+            f'loading="lazy" decoding="async" '
+            "onerror=\"this.onerror=null;this.src='/static/images/poster-missing.svg'\"></div></a>")
+    out = "".join(cards)
+    if out:
+        _HOME_GALLERY_CACHE.update(at=time.time(), cards=out)
+    return out
+
+
 @app.get("/")
-async def index():
+async def index(request: Request, db: AsyncSession = Depends(get_db)):
     """Serve main page"""
-    return _static_html_response("index.html")
+    page = _static_html_response("index.html")
+    try:
+        cards = await _home_gallery_cards(request, db)
+        if cards:
+            body = page.body.decode("utf-8")
+            body, n = re.subn(r'(id="gallery-preview-grid"[^>]*>\s*)<div class="card"[^>]*>[^<]*</div>',
+                              lambda m: m.group(1) + cards, body, count=1)
+            if n:
+                return HTMLResponse(content=body)
+    except Exception as exc:  # noqa: BLE001 - the page never depends on the gallery query
+        print(f"[home] gallery cards skipped: {type(exc).__name__}: {exc}")
+    return page
 
 
-def _task_html_response(html_content: str) -> HTMLResponse:
-    return HTMLResponse(
-        content=_inject_static_layout(html_content),
+def _task_html_response(html_content: str, request: Optional[Request] = None) -> HTMLResponse:
+    # Task page V3 (2026-10-10): the layout partials and every /static JS/CSS
+    # reference are resolved per request from the live static roots (overlay,
+    # then the current release) and content-stamped, so an agent's atomic live
+    # edit reaches the next task page load without a restart (task_page_live.py).
+    response = HTMLResponse(
+        content=task_page_live.render_task_html(html_content),
         headers={
             "Cache-Control": "no-store, max-age=0",
             "Pragma": "no-cache",
             "Expires": "0",
         },
     )
+    return task_page_live.apply_switch_cookie(response, request)
 
 
 @app.get("/task")
 async def task_page(
+    request: Request,
     id: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
 ):
     """Serve task page with dynamic OG meta tags for Telegram/social sharing"""
-    
-    # Read base template
-    task_html_path = STATIC_DIR / "task.html"
-    html_content = task_html_path.read_text(encoding="utf-8")
+
+    # Read base template: the classic page or the V3 Unity-viewer shell, chosen
+    # per request (live rollout file + ?v3= switch), from the live static roots.
+    html_content = await task_page_live.task_template(
+        request, id, user, db, is_admin_email=is_admin_email,
+    )
     
     # If no task_id, return default page (non-indexable)
     if not id:
@@ -17235,49 +17524,14 @@ async def task_page(
     base_url = (APP_URL or "https://autorig.online").rstrip("/")
     task_url = f"{base_url}/task?id={task_id}"
     
-    # Try to get task info for better OG tags
-    task_title = "Rigged 3D Model"
-    task_description = "View this rigged 3D character with 50+ animations"
-    has_video = False
-    has_thumb = False
+    # SEO · social (2026-10-11): one head builder for the task page (seo_social.task_head).
+    # Indexable only when done, public, not adult on this host and titled; failed, unfinished and untitled
+    # tasks are noindex and never carry a status emoji; og:image is a 1200x630 card of the V3 capture.
     task = None
-    task_keywords: List[str] = []
-    
     try:
         from database import Task
         result = await db.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one_or_none()
-        
-        if task:
-            if task.status == "done":
-                task_title = "✅ Rigged 3D Model Ready"
-                task_description = "3D character rigged with skeleton and 50+ animations. Download in GLB, FBX, OBJ formats."
-                try:
-                    from seo_gallery import enrich_seo_metadata
-
-                    seo_title, seo_desc, seo_keywords, _seo_semantic = enrich_seo_metadata(task)
-                    if seo_title:
-                        task_title = seo_title
-                    if seo_desc:
-                        task_description = seo_desc[:500]
-                    task_keywords = seo_keywords
-                except Exception as seo_error:
-                    print(f"[Task Page] Error enriching SEO metadata: {seo_error}")
-            elif task.status == "processing":
-                task_title = "⏳ Rigging in Progress..."
-                task_description = "3D model is being rigged with AI. View live progress."
-            elif task.status == "error":
-                task_title = "❌ Rigging Failed"
-                task_description = "There was an error processing this model."
-            
-            # Check if video exists. Prefer DB truth; filesystem check is a legacy fallback.
-            video_path = f"/var/autorig/videos/{task_id}.mp4"
-            has_video = bool(getattr(task, "video_ready", False)) or (
-                os.path.exists(video_path) and os.path.getsize(video_path) > 0
-            )
-            
-            # Assume thumb exists if task has ready_urls
-            has_thumb = bool(task.ready_urls)
     except Exception as e:
         print(f"[Task Page] Error getting task info: {e}")
 
@@ -17286,138 +17540,55 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{base_url}/task">',
         )
-        return HTMLResponse(content=_inject_static_layout(html_content))
+        # An unknown id is a real 404 (old ids from the previous server were soft 404s for crawlers).
+        return HTMLResponse(
+            content=task_page_live.render_task_html(html_content),
+            status_code=404,
+            headers={"X-Robots-Tag": "noindex, nofollow", "Cache-Control": "no-store, max-age=0"},
+        )
 
-    # Unlisted member models keep the functional task page for the owner, but
-    # never emit public SEO, social preview, poster or video metadata.
-    if not bool(getattr(task, "is_public", True)):
-        html_content = html_content.replace(
-            "<!-- TASK_SEO_PLACEHOLDER -->",
-            f'<link rel="canonical" href="{task_url}">',
-        )
-        html_content = html_content.replace(
-            '<title>Task Progress | AutoRig.online</title>',
-            '<title>Private AutoRig model | AutoRig.online</title>',
-        )
-        html_content = html_content.replace(
-            '<h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>',
-            '<h1 class="task-status-header-title" id="task-seo-heading">Private AutoRig model</h1>',
-        )
-        return _task_html_response(html_content)
-    
-    title_suffix = f" | AutoRig task {task_id[:8]}"
-    compact_task_title = re.sub(r"\s+", " ", task_title).strip() or "Rigged 3D model"
-    max_task_title_len = max(24, 70 - len(title_suffix))
-    if len(compact_task_title) > max_task_title_len:
-        compact_task_title = compact_task_title[: max_task_title_len - 3].rstrip() + "..."
-    task_page_title = f"{compact_task_title}{title_suffix}"
-    safe_task_page_title = html.escape(task_page_title, quote=True)
-    safe_task_heading = html.escape(compact_task_title)
-    task_meta_description = re.sub(r"\s+", " ", task_description).strip()
-    if len(task_meta_description) > 170:
-        task_meta_description = task_meta_description[:167].rsplit(" ", 1)[0].rstrip(".,;:-") + "..."
-    safe_task_meta_description = html.escape(task_meta_description, quote=True)
-    keywords_meta = ""
-    if task_keywords:
-        safe_keywords = html.escape(", ".join(task_keywords[:24]), quote=True)
-        keywords_meta = f'\n    <meta name="keywords" content="{safe_keywords}">'
-    json_ld = ""
-    if task.status == "done":
-        creative_work = {
-            "@context": "https://schema.org",
-            "@type": "CreativeWork",
-            "name": task_page_title[:200],
-            "description": task_description[:2000],
-            "url": task_url,
-            "image": f"{base_url}/api/thumb/{task_id}",
-            "thumbnailUrl": f"{base_url}/api/thumb/{task_id}",
-            "mainEntityOfPage": task_url,
-            "creator": {"@type": "Organization", "name": "AutoRig.online"},
-            "isFamilyFriendly": True,
-        }
-        if task.created_at:
-            creative_work["dateCreated"] = task.created_at.isoformat()
-        if task.updated_at:
-            creative_work["dateModified"] = task.updated_at.isoformat()
-        if task_keywords:
-            creative_work["keywords"] = ", ".join(task_keywords[:24])
-        if has_video:
-            creative_work["associatedMedia"] = {
-                "@type": "VideoObject",
-                "name": task_page_title[:200],
-                "description": task_description[:2000],
-                "thumbnailUrl": f"{base_url}/api/thumb/{task_id}",
-                "contentUrl": f"{base_url}/api/video/{task_id}",
-                "uploadDate": (task.updated_at or task.created_at or datetime.utcnow()).isoformat(),
-            }
-        json_ld = f'\n    <script type="application/ld+json">{json.dumps(creative_work, ensure_ascii=False)}</script>'
-    standard_seo_tags = f'<meta name="description" content="{safe_task_meta_description}">{keywords_meta}{json_ld}'
+    import seo_social
+    import site_mode as _seo_site_mode
 
-    # Build OG meta tags
-    og_tags = f'''
-    <!-- Open Graph / Telegram / Social -->
-    <meta property="og:type" content="{'video.other' if has_video else 'website'}">
-    <meta property="og:url" content="{task_url}">
-    <meta property="og:title" content="{safe_task_page_title}">
-    <meta property="og:description" content="{safe_task_meta_description}">
-    <meta property="og:site_name" content="AutoRig.online">'''
-    
-    # Add image/video tags
-    if has_thumb:
-        og_tags += f'''
-    <meta property="og:image" content="{base_url}/api/thumb/{task_id}">
-    <meta property="og:image:width" content="640">
-    <meta property="og:image:height" content="360">'''
-    
-    if has_video:
-        og_tags += f'''
-    <meta property="og:video" content="{base_url}/api/video/{task_id}">
-    <meta property="og:video:secure_url" content="{base_url}/api/video/{task_id}">
-    <meta property="og:video:type" content="video/mp4">
-    <meta property="og:video:width" content="640">
-    <meta property="og:video:height" content="360">'''
-    
-    # Twitter Card tags
-    if has_video:
-        og_tags += f'''
-    <meta name="twitter:card" content="player">
-    <meta name="twitter:player" content="{base_url}/api/video/{task_id}">
-    <meta name="twitter:player:width" content="640">
-    <meta name="twitter:player:height" content="360">'''
-    elif has_thumb:
-        og_tags += f'''
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="{base_url}/api/thumb/{task_id}">'''
-    else:
-        og_tags += '''
-    <meta name="twitter:card" content="summary">'''
-    
-    og_tags += f'''
-    <meta name="twitter:title" content="{safe_task_page_title}">
-    <meta name="twitter:description" content="{safe_task_meta_description}">
-    '''
-    
-    # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
+    hidden = _seo_site_mode.hides(request, task)
+    video_path = Path(f"/var/autorig/videos/{task_id}.mp4")
+    has_video = bool(getattr(task, "video_ready", False)) or (video_path.exists() and video_path.stat().st_size > 0)
+    has_poster = bool(task.ready_urls) or seo_social.poster_signature(task_id) is not None
+    video_dims = None
+    if has_video and not hidden and task.status == "done":
+        try:
+            dims_source = video_path if video_path.exists() else None
+            if dims_source is None:
+                source_video_url = await _resolve_task_video_source_url(task)
+                durable_video = lookup_cached_artifact(task_id, source_url=source_video_url) if source_video_url else None
+                dims_source = Path(durable_video["path"]) if durable_video and durable_video.get("path") else None
+            video_dims = seo_social.video_dimensions_cached(task_id, dims_source)
+        except Exception as exc:
+            print(f"[seo] video dimensions for {task_id}: {type(exc).__name__}: {exc}")
+    seo_head = seo_social.task_head(
+        task, hidden=hidden, has_video=has_video, has_poster=has_poster,
+        poster_sig=seo_social.poster_signature(task_id), video_dims=video_dims, base_url=base_url,
+    )
     html_content = html_content.replace(
         '<meta name="robots" content="noindex, nofollow">',
-        '<meta name="robots" content="index, follow, max-image-preview:large, max-video-preview:-1">',
+        f'<meta name="robots" content="{seo_head["robots"]}">',
     )
-    html_content = html_content.replace(
-        "<!-- TASK_SEO_PLACEHOLDER -->",
-        f'{standard_seo_tags}\n    <link rel="canonical" href="{task_url}">\n    {og_tags}',
-    )
-    
-    # Update <title> tag to be dynamic
+    html_content = html_content.replace("<!-- TASK_SEO_PLACEHOLDER -->", seo_head["head_html"])
     html_content = html_content.replace(
         '<title>Task Progress | AutoRig.online</title>',
-        f'<title>{safe_task_page_title}</title>'
+        f'<title>{html.escape(seo_head["title"])}</title>'
     )
     html_content = html_content.replace(
         '<h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>',
-        f'<h1 class="task-status-header-title" id="task-seo-heading">{safe_task_heading}</h1>',
+        f'<h1 class="task-status-header-title" id="task-seo-heading">{html.escape(seo_head["h1"])}</h1>',
     )
-    
-    return _task_html_response(html_content)
+
+    return _task_html_response(html_content, request)
+
+
+import seo_social as _seo_social  # noqa: E402  SEO · social cards: /og/site.jpg, /og/task/<id>.jpg
+
+_seo_social.install(app, get_db=get_db, resolve_poster_url_for_task=resolve_poster_url_for_task, static_dir=STATIC_DIR)
 
 
 @app.post("/api/task/{task_id}/purchase-intent")
@@ -17507,9 +17678,33 @@ async def admin_workers_page(user: Optional[User] = Depends(get_current_user)):
 
 
 @app.get("/gallery")
-async def gallery_page():
+async def gallery_page(request: Request, db: AsyncSession = Depends(get_db)):
     """Serve Gallery page"""
-    return _static_html_response("gallery.html")
+    response = _static_html_response("gallery.html")
+    # SEO (2026-10-11): the first page of cards is in the server HTML, so crawlers reach the task pages
+    # without JS. The same /api/gallery query (site_mode filters included); the page's JS replaces it.
+    try:
+        import seo_social
+        from database import Task as _SeoTask
+
+        rig = (request.query_params.get("rig_type") or "all").strip().lower()
+        page = await api_get_gallery(request=request, page=1, per_page=24, sort="date", rig_type=rig,
+                                     author=None, user=None, db=db)
+        ids = [it.task_id for it in page.items]
+        titles = {}
+        if ids:
+            rows = await db.execute(select(_SeoTask.id, _SeoTask.poster_llm_title).where(_SeoTask.id.in_(ids)))
+            titles = {tid: (title or "").strip() for tid, title in rows.all() if (title or "").strip()}
+        cards = seo_social.gallery_cards_html(page.items, titles)
+        body = response.body.decode("utf-8")
+        new_body, n = re.subn(
+            r'(<div id="gallery-grid"[^>]*>)\s*<div class="card"[^>]*>[^<]*</div>',
+            lambda m: m.group(1) + "\n" + cards, body, count=1)
+        if n and cards:
+            response = HTMLResponse(content=new_body)
+    except Exception as exc:
+        print(f"[seo] gallery cards: {type(exc).__name__}: {exc}")
+    return response
 
 
 @app.get("/dashboard")
@@ -17540,6 +17735,83 @@ async def blender_plugin_page():
 async def animal_rig_page():
     """AutoRig V2 animal and non-humanoid rigging landing page."""
     return _static_html_response("animal-rig.html")
+
+
+@app.get("/vision")
+async def vision_page():
+    """Image understanding playground served by the farm's own GPUs."""
+    return _static_html_response("vision.html")
+
+
+@app.get("/text2text")
+async def text2text_page():
+    """Text prompt playground served by the farm's own GPUs."""
+    return _static_html_response("text2text.html")
+
+
+@app.get("/text")
+async def text_page():
+    """Canonical path for the text service; /text2text is the older name."""
+    return _static_html_response("text2text.html")
+
+
+@app.get("/image")
+async def image_page():
+    """Prompt to picture, rendered on the farm."""
+    return _static_html_response("image.html")
+
+
+@app.get("/video")
+async def video_page():
+    """A frame animated into a clip on the farm."""
+    return _static_html_response("video.html")
+
+
+@app.get("/3dmodel")
+async def model3d_page():
+    """A picture turned into geometry by the farm's own Hunyuan3D."""
+    return _static_html_response("3dmodel.html")
+
+
+@app.get("/system_prompts")
+async def system_prompts_page():
+    """Every system prompt of the graphs and the server's own rules, edited live."""
+    return _static_html_response("system_prompts.html")
+
+
+@app.get("/queue")
+async def queue_page():
+    """Every finished render of this device, a page at a time, made for a phone."""
+    return _static_html_response("queue.html")
+
+
+@app.get("/nodes")
+async def nodes_page():
+    """Wire the services together and render the whole composition at once."""
+    return _static_html_response("nodes.html")
+
+
+@app.get("/workflows")
+async def workflows_page():
+    """Every saved composition at once, with what went in and what came out."""
+    return _static_html_response("workflows.html")
+
+
+@app.get("/models")
+async def models_page():
+    """Which computer can run which pipeline, and what it took in a day."""
+    return _static_html_response("models.html")
+
+
+@app.get("/lora")
+async def lora_page():
+    """The farm's LoRA manager: install from a Civitai link, see every box."""
+    return _static_html_response("lora.html")
+
+
+@app.get("/avatars")
+async def avatars_page():
+    return _static_html_response("avatars.html")
 
 
 @app.get("/rig-animals", include_in_schema=False)
@@ -17592,12 +17864,6 @@ async def obj_auto_rig_page():
 async def how_it_works_page():
     """How it works page"""
     return _static_html_response("how-it-works.html")
-
-
-@app.get("/rig")
-async def rig_architecture_page():
-    """Rig architecture scheme page"""
-    return _static_html_response("rig.html")
 
 
 @app.get("/faq")
@@ -17866,10 +18132,14 @@ async def sitemap_index(db: AsyncSession = Depends(get_db)):
 @app.get("/sitemap/pages.xml")
 async def sitemap_pages():
     """Marketing / guide urlset (was static/sitemap.xml)."""
-    path = STATIC_DIR / "sitemap-pages.xml"
+    # SEO (2026-10-11): read the live release like _static_html_response, so a live_static put of the
+    # sitemap is served at once (STATIC_DIR is pinned to the release the process started in).
+    live_static = Path("/srv/autorig/current/autorig-online/static")
+    root = live_static if (live_static / "sitemap-pages.xml").is_file() else STATIC_DIR
+    path = root / "sitemap-pages.xml"
     if not path.is_file():
         return FileResponse(
-            str(STATIC_DIR / "sitemap.xml"),
+            str(root / "sitemap.xml"),
             media_type="application/xml",
         )
     return FileResponse(str(path), media_type="application/xml")
@@ -18073,7 +18343,7 @@ async def create_scene(
         like_count=scene.like_count,
         liked_by_me=False,
         owner_type=scene.owner_type,
-        owner_id=scene.owner_id,
+        owner_id="user" if scene.owner_type == "user" else "anon",      # never the e-mail / anon_id (2026-10-11)
         created_at=scene.created_at,
         updated_at=scene.updated_at
     )
@@ -18141,7 +18411,7 @@ async def get_scene(
         like_count=scene.like_count,
         liked_by_me=liked_by_me,
         owner_type=scene.owner_type,
-        owner_id=scene.owner_id,
+        owner_id="user" if scene.owner_type == "user" else "anon",      # never the e-mail / anon_id (2026-10-11)
         created_at=scene.created_at,
         updated_at=scene.updated_at
     )
@@ -18213,7 +18483,7 @@ async def update_scene(
         like_count=scene.like_count,
         liked_by_me=False,
         owner_type=scene.owner_type,
-        owner_id=scene.owner_id,
+        owner_id="user" if scene.owner_type == "user" else "anon",      # never the e-mail / anon_id (2026-10-11)
         created_at=scene.created_at,
         updated_at=scene.updated_at
     )
@@ -18282,3 +18552,34 @@ try:
     print("[Generation] image-to-rig routes registered")
 except Exception as _gen_routes_error:  # never take the API down over one feature
     print(f"[Generation] route registration failed: {_gen_routes_error}")
+
+
+# --- user language (Localization V3, 2026-10-10) -------------------------------
+# GET/POST /api/me/language, /api/language(/resolve), /<lang>/ page URLs and
+# server-side page localization. See user_language.py.
+try:
+    from user_language import install as _install_user_language
+
+    _install_user_language(
+        app, get_db=get_db, get_current_user=get_current_user, get_anon_session=get_anon_session,
+    )
+except Exception as _i18n_error:  # never take the API down over one feature
+    print(f"[i18n] user language not installed: {_i18n_error}")
+
+
+# --- site_mode (NSFW split, 2026-10-11) -----------------------------------------
+# Host-based site modes: autorig.online stays SFW, the adult domain is gated
+# (Google sign-in + 18+ consent + geo). See site_mode.py.
+try:
+    import site_mode as _site_mode_module
+
+    async def _site_mode_api_key_user(request, db):
+        _user, _anon = await resolve_api_key_identity(request, db)
+        return _user
+
+    _site_mode_module.install(
+        app, require_admin=require_admin, is_admin_email=is_admin_email,
+        api_key_user=_site_mode_api_key_user, layout=_inject_static_layout,
+    )
+except Exception as _site_mode_error:  # the main site never goes down over this; nginx gates the adult host
+    print(f"[site-mode] not installed: {_site_mode_error}")

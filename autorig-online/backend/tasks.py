@@ -7,6 +7,7 @@ import os
 import re
 import time
 import uuid
+from enum import Enum
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
@@ -17,9 +18,19 @@ from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import Task, User, AnonSession, AsyncSessionLocal
-from config import APP_URL
+from config import APP_URL, UPLOAD_DIR
 from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
+from worker_transport import worker_http_client, worker_transport_url, worker_transport_map, WorkerTransportConfigError
+from source_preflight_policy import (
+    SourceDisposition,
+    SourcePreflightResult,
+    normalize_source_preflight,
+    redirect_allowlist,
+    resolve_source_redirect,
+    retry_delay_seconds,
+)
+from source_preflight_local import probe_owned_source
 from task_timeout_contract import task_hard_timeout_reference
 from collection_retry_policy import collection_error_retry_due
 from task_priority import (
@@ -85,7 +96,7 @@ RIG_V2_WORKER_ANIMAL_TYPES = {
 RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
 SOURCE_PREFLIGHT_TIMEOUT_SECONDS = 8.0
 SOURCE_PREFLIGHT_MAX_ATTEMPTS = 3
-SOURCE_PREFLIGHT_BACKOFF_SECONDS = (60, 300)
+SOURCE_PREFLIGHT_BACKOFF_SECONDS = (60, 300, 900, 1800)
 VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS = 4.0
 VIEWER_RECONCILE_BACKOFF_SECONDS = 300.0
 _viewer_reconcile_last_attempt: Dict[str, float] = {}
@@ -112,29 +123,54 @@ def _source_format_error(input_url: str, prefix: bytes, content_type: str) -> Op
     return None
 
 
-async def preflight_task_source(input_url: Optional[str]) -> Tuple[bool, str, bool]:
-    """
-    Read only the first bytes of the source before reserving a worker.
-
-    Returns (available, detail, permanent_error). Network/HTTP availability
-    failures are retryable; an invalid payload/format is terminal immediately.
-    """
-    url = (input_url or "").strip()
-    if not url:
-        return False, "source URL is missing", True
-    try:
-        timeout = httpx.Timeout(
-            SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
-            connect=SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
-        )
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+async def _preflight_http_source(url:str)->SourcePreflightResult:
+    timeout = httpx.Timeout(
+        SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
+        connect=SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
+    )
+    allowed = redirect_allowlist(
+        url,
+        APP_URL,
+        worker_transport_map().keys(),
+        os.getenv("AUTORIG_SOURCE_REDIRECT_ORIGINS", ""),
+    )
+    current = url
+    seen = {current}
+    redirects = 0
+    async with worker_http_client(timeout=timeout, follow_redirects=False) as client:
+        while True:
             async with client.stream(
                 "GET",
-                url,
+                current,
                 headers={"Range": "bytes=0-63", "Accept-Encoding": "identity"},
             ) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    if redirects >= 5:
+                        return SourcePreflightResult(
+                            False, "source redirect limit exceeded", SourceDisposition.INTERNAL
+                        )
+                    try:
+                        current = resolve_source_redirect(
+                            current, response.headers.get("location") or "", allowed, seen
+                        )
+                    except ValueError as exc:
+                        return SourcePreflightResult(
+                            False,
+                            f"source redirect rejected: {exc}",
+                            SourceDisposition.INTERNAL,
+                        )
+                    seen.add(current)
+                    redirects += 1
+                    continue
                 if response.status_code not in (200, 206):
-                    return False, f"source returned HTTP {response.status_code}", False
+                    disposition = (
+                        SourceDisposition.TRANSIENT
+                        if response.status_code == 429 or response.status_code >= 500
+                        else SourceDisposition.BOUNDED
+                    )
+                    return SourcePreflightResult(
+                        False, f"source returned HTTP {response.status_code}", disposition
+                    )
                 prefix = b""
                 async for chunk in response.aiter_bytes():
                     prefix += chunk
@@ -142,7 +178,9 @@ async def preflight_task_source(input_url: Optional[str]) -> Tuple[bool, str, bo
                         break
                 prefix = prefix[:64]
                 if not prefix:
-                    return False, "source returned an empty response", False
+                    return SourcePreflightResult(
+                        False, "source returned an empty response", SourceDisposition.TRANSIENT
+                    )
                 size = None
                 content_range = response.headers.get("content-range") or ""
                 match = re.search(r"/(\d+)\s*$", content_range)
@@ -153,21 +191,49 @@ async def preflight_task_source(input_url: Optional[str]) -> Tuple[bool, str, bo
                     if raw_length and raw_length.isdigit():
                         size = int(raw_length)
                 if size == 0:
-                    return False, "source file is empty", True
+                    return SourcePreflightResult(
+                        False, "source file is empty", SourceDisposition.PERMANENT
+                    )
                 format_error = _source_format_error(
-                    url,
-                    prefix,
-                    response.headers.get("content-type") or "",
+                    current, prefix, response.headers.get("content-type") or ""
                 )
                 if format_error:
-                    return False, format_error, True
-                return True, "", False
+                    return SourcePreflightResult(
+                        False, format_error, SourceDisposition.PERMANENT
+                    )
+                return SourcePreflightResult(True)
+
+
+async def preflight_task_source(input_url: Optional[str]) -> SourcePreflightResult:
+    """
+    Read only the first bytes of the source before reserving a worker.
+
+    Returns (available, detail, permanent_error). Network/HTTP availability
+    failures are retryable; an invalid payload/format is terminal immediately.
+    """
+    url = (input_url or "").strip()
+    if not url:
+        return SourcePreflightResult(False,"source URL is missing",SourceDisposition.PERMANENT)
+    try:
+        owned=await probe_owned_source(url,app_url=APP_URL,upload_dir=UPLOAD_DIR,renderfin_data_dir=os.getenv("RENDERFIN_DATA_DIR","/var/autorig/renderfin"))
+        if owned is not None:
+            if owned.state=="missing":return SourcePreflightResult(False,owned.detail,SourceDisposition.BOUNDED)
+            if owned.state=="transient":return SourcePreflightResult(False,owned.detail,SourceDisposition.TRANSIENT)
+            if owned.state=="internal":return SourcePreflightResult(False,owned.detail,SourceDisposition.INTERNAL)
+            if owned.state=="unsafe":return SourcePreflightResult(False,owned.detail,SourceDisposition.PERMANENT)
+            if owned.size==0:return SourcePreflightResult(False,"source file is empty",SourceDisposition.PERMANENT)
+            format_error=_source_format_error(url,owned.prefix,"")
+            if format_error:return SourcePreflightResult(False,format_error,SourceDisposition.PERMANENT)
+            return SourcePreflightResult(True)
+        return await _preflight_http_source(url)
     except httpx.TimeoutException:
-        return False, f"source did not respond within {SOURCE_PREFLIGHT_TIMEOUT_SECONDS:g}s", False
+        return SourcePreflightResult(False,f"source did not respond within {SOURCE_PREFLIGHT_TIMEOUT_SECONDS:g}s",SourceDisposition.TRANSIENT)
     except httpx.HTTPError as exc:
-        return False, f"source request failed: {exc.__class__.__name__}", False
+        return SourcePreflightResult(False,f"source request failed: {exc.__class__.__name__}",SourceDisposition.TRANSIENT)
+    except WorkerTransportConfigError as exc:
+        return SourcePreflightResult(False,f"source transport configuration failed: {exc.__class__.__name__}",SourceDisposition.INTERNAL)
     except Exception as exc:
-        return False, f"source check failed: {exc.__class__.__name__}", False
+        return SourcePreflightResult(False,f"source check failed: {exc.__class__.__name__}",SourceDisposition.INTERNAL)
 
 
 async def _apply_source_preflight_failure(
@@ -175,13 +241,14 @@ async def _apply_source_preflight_failure(
     task: Task,
     detail: str,
     *,
-    permanent: bool,
+    disposition: SourceDisposition,
 ) -> str:
     now = datetime.utcnow()
     attempts = int(getattr(task, "source_attempt_count", 0) or 0) + 1
     task.source_attempt_count = attempts
     task.updated_at = now
-    if permanent or attempts >= SOURCE_PREFLIGHT_MAX_ATTEMPTS:
+    terminal=disposition is SourceDisposition.PERMANENT or (disposition is SourceDisposition.BOUNDED and attempts>=SOURCE_PREFLIGHT_MAX_ATTEMPTS)
+    if terminal:
         task.status = "error"
         task.source_next_retry_at = None
         task.error_message = f"Source asset unavailable: {detail}."
@@ -193,16 +260,17 @@ async def _apply_source_preflight_failure(
         )
         return task.error_message
 
-    backoff_index = min(attempts - 1, len(SOURCE_PREFLIGHT_BACKOFF_SECONDS) - 1)
-    delay_seconds = SOURCE_PREFLIGHT_BACKOFF_SECONDS[backoff_index]
+    delay_seconds=retry_delay_seconds(attempts)
     task.status = "created"
+    task.worker_api = None
+    task.processing_started_at = None
     task.source_next_retry_at = now + timedelta(seconds=delay_seconds)
     task.error_message = None
     await db.commit()
     await db.refresh(task)
     print(
-        f"[Source Preflight] Task {task.id} retry {attempts}/"
-        f"{SOURCE_PREFLIGHT_MAX_ATTEMPTS} in {delay_seconds}s: {detail}"
+        f"[Source Preflight] Task {task.id} retry {attempts} "
+        f"({disposition.value}) in {delay_seconds}s: {detail}"
     )
     return f"Source preflight retry scheduled: {detail}"
 
@@ -464,7 +532,7 @@ async def _head_is_ready(url: str) -> bool:
     import httpx
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.head(url, timeout=5.0, follow_redirects=True)
+            resp = await client.head(worker_transport_url(url), timeout=5.0, follow_redirects=True)
             return resp.status_code == 200
     except Exception:
         return False
@@ -555,6 +623,34 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
 # =============================================================================
 # Task Creation
 # =============================================================================
+class TaskDispatchOwner(str, Enum):
+    LEGACY = "legacy"
+    V3_RUNTIME = "v3_runtime"
+
+
+class V3RuntimeOwned:
+    """Typed refusal returned when legacy dispatch is called for a V3 task."""
+
+    owner = TaskDispatchOwner.V3_RUNTIME
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __str__(self) -> str:
+        return "V3 task is owned by the durable V3 runtime"
+
+
+V3_RUNTIME_OWNED = V3RuntimeOwned()
+
+
+def task_dispatch_owner(task: Task) -> TaskDispatchOwner:
+    """A pipeline_kind=v3 row belongs to the V3 runtime: legacy dispatch,
+    progress polling, stale reset and requeue never touch it."""
+    return (TaskDispatchOwner.V3_RUNTIME
+            if str(getattr(task, "pipeline_kind", "") or "").strip().lower() == "v3"
+            else TaskDispatchOwner.LEGACY)
+
+
 async def create_conversion_task(
     db: AsyncSession,
     input_url: str,
@@ -567,15 +663,51 @@ async def create_conversion_task(
     input_bytes: Optional[int] = None,
     collection_metadata: Optional[Dict[str, Any]] = None,
     queue_class: str = "interactive",
+    v3_binding: Optional[Any] = None,
+    viewer_settings: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Task], Optional[str]]:
     """
     Create a new conversion task.
     Returns: (task, error_message)
+
+    pipeline_kind="v3" requires a server-owned, already-normalized TaskBinding;
+    the Task row and its binding are written in one commit.
     """
     task_type = normalize_task_type(task_type)
     pk = (pipeline_kind or "rig").strip().lower()
-    if pk not in ("rig", "convert", "generate"):
+    if pk not in ("rig", "convert", "generate", "v3"):
         pk = "rig"
+    if pk in ("rig", "convert"):
+        # Downloads · V3: the classic converter takes no new tasks while the live switch says so
+        # (v3_intake.classic_new_tasks_enabled); existing tasks are not touched.
+        from v3_intake import classic_new_tasks_enabled
+
+        if not classic_new_tasks_enabled():
+            print(f"[Tasks] classic {pk} task refused for {owner_type}:{str(owner_id)[:40]}: classic_new_tasks=off")
+            return None, "classic_pipeline_off"
+    canonical = None
+    if pk == "v3":
+        if v3_binding is None:
+            raise ValueError("pipeline_kind=v3 requires a server-owned validated TaskBinding")
+        from v3_dispatch_outbox import V3DispatchOutbox
+        from v3_task_runtime import normalize_task_binding
+
+        canonical = normalize_task_binding(
+            task_id=v3_binding.task_id,
+            source_sha256=v3_binding.source_sha256,
+            source_manifest=v3_binding.source_manifest,
+            requested_intent=v3_binding.requested_intent,
+            attempt=v3_binding.attempt,
+            upstream_receipt=v3_binding.upstream_receipt,
+            intent_plan=v3_binding.intent_plan,
+        )
+        if canonical != v3_binding or canonical.state != "pending":
+            raise ValueError("pipeline_kind=v3 requires the canonical pending TaskBinding")
+        # Creation is a post-normalization operation: the exact source bytes
+        # must exist before a V3 Task row does.
+        V3DispatchOutbox._verify_source_file(canonical.source_manifest, canonical.source_sha256)
+    elif v3_binding is not None:
+        raise ValueError("V3 TaskBinding cannot be attached to a legacy pipeline")
 
     from main import ensure_disk_headroom_for_new_task, enforce_task_cache_max_size
 
@@ -583,7 +715,7 @@ async def create_conversion_task(
     await ensure_disk_headroom_for_new_task(db)
 
     # Create task record
-    task_id = str(uuid.uuid4())
+    task_id = canonical.task_id if canonical is not None else str(uuid.uuid4())
     collection = collection_metadata if isinstance(collection_metadata, dict) else {}
     collection_tags = collection.get("collection_tags")
     if not isinstance(collection_tags, list):
@@ -591,10 +723,12 @@ async def create_conversion_task(
     collection_tags = [
         str(tag).strip()[:64] for tag in collection_tags if str(tag).strip()
     ][:20]
+    import task_privacy as _task_privacy
     task = Task(
         id=task_id,
         owner_type=owner_type,
         owner_id=owner_id,
+        is_public=_task_privacy.initial_is_public(owner_type, owner_id),   # subscribers: private by default
         input_url=input_url,
         input_type=task_type,
         status="created",
@@ -615,9 +749,23 @@ async def create_conversion_task(
             str(collection.get("collection_member_title") or "").strip()[:256] or None
         ),
     )
+    if viewer_settings:
+        task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
 
     db.add(task)
-    await db.commit()
+    if canonical is not None:
+        # Task and durable V3 binding share this caller-owned transaction.
+        # Schema installation belongs to startup, never this path.
+        from v3_task_runtime import SameTaskDbBindings
+
+        try:
+            await SameTaskDbBindings().bind_in_task_transaction(db, canonical)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+    else:
+        await db.commit()
     await db.refresh(task)
 
     # This function also runs in the Telegram service.  Use the loopback UDP
@@ -641,6 +789,8 @@ async def start_task_on_worker(
     Workers accept GLB, FBX, OBJ directly via input_url.
     Returns: (task, error_message)
     """
+    if task_dispatch_owner(task) is TaskDispatchOwner.V3_RUNTIME:
+        return task, V3_RUNTIME_OWNED
     replaying_unknown_submission = bool(
         task.workload_lease_id
         and task.worker_api
@@ -693,17 +843,15 @@ async def start_task_on_worker(
             _schedule_task_error_notification(task.id)
             return task, task.error_message
 
-    source_ok, source_detail, source_permanent = (True, "", False)
+    source_result = SourcePreflightResult(True)
     if not replaying_unknown_submission:
-        source_ok, source_detail, source_permanent = await preflight_task_source(
-            task.input_url
-        )
-    if not source_ok:
+        source_result = normalize_source_preflight(await preflight_task_source(task.input_url))
+    if not source_result.available:
         error = await _apply_source_preflight_failure(
             db,
             task,
-            source_detail,
-            permanent=source_permanent,
+            source_result.detail,
+            disposition=source_result.disposition,
         )
         if task.status == "error" or task.workload_lease_id:
             await release_task_workload_lease(
@@ -716,6 +864,8 @@ async def start_task_on_worker(
         return task, error
 
     if not replaying_unknown_submission:
+        task.source_attempt_count = 0
+        task.source_next_retry_at = None
         try:
             normalized = await asyncio.to_thread(
                 normalize_task_input, task.input_url
@@ -1173,7 +1323,7 @@ async def _fetch_concrete_worker_artifacts(
     worker_root = f"{worker_base.rstrip('/')}/converter/glb"
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(files_url, timeout=8.0)
+            resp = await client.get(worker_transport_url(files_url), timeout=8.0)
         if resp.status_code != 200:
             return [], None, None
         data = resp.json() if resp.content else {}
@@ -1233,7 +1383,7 @@ async def _fetch_worker_status_viewer_artifacts(
             timeout=VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS,
             follow_redirects=True,
         ) as client:
-            response = await client.get(status_url)
+            response = await client.get(worker_transport_url(status_url))
         if response.status_code != 200:
             return None, None
         payload = response.json() if response.content else {}
@@ -1265,7 +1415,7 @@ async def _fetch_worker_completion_contract(task: Task) -> Optional[dict]:
     status_url = f"{worker_api.rstrip('/')}/status/{quote(worker_task_id, safe='')}"
     try:
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-            response = await client.get(status_url)
+            response = await client.get(worker_transport_url(status_url))
         if response.status_code != 200:
             return None
         payload = response.json() if response.content else {}
@@ -1297,6 +1447,28 @@ def _completion_contract_v2_state(payload: Optional[dict]) -> Tuple[bool, bool, 
     return True, finalized, None
 
 
+def _legacy_primary_completion_gate(
+    task: Task,
+    payload: Optional[dict],
+    *,
+    all_urls_ready: bool,
+) -> Tuple[bool, Optional[str]]:
+    """Require the exact primary worker task to report Completed."""
+    if not str(getattr(task, "worker_task_id", None) or "").strip():
+        return False, None
+    if not isinstance(payload, dict):
+        return False, None
+    worker_status = str(payload.get("status") or "").strip().lower()
+    if worker_status in {"failed", "error"}:
+        failure = str(
+            payload.get("error")
+            or payload.get("error_message")
+            or "worker task failed"
+        ).strip()
+        return False, failure or "worker task failed"
+    return bool(all_urls_ready and worker_status == "completed"), None
+
+
 def _task_declares_completion_v2(task: Task) -> bool:
     """Read the persisted, migration-free v2 declaration from progress_page."""
     try:
@@ -1316,7 +1488,7 @@ async def _probe_remote_glb_artifact(url: Optional[str]) -> bool:
         async with httpx.AsyncClient(follow_redirects=True) as client:
             async with client.stream(
                 "GET",
-                candidate,
+                worker_transport_url(candidate),
                 headers={"Range": "bytes=0-11", "Accept-Encoding": "identity"},
                 timeout=VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS,
             ) as response:
@@ -1465,7 +1637,7 @@ async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
     log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
     try:
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            resp = await client.get(log_url)
+            resp = await client.get(worker_transport_url(log_url))
         if resp.status_code != 200:
             return None
         text = resp.text
@@ -1484,7 +1656,7 @@ async def _worker_conversion_completed(task: Task) -> bool:
     log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
     try:
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            resp = await client.get(log_url)
+            resp = await client.get(worker_transport_url(log_url))
         if resp.status_code != 200:
             return False
         text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
@@ -1564,6 +1736,8 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     Check and update task progress.
     Checks a batch of URLs and updates ready count.
     """
+    if task_dispatch_owner(task) is TaskDispatchOwner.V3_RUNTIME:
+        return task
     if _restore_worker_api_from_progress_page(task):
         task.updated_at = datetime.utcnow()
         print(f"[Tasks] Restored worker_api from progress_page for task {task.id}: {task.worker_api}")
@@ -1616,6 +1790,24 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         _schedule_task_error_notification(task.id)
         return task
 
+    legacy_worker_completed = False
+    if not expects_v2 and not _is_animal_task(task):
+        legacy_worker_completed, legacy_worker_failure = _legacy_primary_completion_gate(
+            task,
+            completion_payload,
+            all_urls_ready=False,
+        )
+        if legacy_worker_failure and task.status not in ("done", "error"):
+            task.status = "error"
+            task.error_message = f"Worker failed: {legacy_worker_failure}"
+            _clear_terminal_preemption_state(task)
+            task.updated_at = datetime.utcnow()
+            await release_task_workload_lease(db, task, outcome="released")
+            await db.commit()
+            await db.refresh(task)
+            _schedule_task_error_notification(task.id)
+            return task
+
     # Get already ready URLs
     already_ready = set(task.ready_urls)
     
@@ -1641,11 +1833,19 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         
         # Check if all URLs are ready
         if task.total_count > 0 and task.ready_count >= task.total_count:
+            if not expects_v2 and not _is_animal_task(task):
+                legacy_worker_completed, _ = _legacy_primary_completion_gate(
+                    task,
+                    completion_payload,
+                    all_urls_ready=True,
+                )
             if completion_probe_unavailable:
                 task.status = "processing"
             elif contract_v2 and not worker_finalized:
                 task.status = "processing"
             elif _is_animal_task(task) and not await _worker_conversion_completed(task):
+                task.status = "processing"
+            elif not contract_v2 and not _is_animal_task(task) and not legacy_worker_completed:
                 task.status = "processing"
             else:
                 task.status = "done"
@@ -1670,22 +1870,38 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         if validated_animations_url:
             task.viewer_animations_glb_url = validated_animations_url
             task.updated_at = datetime.utcnow()
-        if (
-            task.status not in ("done", "error")
-            and concrete_urls
+        concrete_outputs_complete = bool(
+            concrete_urls
             and _worker_outputs_look_complete(
                 concrete_urls,
                 require_preview=not (contract_v2 and worker_finalized),
             )
+        )
+        if not expects_v2 and not _is_animal_task(task):
+            legacy_worker_completed, _ = _legacy_primary_completion_gate(
+                task,
+                completion_payload,
+                all_urls_ready=concrete_outputs_complete,
+            )
+        if (
+            task.status not in ("done", "error")
+            and concrete_outputs_complete
             and not completion_probe_unavailable
             and (not contract_v2 or worker_finalized)
+            and (contract_v2 or _is_animal_task(task) or legacy_worker_completed)
         ):
             task.output_urls = concrete_urls
             task.ready_urls = concrete_urls
             task.total_count = len(concrete_urls)
             task.ready_count = len(concrete_urls)
-            conversion_completed = worker_finalized if contract_v2 else (
-                (not _is_animal_task(task)) or await _worker_conversion_completed(task)
+            conversion_completed = (
+                worker_finalized
+                if contract_v2
+                else (
+                    await _worker_conversion_completed(task)
+                    if _is_animal_task(task)
+                    else legacy_worker_completed
+                )
             )
             task.status = "done" if conversion_completed else "processing"
             task.last_progress_at = datetime.utcnow()
@@ -1905,6 +2121,9 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> bool:
     Operator recovery: move task back to queue like stale reset but restart_count := 0
     (does not increment). Caller should commit.
     """
+    if task_dispatch_owner(task) is TaskDispatchOwner.V3_RUNTIME:
+        print(f"[V3] Refusing legacy admin requeue for runtime-owned task: {task.id}")
+        return False
     if preemption_in_progress(task):
         print(f"[Priority] Refusing admin requeue during preemption: {task.id}")
         return False
@@ -1945,6 +2164,10 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     Reset a stale task for re-processing.
     Returns True if task was reset, False if max restarts exceeded.
     """
+    if task_dispatch_owner(task) is TaskDispatchOwner.V3_RUNTIME:
+        print(f"[V3] Refusing legacy stale reset for runtime-owned task: {task.id}")
+        return False
+
     from config import MAX_TASK_RESTARTS
 
     if preemption_in_progress(task):
@@ -2012,6 +2235,7 @@ async def find_and_retry_failed_collection_tasks(db: AsyncSession) -> int:
         select(Task).where(
             Task.status == "error",
             Task.collection_guid.is_not(None),
+            Task.pipeline_kind != "v3",
         )
     )
     failed_members = list(result.scalars().all())
@@ -2069,10 +2293,14 @@ async def find_and_reset_stale_tasks(
     partial_cutoff = now - timedelta(minutes=PARTIAL_PROGRESS_STALE_MINUTES)
     lookup = get_worker_active_lookup(queue_status)
 
-    # Find all non-terminal tasks
+    # Find all non-terminal tasks.  V3 rows have their own durable runtime and
+    # an explicit needs_review state; a generation row is owned by its pump and
+    # Renderfin (it may wait hours for a Hunyuan slot): the legacy stale reset and
+    # global timeout must never touch either.
     result = await db.execute(
         select(Task).where(
             Task.status.notin_(["done", "error"]),
+            Task.pipeline_kind.notin_(["v3", "generate"]),
         )
     )
     active_tasks = result.scalars().all()
@@ -2195,6 +2423,7 @@ async def get_stalled_processing_tasks_by_worker(
             # a generation task has no worker progress to go stale on;
             # its own pump owns the lifecycle until the mesh exists
             Task.pipeline_kind != "generate",
+            Task.pipeline_kind != "v3",
             Task.preemption_state.notin_(("requested", "stopping")),
         )
     )

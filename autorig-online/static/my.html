@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="my_page_title">My models | AutoRig.online</title>
+    <meta name="description" content="Your own AutoRig models: make them private or public, or delete them.">
+    <meta name="robots" content="noindex,nofollow">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css?v=82cbb3210d">
+    <style>
+        .my-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0 0 1rem; }
+        .my-bar h1 { margin: 0 auto 0 0; font-size: clamp(1.4rem, 3vw, 2rem); }
+        .my-ibtn { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 10px;
+                   border: 1px solid var(--glass-border); background: var(--bg-card); color: var(--text-primary);
+                   font-size: 1.15rem; cursor: pointer; line-height: 1; text-decoration: none; }
+        .my-ibtn:hover:not([disabled]) { border-color: var(--accent-primary, #6366f1); }
+        .my-ibtn:focus-visible { outline: 2px solid var(--accent-primary, #6366f1); outline-offset: 2px; }
+        .my-ibtn[disabled] { opacity: .4; cursor: default; }
+        .my-ibtn[aria-pressed="true"] { background: var(--accent-primary, #6366f1); color: #fff; }
+        .my-count { min-width: 2.5rem; text-align: center; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+        .my-card { position: relative; }
+        .my-card.is-deleting { opacity: .35; pointer-events: none; }
+        .my-card.is-selected .tc-card { outline: 3px solid var(--accent-primary, #6366f1); outline-offset: 2px; }
+        .my-ctl { position: absolute; top: .5rem; right: .5rem; display: flex; gap: .35rem; z-index: 3; }
+        .my-ctl .my-ibtn { width: 36px; height: 36px; font-size: 1rem; background: rgba(10,10,15,.72);
+                           color: #fff; border-color: rgba(255,255,255,.18); backdrop-filter: blur(6px); }
+        .my-sel { position: absolute; top: .5rem; left: .5rem; z-index: 3; width: 22px; height: 22px; cursor: pointer;
+                  accent-color: var(--accent-primary, #6366f1); }
+        .my-state { position: absolute; bottom: .5rem; right: .5rem; z-index: 3; font-size: .95rem;
+                    background: rgba(10,10,15,.72); color: #fff; border-radius: 8px; padding: .2rem .45rem; }
+        .my-toast { position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%); z-index: 50;
+                    display: flex; align-items: center; gap: .6rem; padding: .55rem .75rem; border-radius: 12px;
+                    background: #15151f; color: #f0f0f5; border: 1px solid rgba(255,255,255,.15);
+                    box-shadow: 0 8px 30px rgba(0,0,0,.4); }
+        .my-toast[hidden] { display: none; }
+        .my-empty { text-align: center; padding: 3rem 1rem; color: var(--text-secondary); font-size: 2.5rem; }
+        .my-empty a { display: inline-block; margin-top: .5rem; font-size: 1rem; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body data-layout-free3d-init="none" data-layout-active-path="/my">
+    <div id="site-header"></div>
+
+    <main style="padding: 2rem 0 4rem;">
+        <div class="container">
+            <div class="my-bar" role="toolbar" aria-label="My models">
+                <h1 data-i18n="my_heading">My models</h1>
+                <label class="my-ibtn" title="Select all" data-i18n-title="my_select_all">
+                    <input type="checkbox" id="my-select-all" aria-label="Select all" data-i18n-aria-label="my_select_all" style="width:18px;height:18px;margin:0">
+                </label>
+                <span class="my-count" id="my-sel-count" aria-live="polite"></span>
+                <button type="button" class="my-ibtn" id="my-bulk-private" title="Make private" data-i18n-title="my_make_private" aria-label="Make private" data-i18n-aria-label="my_make_private" disabled>🔒</button>
+                <button type="button" class="my-ibtn" id="my-bulk-public" title="Make public" data-i18n-title="my_make_public" aria-label="Make public" data-i18n-aria-label="my_make_public" disabled>🌐</button>
+                <button type="button" class="my-ibtn" id="my-bulk-delete" title="Delete for good" data-i18n-title="my_delete" aria-label="Delete for good" data-i18n-aria-label="my_delete" disabled>🗑</button>
+                <button type="button" class="my-ibtn hidden" id="my-default-private" aria-pressed="false" title="New models private" data-i18n-title="my_default_private" aria-label="New models private" data-i18n-aria-label="my_default_private">🛡</button>
+                <a class="my-ibtn hidden" id="my-plan-link" href="/buy-credits" title="Private models come with the subscription" data-i18n-title="my_private_locked" aria-label="Private models come with the subscription" data-i18n-aria-label="my_private_locked">🔐</a>
+                <a class="my-ibtn hidden" id="my-signin" href="/auth/login?next=/my" title="Sign in to keep your models in one place" data-i18n-title="my_signin_hint" aria-label="Sign in" data-i18n-aria-label="my_signin_hint">👤</a>
+            </div>
+            <div id="my-grid" class="gallery-grid-dyn" aria-busy="true">
+                <div class="card" style="padding:2rem;color:var(--text-secondary)" data-i18n="my_loading">Loading…</div>
+            </div>
+            <div id="my-more" class="hidden" style="text-align:center;margin-top:1.5rem">
+                <button type="button" class="my-ibtn" id="my-more-btn" title="More" data-i18n-title="my_more" aria-label="More" data-i18n-aria-label="my_more">⋯</button>
+            </div>
+        </div>
+    </main>
+
+    <div class="my-toast" id="my-toast" role="status" aria-live="polite" hidden>
+        <span id="my-toast-text"></span>
+        <button type="button" class="my-ibtn" id="my-toast-undo" title="Undo" data-i18n-title="my_undo" aria-label="Undo" data-i18n-aria-label="my_undo">↶</button>
+    </div>
+
+    <div id="site-footer"></div>
+
+    <script src="/static/js/header.js?v=7af49a0b78"></script>
+    <script src="/static/js/footer.js?v=196f33f358"></script>
+    <script src="/static/js/site-layout.js?v=21a812bf8b"></script>
+    <script src="/static/js/i18n.js?v=def8a7f7a1"></script>
+    <script src="/static/js/rig-icons.js?v=rigicons1"></script>
+    <script src="/static/js/task-card.js"></script>
+    <script src="/static/js/my-models.js"></script>
+</body>
+</html>

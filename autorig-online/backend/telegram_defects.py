@@ -108,6 +108,8 @@ def similar_line(row: dict) -> str:
 
 async def similar_html(run_id: str | None) -> str:
     rows = await similar_rows(run_id)
+    import task_privacy as _task_privacy          # private models (2026-10-17) are never listed as similar
+    rows = [r for r in rows if not _task_privacy.INDEX.is_private(str(r.get("task") or ""))]
     return "\n".join(similar_line(r) for r in rows)
 
 

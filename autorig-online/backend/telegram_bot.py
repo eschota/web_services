@@ -709,6 +709,10 @@ async def broadcast_new_task(
     source_preview_url: str | None = None,
 ) -> None:
     print(f"[Telegram] broadcast_new_task called for task {task_id}")
+    import task_privacy as _task_privacy
+    if _task_privacy.INDEX.is_private(task_id):     # private models (2026-10-17): no notice
+        print(f"[Telegram] task {task_id} is private, no new-task notice")
+        return
     token = _get_token()
     if not token:
         print("[Telegram] No token, skipping new task notification")

@@ -136,6 +136,9 @@ async def _remember_notice(chat_id: int, task_id: str, sent) -> None:
 
 async def broadcast_task_error(task_id: str, *, duration_seconds: int | None=None, queue_wait_seconds: int | None=None, processing_time_seconds: int | None=None, progress_page: str | None=None) -> None:
     print(f'[Telegram] broadcast_task_error called for task {task_id}')
+    import task_privacy as _task_privacy
+    if _task_privacy.INDEX.is_private(task_id):     # private models (2026-10-17): no notice
+        return
     token = _api._get_token()
     if not token:
         print('[Telegram] No token, skipping error notification')
@@ -198,6 +201,10 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
     """``extra_html``: lines the caller built (V3: viewer link, phase timings); ``video_wait_seconds=0`` when the
     task has no worker video to wait for (V3)."""
     print(f'[Telegram] broadcast_task_done called for task {task_id}')
+    import task_privacy as _task_privacy
+    if _task_privacy.INDEX.is_private(task_id):     # private models (2026-10-17): no notice
+        print(f'[Telegram] task {task_id} is private, no done notice')
+        return
     token = _api._get_token()
     if not token:
         print('[Telegram] No token, skipping done notification')

@@ -1,7 +1,7 @@
 <header class="header">
     <div class="container">
         <div class="header-inner">
-            <a href="/" class="logo" aria-label="AutoRig.online home">
+            <a href="/" class="logo" aria-label="AutoRig.online home" data-i18n-aria-label="chrome_logo_aria">
                 <img src="/static/images/logo/autorig-logo.png"
                      srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x"
                      alt="AutoRig.online"
@@ -10,20 +10,21 @@
                      height="80">
             </a>
 
-            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-controls="site-primary-nav" aria-expanded="false">
+            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation" data-i18n-aria-label="chrome_nav_open" aria-controls="site-primary-nav" aria-expanded="false">
                 <span></span>
                 <span></span>
                 <span></span>
             </button>
 
-            <nav class="nav" id="site-primary-nav" aria-label="Primary navigation">
+            <nav class="nav" id="site-primary-nav" aria-label="Primary navigation" data-i18n-aria-label="chrome_nav_primary">
                 <a href="/guides" class="nav-link" data-i18n="nav_guides">Guides</a>
                 <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+                <a href="/my" class="nav-link" data-i18n="nav_my_models" title="My models" data-i18n-title="nav_my_models">My models</a>
                 <a href="/animal-rig" class="nav-link" data-i18n="nav_animal_rig">Animals</a>
                 <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
                 <a href="/blender-plugin" class="nav-link" data-i18n="nav_blender_plugin">Blender Plugin</a>
                 <a href="/developers" class="nav-link" data-i18n="nav_api">API</a>
-                <a href="#" class="nav-link header-admin-tab hidden" id="header-admin-tab" title="Admin queue monitor">ADMIN</a>
+                <a href="#" class="nav-link header-admin-tab hidden" id="header-admin-tab" title="Admin queue monitor" data-i18n-title="chrome_admin_title">ADMIN</a>
             </nav>
 
             <div class="header-actions">
@@ -33,21 +34,22 @@
                 </div>
 
                 <div class="lang-selector">
-                    <button class="lang-btn" type="button" aria-label="Language">
-                        <span>EN</span>
+                    <button class="lang-btn" type="button" aria-label="Language" data-i18n-aria-label="lang_label">
+                        <span data-lang-current>EN</span>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
                             <path d="M3 4.5L6 7.5L9 4.5"/>
                         </svg>
                     </button>
                     <div class="lang-dropdown">
-                        <button class="lang-option" type="button" data-lang="en">English</button>
-                        <button class="lang-option" type="button" data-lang="ru">Russian</button>
-                        <button class="lang-option" type="button" data-lang="zh">Chinese</button>
-                        <button class="lang-option" type="button" data-lang="hi">Hindi</button>
+                        <button class="lang-option" type="button" data-lang="en" lang="en">English</button>
+                        <button class="lang-option" type="button" data-lang="ru" lang="ru">Русский</button>
+                        <button class="lang-option" type="button" data-lang="zh" lang="zh">中文</button>
+                        <button class="lang-option" type="button" data-lang="hi" lang="hi">हिंदी</button>
+                        <button class="lang-option" type="button" data-lang="fa" lang="fa" dir="rtl">فارسی</button>
                     </div>
                 </div>
 
-                <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle theme">Theme</button>
+                <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle theme" data-i18n-title="chrome_theme_toggle">Theme</button>
 
                 <a href="/auth/login" class="btn btn-google" id="login-btn">
                     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -60,7 +62,7 @@
                 </a>
 
                 <div id="user-info" class="hidden flex items-center gap-2">
-                    <a href="/dashboard" class="user-account-hit" title="Dashboard">
+                    <a href="/dashboard" class="user-account-hit" title="Dashboard" data-i18n-title="nav_dashboard">
                         <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
                         <span class="user-name"></span>
                     </a>
