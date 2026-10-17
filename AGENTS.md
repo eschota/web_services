@@ -630,6 +630,23 @@ Owner rule, 2026-10-10:
 * The scene gate is one flag with one owner (the page's stage logic), with a hard cap (120 s) so a stuck run never
   blocks the scene forever; its decisions are logged in the console with the reason.
 
+## Positioning Is Checked From The Start When The File Stands Tall (owner order, 2026-10-17)
+
+> если вертикалка выше горизонталки это повод проверить позиционирование со старта
+
+* On the notice of task 5b8dcdac («T Pose», `t_pose.glb`, #2514): a standing T-pose character whose file's own +y
+  extent is the tallest (1.12 vs 1.10 arm span, 0.34 thick) was turned by the orientator onto its back («quadruped:
+  4 foot blobs at the low end», 0.9: the two hands and two feet seen along the thin axis) and rigged with 32 quad
+  bones through the lying body. The slab guard of `mt/orient.estimate_up` fired only below 0.25 of the span; this
+  file is 0.305.
+* The rule (spec `docs/orientation-tall-file-spec-20261017.md` in the MT repo): when the file's vertical extent is
+  not below its horizontal ones (`tall_file`, ratio 0.95), the file's own up is judged FIRST by the voxel trace; a
+  +y that reads a biped (two arm chains, feet) is kept whatever the orientator's pick, and only a source skeleton
+  outranks it. A quadruped pick is never a slab (the up axis under 0.5 of the smaller horizontal extent is dropped
+  unless the words name an animal). The title and the file name are words (`t_pose`, `a_pose`, `humanoid`,
+  `character` mean a biped). Every orientation pass writes its judge evidence into `proj/orient.json` (candidates,
+  arm chains, feet, seconds), and the «transform» defect report shows it. Corpus case `tpose_slab_030_upright`.
+
 ## Rig Contract V3.1 (owner order, 2026-10-17)
 
 > запиши контракт v3.1 и добавь туда обязательный скиннинг не в позе контакта, а в свободную А или Т позу, ту что
