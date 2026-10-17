@@ -16,6 +16,9 @@ VEHICLE_MASKS_URL first and falls back to the CPU worker.
               `boxes` (2026-10-16): one SAM2 mask per box hint, no DINO; objects with "source": "box",
               "prompt_box", masks "<kind>_box_<i>.png"; "boxes_done" counts them. With `boxes` and no `queries`
               DINO does not run at all. Without `boxes` the request is the text path as before.
+    POST /analyze the common GPU analyser (contract V3.2 §1, analyzer_box.py beside this file): a low-poly mesh ->
+                  standard views rendered on the GPU -> one GroundingDINO caption per batch of views -> SAM2 ->
+                  votes per face and label / material; or a picture -> object / material maps (mt/analyzer.py)
     GET  /health  {"ok": true, "device": "cuda", "gpu": "...", "loaded": true, "box": "f12", "requests": 3,
                    "inflight": 0, "last_seconds": 1.8, "vram_mb": 2210, "idle_unload_s": 600}
 
@@ -238,6 +241,24 @@ def segment(img_bgr, queries, box_threshold=0.3, wheel_threshold=0.4, text_thres
             "device": STATE["device"], "gpu": STATE["gpu"]}
 
 
+def _analyzer():
+    """analyzer_box.py beside this file (the common GPU analyser), imported on first use; None when absent."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import analyzer_box
+        return analyzer_box
+    except Exception as exc:                       # noqa: BLE001
+        STATE["analyze_error"] = f"{type(exc).__name__}: {exc}"[:200]
+        return None
+
+
+def _analyzer_version():
+    m = _analyzer()
+    return getattr(m, "VERSION", None) if m else None
+
+
 class H(BaseHTTPRequestHandler):
     def _send(self, code, doc):
         data = json.dumps(doc).encode("utf-8")
@@ -259,10 +280,12 @@ class H(BaseHTTPRequestHandler):
                                     "errors": STATE["errors"], "inflight": STATE["inflight"],
                                     "last_seconds": STATE["last_seconds"], "vram_mb": _vram_mb(),
                                     "idle_unload_s": STATE["idle_unload_s"], "loads": STATE["loads"],
-                                    "load_error": STATE["load_error"]})
+                                    "load_error": STATE["load_error"], "analyze": _analyzer_version()})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path.startswith("/analyze"):
+            return self._analyze()
         if not self.path.startswith("/masks"):
             return self._send(404, {"error": "not found"})
         try:
@@ -301,6 +324,43 @@ class H(BaseHTTPRequestHandler):
         except Exception as exc:                   # noqa: BLE001
             STATE["errors"] += 1
             self._send(500, {"error": str(exc)[:400]})
+
+
+def _analyze_post(self):
+    """POST /analyze: the same models and lock as /masks (analyzer_box.analyze)."""
+    try:
+        n = int(self.headers.get("Content-Length") or 0)
+        body = json.loads(self.rfile.read(n) or b"{}")
+        ab = _analyzer()
+        if ab is None:
+            return self._send(501, {"error": "analyzer_box.py missing: " + str(STATE.get("analyze_error"))})
+        STATE["inflight"] += 1
+        STATE["requests"] += 1
+        try:
+            t0 = time.perf_counter()
+            if not STATE["loaded"]:
+                _load_safe()
+            if not STATE["loaded"]:
+                STATE["errors"] += 1
+                return self._send(503, {"error": "models not loaded: " + (STATE["load_error"] or "loading")})
+            with STATE["lock"]:
+                if not STATE["loaded"]:
+                    STATE["errors"] += 1
+                    return self._send(503, {"error": "models unloaded"})
+                doc = ab.analyze(body, STATE)
+                STATE["last_used"] = time.time()
+            doc["box_name"] = STATE["box"]
+            doc.setdefault("seconds", {})["request"] = round(time.perf_counter() - t0, 3)
+            STATE["last_seconds"] = doc["seconds"]["request"]
+        finally:
+            STATE["inflight"] -= 1
+        self._send(200, doc)
+    except Exception as exc:                       # noqa: BLE001
+        STATE["errors"] += 1
+        self._send(500, {"error": f"{type(exc).__name__}: {exc}"[:400]})
+
+
+H._analyze = _analyze_post
 
 
 def main():
