@@ -87,3 +87,6 @@
   .v31-stepname{display:none}
 }
 @media (prefers-reduced-motion:reduce){.v31-card,.v31-part,.v31-chips li{animation:none}}
+.v31-pop h6{margin:2px 0 3px;font-size:11px;font-weight:750;opacity:.75;text-transform:none}
+.v31-pop h5 small{opacity:.6;font-weight:600}
+.tv3-tool.v31-partstool:not(.on){opacity:.55}

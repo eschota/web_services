@@ -16,7 +16,13 @@
 // viewer prefs (/api/mt/v31/prefs). Runs without the V3.1 events still get the voxels, bones, weights, clips and
 // checks they have; the Unity presentation (mt/static/live.js) is never driven from here, so it works as before.
 // Off: ?v31=0. Icons with tooltips; every name goes through I18n (v31_* keys, en/ru/zh/hi/fa).
-const BUILD = 'v31-20261017.1';
+// The 3D side (V3.1 parts, spec MT docs/v31-part-entities-spec-20261017.md §D, 2026-10-17): a Unity build that answers
+// live_ready_v31 (LiveLayerParts.cs) gets the part records too: LiveParts (colour, icon, mask, centroid, bone), the voxel
+// colours while the parts are found, the part shader on the mesh from the bones on, and only the 3D icons once the
+// animation is ready (LivePartsOff; a tool bar button cycles icons / full / none). Hover on an icon opens the part's card,
+// a click (icon or mesh) pins it with the relabel buttons. A replay with the build in drives the voxels, bones and
+// weights in 3D instead of the splat. A build without it never gets these messages.
+const BUILD = 'v31-20261017.2';
 const params = new URLSearchParams(location.search);
 const OFF = params.get('v31') === '0';
 const FIXTURE = params.get('v31fixture') === '1';
@@ -47,6 +53,13 @@ const FB = {
     v31_label_hat: 'hat', v31_label_glove: 'glove', v31_label_mitten: 'mitten', v31_label_coat: 'coat',
     v31_label_cloak: 'cloak', v31_label_skirt: 'skirt', v31_label_boot: 'boot', v31_label_wing: 'wing',
     v31_label_tail: 'tail', v31_label_ear: 'ear', v31_label_prop: 'held object',
+    v31_label_face: 'face', v31_label_moustache: 'moustache', v31_label_neck: 'neck', v31_label_cape: 'cape',
+    v31_label_sleeve: 'sleeve', v31_label_belt: 'belt', v31_label_finger: 'finger', v31_label_horn: 'horn',
+    v31_behaviour: 'Behaviour', v31_chain: 'Chain', v31_sources: 'Sources', v31_qa_part: 'Part checks',
+    v31_behaviour_bone: 'bone', v31_behaviour_chain: 'bone chain', v31_behaviour_cloth: 'cloth',
+    v31_behaviour_tail: 'tail', v31_behaviour_prop: 'held object', v31_behaviour_static: 'static',
+    v31_parts_mode_icons: 'Parts: icons only', v31_parts_mode_full: 'Parts: colours, shader and icons',
+    v31_parts_mode_none: 'Parts: hidden',
     v31_cat_biped: 'Biped', v31_cat_humanoid: 'Humanoid', v31_cat_quadruped: 'Quadruped', v31_cat_equine: 'Equine',
     v31_cat_monster: 'Monster', v31_cat_serpent: 'Serpent', v31_cat_bird: 'Bird', v31_cat_multilimb: 'Many limbs',
     v31_cat_hands: 'Hands', v31_cat_vehicle: 'Vehicle', v31_cat_primate: 'Primate',
@@ -76,6 +89,13 @@ const FB = {
     v31_label_hat: 'шапка', v31_label_glove: 'перчатка', v31_label_mitten: 'варежка', v31_label_coat: 'пальто',
     v31_label_cloak: 'плащ', v31_label_skirt: 'юбка', v31_label_boot: 'сапог', v31_label_wing: 'крыло',
     v31_label_tail: 'хвост', v31_label_ear: 'ухо', v31_label_prop: 'предмет в руке',
+    v31_label_face: 'лицо', v31_label_moustache: 'усы', v31_label_neck: 'шея', v31_label_cape: 'накидка',
+    v31_label_sleeve: 'рукав', v31_label_belt: 'пояс', v31_label_finger: 'палец', v31_label_horn: 'рог',
+    v31_behaviour: 'Поведение', v31_chain: 'Цепочка', v31_sources: 'Источники', v31_qa_part: 'Проверки части',
+    v31_behaviour_bone: 'кость', v31_behaviour_chain: 'цепочка костей', v31_behaviour_cloth: 'ткань',
+    v31_behaviour_tail: 'хвост', v31_behaviour_prop: 'предмет в руке', v31_behaviour_static: 'неподвижная',
+    v31_parts_mode_icons: 'Части: только иконки', v31_parts_mode_full: 'Части: цвета, шейдер и иконки',
+    v31_parts_mode_none: 'Части: скрыты',
     v31_cat_biped: 'Двуногий', v31_cat_humanoid: 'Гуманоид', v31_cat_quadruped: 'Четвероногий', v31_cat_equine: 'Лошадиные',
     v31_cat_monster: 'Монстр', v31_cat_serpent: 'Змей', v31_cat_bird: 'Птица', v31_cat_multilimb: 'Много конечностей',
     v31_cat_hands: 'Кисти', v31_cat_vehicle: 'Транспорт', v31_cat_primate: 'Примат',
@@ -116,6 +136,9 @@ const ICON = {
   auto: '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>',
   map: '<path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  parts_icons: '<circle cx="7" cy="7" r="3.2"/><circle cx="17" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/>',
+  parts_full: '<path d="M12 3c4 0 6 2.6 6 5.6 0 2.4-1.4 3.6-3 4.4v7h-6v-7c-1.6-.8-3-2-3-4.4C6 5.6 8 3 12 3z"/><circle cx="12" cy="8.5" r="2.4" fill="currentColor"/>',
+  parts_none: '<circle cx="7" cy="7" r="3.2"/><circle cx="17" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/><path d="M4 20L20 4"/>',
 };
 const STEP_NAME = { vox: 'voxels', erosion: 'erosion', frame: 'frame', part: 'parts', cls: 'class', bones: 'bones',
   weights: 'weights', pose: 'pose', layers: 'layers', clip: 'clips', qa: 'qa', qa_ext: 'qa', judge: 'qa',
@@ -216,6 +239,11 @@ function start(viewerEl) {
   replayTool.hidden = true;
   replayTool.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON.replay}</svg>`;
   if (tools) tools.insertBefore(replayTool, document.getElementById('tv3-build') || null);
+  const partsTool = document.createElement('button');
+  partsTool.className = 'tv3-tool v31-tool v31-partstool';
+  partsTool.type = 'button';
+  partsTool.hidden = true;
+  if (tools) tools.insertBefore(partsTool, document.getElementById('tv3-build') || null);
 
   const W = window.autorigV31 = { build: BUILD, run: null, steps: [], idx: 0, mode: 'wait', fixture: FIXTURE, t: {} };
   let run = '', FILES = '';
@@ -321,7 +349,11 @@ function start(viewerEl) {
   }
   function seek(n) {
     n = Math.max(0, Math.min(steps.length, n));
-    if (n < idx) { S = fresh(); for (let i = 0; i < n; i++) apply(steps[i]); }
+    if (n < idx) {
+      S = fresh();
+      for (let i = 0; i < n; i++) apply(steps[i]);
+      if (replay3d) { drv = {}; usendRaw('LiveReset', ''); delete uSent.vp; delete uSent.pm; }
+    }
     else for (let i = idx; i < n; i++) apply(steps[i]);
     idx = n;
     W.idx = idx;
@@ -369,6 +401,8 @@ function start(viewerEl) {
       if ((playing || live) && cards.children.length > n0) cards.lastElementChild.scrollIntoView({ block: 'nearest' });
     }
     root.classList.toggle('has-cards', !!html);
+    syncUnity();
+    paintPartsTool();
   }
   function ticksHtml() {
     if (!steps.length) return '';
@@ -447,20 +481,44 @@ function start(viewerEl) {
   }
 
   // ---------------------------------------------------------------- relabel
-  function openPop(id, x, y) {
+  // the part's card: the numbers of its record (analysis/parts.json), then the contract labels to relabel it
+  function srcHtml(src) {
+    if (!src) return '—';
+    if (typeof src !== 'object') return esc(src);
+    const rows = Object.entries(src).filter(([, v]) => v != null && v !== false && v !== '');
+    if (!rows.length) return '—';
+    return rows.map(([k, v]) => `${esc(k)}${typeof v === 'number' ? ` ${Math.round(v * (v <= 1 ? 100 : 1))}${v <= 1 ? '%' : ''}` : ''}`).join(' · ');
+  }
+  function qaHtml(qa) {
+    const rows = Object.entries(qa || {}).filter(([, v]) => v != null && typeof v !== 'object');
+    return rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${typeof v === 'number' ? num(v, 3) : esc(v)}</dd>`).join('');
+  }
+  function openPop(id, x, y, opts) {
     const p = S.parts.get(id);
     if (!p) { pop.hidden = true; return; }
+    const o = opts || {};
     const cur = partLabel(p);
-    pop.innerHTML = `<h5><i style="background:${esc(p.color)}"></i>${esc(labelName(cur))}</h5><dl>` +
-      `<dt>${esc(tr('v31_voxels_n'))}</dt><dd>${num(p.voxels, 0)}</dd><dt>${esc(tr('v31_volume'))}</dt><dd>${num(p.volume_m3, 4)} m³</dd>` +
-      `<dt>${esc(tr('v31_bone'))}</dt><dd>${esc(p.attachment_bone || '—')}</dd><dt>${esc(tr('v31_source'))}</dt><dd>${esc(p.source || '—')}</dd>` +
-      `<dt>${esc(tr('v31_confidence'))}</dt><dd>${Math.round(Number(p.confidence || 0) * 100)}%</dd></dl>` +
+    const bone = p.attached_to || p.attachment_bone || '';
+    const chain = Array.isArray(p.chain) ? p.chain : [];
+    const beh = p.behaviour ? (tr(`v31_behaviour_${p.behaviour}`) || p.behaviour) : '';
+    const qa = qaHtml(p.qa);
+    pop.innerHTML = `<h5><i style="background:${esc(p.color)}"></i>${esc(labelName(cur))}${p.side ? ` <small>${esc(tr(`v31_side_${p.side}`))}</small>` : ''}</h5><dl>` +
+      `<dt>${esc(tr('v31_confidence'))}</dt><dd>${Math.round(Number(p.confidence || 0) * 100)}%</dd>` +
+      `<dt>${esc(tr(typeof p.source === 'object' && p.source ? 'v31_sources' : 'v31_source'))}</dt><dd>${srcHtml(p.source)}</dd>` +
+      `<dt>${esc(tr('v31_volume'))}</dt><dd>${num(p.volume_m3, 4)} m³</dd>` +
+      (p.voxels != null ? `<dt>${esc(tr('v31_voxels_n'))}</dt><dd>${num(p.voxels, 0)}</dd>` : '') +
+      `<dt>${esc(tr('v31_bone'))}</dt><dd>${esc(bone || '—')}</dd>` +
+      (chain.length ? `<dt>${esc(tr('v31_chain'))}</dt><dd title="${esc(chain.join(', '))}">${chain.length}</dd>` : '') +
+      (beh ? `<dt>${esc(tr('v31_behaviour'))}</dt><dd>${esc(beh)}</dd>` : '') + '</dl>' +
+      (qa ? `<h6>${esc(tr('v31_qa_part'))}</h6><dl>${qa}</dl>` : '') +
       `<div class="v31-relabel" title="${esc(tr('v31_relabel'))}">${CONTRACT_LABELS.map((l) => `<button type="button" data-label="${l}" class="${l === cur ? 'cur' : ''}">${esc(labelName(l))}</button>`).join('')}</div>`;
     pop.dataset.part = id;
+    pop.dataset.hover = o.hover ? '1' : '';
     pop.hidden = false;
     const r = root.getBoundingClientRect();
     const pw = Math.min(260, r.width - 16);
-    pop.style.left = `${Math.max(8, Math.min(r.width - pw - 8, x - r.left - pw - 12))}px`;
+    const left = o.right && x - r.left + 22 + pw < r.width - 8 ? x - r.left + 22 : x - r.left - pw - 12;
+    pop.style.left = `${Math.max(8, Math.min(r.width - pw - 8, left))}px`;
     pop.style.top = `${Math.max(8, Math.min(r.height - 240, y - r.top - 20))}px`;
   }
   async function relabel(id, label) {
@@ -499,11 +557,160 @@ function start(viewerEl) {
     if (selected) openPop(id, li.getBoundingClientRect().left, e.clientY); else pop.hidden = true;
     paint();
   });
+  cards.addEventListener('mouseover', (e) => {
+    const li = e.target.closest('.v31-part');
+    usend('LivePartHover', { id: li ? li.dataset.part : '' }, 'hover');
+  });
+  cards.addEventListener('mouseleave', () => usend('LivePartHover', { id: '' }, 'hover'));
+  pop.addEventListener('mouseenter', () => { clearTimeout(hoverHide); pop.dataset.hover = ''; });
   pop.addEventListener('click', (e) => {
     const b = e.target.closest('button[data-label]');
     if (b && pop.dataset.part) relabel(pop.dataset.part, b.dataset.label);
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { pop.hidden = true; selected = null; paint(); } });
+
+  // ---------------------------------------------------------------- the 3D side (Unity, LiveLayerParts.cs)
+  let u3d = false, uSent = {}, uState = null, replay3d = false, drv = {}, hoverHide = 0;
+  let partsMode = 'icons';
+  try { const m = localStorage.getItem('autorig_v31_parts_mode'); if (m === 'full' || m === 'none' || m === 'icons') partsMode = m; } catch (e) { /* storage off */ }
+  const uwin = () => { try { return viewerEl.contentWindow; } catch (e) { return null; } };
+  const abs = (u) => { try { return new URL(url(u), location.origin).href; } catch (e) { return u; } };
+  function usendRaw(m, v) {
+    const w = uwin();
+    if (!u3d || !w || !w.autorigUnity || typeof w.autorigUnity.send !== 'function') return false;
+    try { w.autorigUnity.send(m, v); } catch (e) { return false; }
+    return true;
+  }
+  // a message is sent again only when it changed (paint() calls the sync often)
+  function usend(m, v, key) {
+    const k = key || m, sv = JSON.stringify(v);
+    if (uSent[k] === sv) return;
+    if (usendRaw(m, v)) uSent[k] = sv;
+  }
+  function onUnity(ev) {
+    const d = ev.detail || {};
+    let data = null;
+    try { data = d.json ? JSON.parse(d.json) : null; } catch (e) { data = null; }
+    if (d.name === 'live_ready_v31') {
+      const first = !u3d;
+      u3d = true;
+      uSent = {};
+      W.u3d = data;
+      if (first) usendRaw('LiveV31Hello', '');
+      paint();
+    } else if (d.name === 'live_parts_state') {
+      uState = data;
+      W.uState = data;
+      paintPartsTool();
+    } else if (d.name === 'live_part_hover' && data) {
+      const r = viewerEl.getBoundingClientRect();
+      clearTimeout(hoverHide);
+      if (data.id) {
+        if (!pop.hidden && !pop.dataset.hover && pop.dataset.part !== data.id) return;   // a pinned card stays
+        if (pop.hidden || pop.dataset.hover) openPop(data.id, r.left + data.x * r.width, r.top + data.y * r.height, { hover: true, right: true });
+      } else if (!pop.hidden && pop.dataset.hover) hoverHide = setTimeout(() => { if (pop.dataset.hover) pop.hidden = true; }, 700);
+    } else if (d.name === 'live_part_pick' && data && data.id) {
+      const r = viewerEl.getBoundingClientRect();
+      selected = data.selected || null;
+      W.lastPick = data;
+      if (selected) openPop(data.id, r.left + data.x * r.width, r.top + data.y * r.height, { right: true });
+      else pop.hidden = true;
+      paint();
+    }
+  }
+  function hookUnity() {
+    const w = uwin();
+    if (!w || w.__v31hook) return;
+    try { w.__v31hook = true; w.addEventListener('autorig-unity', onUnity); } catch (e) { /* cross-origin */ }
+  }
+  hookUnity();
+  setInterval(hookUnity, 500);
+  viewerEl.addEventListener('load', () => { u3d = false; uSent = {}; drv = {}; hookUnity(); });
+
+  function unityParts() {
+    return S.order.map((id) => {
+      const p = S.parts.get(id);
+      const m = p.mask_url_96 || p.mask_url;
+      const o = { id, label: partLabel(p), color: p.color || '', priority: p.group === 'props' ? 2 : p.group === 'garments' ? 1 : 0 };
+      if (p.icon) o.icon = p.icon;
+      if (m) o.mask_url = abs(m);
+      if (Array.isArray(p.centroid)) o.centroid = p.centroid;
+      else if (p.bbox && p.bbox.min && p.bbox.max && !m) o.bbox = p.bbox;
+      const bone = p.attached_to || p.attachment_bone;
+      if (bone) o.bone = bone;
+      if (Array.isArray(p.chain) && p.chain.length) o.bones = p.chain;
+      return o;
+    });
+  }
+  // what Unity shows of the parts: while the stages play (a 3D replay, a live run), the voxels in part colours until the
+  // bones, then the part shader on the mesh; at rest the person's mode (icons only by default)
+  function syncUnity() {
+    if (!u3d) return;
+    const parts = unityParts();
+    usend('LiveParts', { parts });
+    usend('LivePartSelect', { id: selected || '' }, 'sel');
+    if (!parts.length) return;
+    const presenting = replay3d || (live && !runDone && !replayMode);
+    if (presenting) {
+      usend('LivePartsOff', { mode: 'full', pin: true }, 'mode');
+      usend('LiveShow', { layer: 'voxelparts', on: !S.bones }, 'vp');
+      usend('LiveShow', { layer: 'parts', on: !!S.bones }, 'pm');
+    } else {
+      usend('LiveShow', { layer: 'voxelparts', on: false }, 'vp');
+      usend('LiveShow', { layer: 'parts', on: true }, 'pm');
+      usend('LivePartsOff', { mode: partsMode, pin: partsMode !== 'icons' }, 'mode');
+    }
+    drive3d();
+  }
+  // a 3D replay: the voxel levels, the bones and the weights go to Unity from the steps played so far
+  function drive3d() {
+    if (!replay3d || !u3d) return;
+    const done = steps.slice(0, idx);
+    let lastVox = null, lastBones = null;
+    for (const st of done) { if (st.k === 'vox') lastVox = st; if (st.k === 'bones' || st.k === 'weights') lastBones = st; }
+    const cur = done[done.length - 1];
+    const voxUrl = lastVox ? abs(lastVox.url) : '';
+    if (voxUrl && drv.vox !== voxUrl) { usendRaw('LiveVoxels', { url: voxUrl, res: lastVox.res, fine: !!lastVox.fine }); drv.vox = voxUrl; }
+    const voxOn = !!lastVox && !S.bones;
+    if (drv.voxOn !== voxOn) { usendRaw('LiveShow', { layer: 'voxels', on: voxOn }); drv.voxOn = voxOn; }
+    if (lastBones && drv.bones !== lastBones) { usendRaw('LiveBones', { bones: lastBones.bones || [] }); usendRaw('LiveShow', { layer: 'bones', on: true }); drv.bones = lastBones; }
+    const heat = !!(cur && cur.k === 'weights');
+    if (drv.heat !== heat) { usendRaw('LiveWeights', { mode: heat ? 'dominant' : 'off' }); drv.heat = heat; }
+  }
+  function start3d() {
+    replay3d = true;
+    drv = {};
+    uSent = {};
+    usendRaw('LiveReset', '');
+  }
+  function end3d() {
+    if (!replay3d) return;
+    replay3d = false;
+    usendRaw('LiveShow', { layer: 'voxels', on: false });
+    usendRaw('LiveWeights', { mode: 'off' });
+    drv = {};
+    syncUnity();
+  }
+  function paintPartsTool() {
+    const show = u3d && S.parts.size > 0;
+    partsTool.hidden = !show;
+    if (!show) return;
+    const mode = uState && uState.mode && !replay3d ? uState.mode : partsMode;
+    partsTool.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[`parts_${mode}`] || ICON.parts_icons}</svg>`;
+    partsTool.title = tr(`v31_parts_mode_${mode}`);
+    partsTool.setAttribute('aria-label', partsTool.title);
+    partsTool.classList.toggle('on', mode !== 'none');
+  }
+  partsTool.addEventListener('click', () => {
+    const order = ['icons', 'full', 'none'];
+    const cur = uState && uState.mode && !replay3d ? uState.mode : partsMode;
+    partsMode = order[(order.indexOf(cur) + 1) % order.length];
+    try { localStorage.setItem('autorig_v31_parts_mode', partsMode); } catch (e) { /* storage off */ }
+    delete uSent.mode;
+    if (replay3d || replayMode) skip();
+    syncUnity();
+    paintPartsTool();
+  });
 
   // ---------------------------------------------------------------- the canvas (the voxel splat)
   let maskIndex = null;     // quantized position -> part id, from the loaded masks
@@ -769,8 +976,9 @@ function start(viewerEl) {
     const token = ++playToken;
     playing = true;
     replayMode = true;
-    setDocked(false);
-    hold(true);
+    // the build answers live_ready_v31 and has presented: the stages play in 3D, the panel stays docked
+    if (u3d && unityReady()) { if (!replay3d) start3d(); setDocked(true); }
+    else { setDocked(false); hold(true); }
     scrub.hidden = false;
     if (from != null) seek(from);
     paint();
@@ -789,6 +997,7 @@ function start(viewerEl) {
   function finishReplay() {
     playing = false;
     replayMode = false;
+    end3d();
     paint();
     if (!live || runDone) { setDocked(true); hold(false); }
   }
@@ -917,11 +1126,12 @@ function start(viewerEl) {
   // live: once the Unity build is in, the panel docks and Unity draws in 3D; the splat stays one click away
   setInterval(() => { if (live && !replayMode && !docked && unityReady()) { setDocked(true); hold(false); } }, 1000);
   Object.assign(W, { seek: (n) => { playToken++; playing = false; seek(n); }, play: (n) => play(n), skip: () => skip(),
-    state: () => S, kinds: () => steps.map((x) => x.k) });
+    state: () => S, kinds: () => steps.map((x) => x.k), unity: () => ({ u3d, replay3d, partsMode, uState, sent: { ...uSent } }) });
   function teardown() {
     cancelAnimationFrame(raf);
     root.remove();
     replayTool.remove();
+    partsTool.remove();
     hold(false);
     W.mode = 'none';
   }
