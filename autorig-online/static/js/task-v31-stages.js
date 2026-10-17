@@ -1258,6 +1258,12 @@ function start(viewerEl) {
   }
   // live: once the Unity build is in, the panel docks and Unity draws in 3D; the splat stays one click away
   setInterval(() => { if (live && !replayMode && !docked && unityReady()) setDocked(true); }, 1000);
+  // the stage the person is looking at, for the viewer telemetry (static/js/viewer-telemetry.js)
+  W.stageInfo = () => {
+    const cur = steps[idx - 1];
+    return { kind: cur ? (STEP_NAME[cur.k] || cur.k) : '', step: idx, steps: steps.length, docked, playing, replay: replayMode,
+      live, replay3d: !!replay3d, map: mapOn, gate: G.open };
+  };
   Object.assign(W, { seek: (n) => { playToken++; playing = false; seek(n); }, play: (n) => play(n), skip: () => skip(),
     state: () => S, kinds: () => steps.map((x) => x.k), unity: () => ({ u3d, replay3d, partsMode, uState, sent: { ...uSent } }) });
   function teardown() {
