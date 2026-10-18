@@ -1,0 +1,116 @@
+/* Viewer V3.1 stages over the task viewer (static/js/task-v31-stages.js, 2026-10-17): the voxel splat, the parts
+   legend and the class / pose / layers / clips / QA cards, the scrub bar. Icons with tooltips, no paragraphs. */
+.v31{--v31-glass:rgba(16,20,30,.72);--v31-line:rgba(255,255,255,.10);--v31-blur:blur(14px);--v31-shadow:0 12px 36px rgba(0,0,0,.42);position:absolute;inset:0;z-index:4;pointer-events:none;font:500 12px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;color:#e9eef7}
+.v31:not(.on){display:none}
+.v31-back{position:absolute;inset:0;background:radial-gradient(110% 90% at 46% 40%,rgba(14,18,28,.94) 0,rgba(4,6,10,.97) 70%);opacity:0;transition:opacity .6s ease}
+.v31.staging .v31-back{opacity:1}
+.v31-cv{position:absolute;inset:0;width:100%;height:100%;pointer-events:auto;cursor:grab;touch-action:none}
+.v31-cv:active{cursor:grabbing}
+.v31.docked .v31-cv{display:none}
+.v31.docked.mapon .v31-cv{display:block;inset:auto;left:58px;bottom:96px;width:min(240px,40%);height:min(300px,48%);border-radius:14px;background:rgba(6,9,15,.82);border:1px solid rgba(255,255,255,.1);box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.v31 .v31i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.v31-btn{pointer-events:auto;display:inline-grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:9px;background:rgba(255,255,255,.06);color:#e9eef7;cursor:pointer;transition:background .2s,color .2s}
+.v31-btn:hover{background:rgba(255,255,255,.16)}
+.v31-btn.on{color:#80ed99}
+.v31-panel{position:absolute;top:64px;right:52px;width:236px;max-width:260px;max-height:calc(100% - 64px - 200px);display:flex;flex-direction:column;pointer-events:auto;border-radius:14px;background:var(--v31-glass);border:1px solid var(--v31-line);box-shadow:var(--v31-shadow);backdrop-filter:var(--v31-blur);-webkit-backdrop-filter:var(--v31-blur);transition:opacity .35s,transform .35s}
+.v31:not(.has-cards) .v31-panel{opacity:.0;transform:translateY(-6px)}
+.v31-panel-head{display:flex;align-items:center;gap:6px;padding:6px;border-bottom:1px solid rgba(255,255,255,.07)}
+.v31-now{flex:1;min-width:0;display:flex;align-items:center;gap:6px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v31-now .v31i{color:#4cc9f0;animation:v31pulse 1.2s ease-in-out infinite}
+.v31.docked .v31-now .v31i{animation:none}
+.v31-cards{overflow:auto;min-height:0;flex:1 1 auto;padding:4px 6px 8px;scrollbar-width:thin;overscroll-behavior:contain}
+.v31.collapsed .v31-cards,.v31.collapsed .v31-scrub{display:none}
+.v31.collapsed .v31-fold .v31i{transform:rotate(45deg)}
+.v31-card{margin:6px 0 0;padding:7px 8px;border-radius:10px;background:rgba(255,255,255,.04);animation:v31in .45s ease both}
+.v31-card h4{display:flex;align-items:center;gap:6px;margin:0 0 5px;font-weight:700;font-size:11.5px;line-height:1.2;letter-spacing:.02em;color:#cfd8e6}
+.v31-card h4 span{flex:1}
+.v31-card h4 b{font-variant-numeric:tabular-nums;color:#fff}
+.v31-card h4 b.warn,.v31 .warn{color:#ffd166}
+.v31-parts{list-style:none;margin:0;padding:0}
+.v31-part{display:grid;grid-template-columns:12px 1fr auto;grid-template-rows:auto 3px;column-gap:7px;align-items:center;padding:4px 5px;border-radius:7px;cursor:pointer;animation:v31in .4s ease both}
+.v31-part:hover{background:rgba(255,255,255,.07)}
+.v31-part.sel{background:rgba(76,201,240,.16);outline:1px solid rgba(76,201,240,.5)}
+.v31-part>i{width:12px;height:12px;border-radius:4px;box-shadow:0 0 0 1px rgba(0,0,0,.4) inset}
+.v31-part span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v31-part small{opacity:.6}
+.v31-part em{font-style:normal;font-size:10px;padding:0 4px;border-radius:4px;background:rgba(255,209,102,.18);color:#ffd166}
+.v31-part.relab span{color:#f4a261}
+.v31-part b{font-variant-numeric:tabular-nums;font-weight:600;opacity:.85;font-size:11px}
+.v31-part u{grid-column:2/4;height:3px;border-radius:2px;background:rgba(255,255,255,.08);text-decoration:none;overflow:hidden}
+.v31-part u s{display:block;height:100%;background:linear-gradient(90deg,#4cc9f0,#80ed99);text-decoration:none}
+.v31-mute{margin:4px 2px 0;opacity:.55;font-size:11px}
+.v31-big{font-weight:800;font-size:17px;line-height:1.15;color:#ffd166}
+.v31-big small{font-weight:600;font-size:11px;opacity:.7;color:#e9eef7}
+.v31-what{margin-top:2px;opacity:.75;font-style:italic}
+.v31-card dl{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin:5px 0 0}
+.v31-card dt{opacity:.62;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v31-card dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;font-weight:650}
+.v31 .ok{color:#80ed99}.v31 .bad{color:#ff6b6b}
+.v31-std{font-weight:900;font-size:16px;line-height:1;color:#06d6a0}
+.v31-wimg{display:block;width:100%;max-height:150px;object-fit:contain;border-radius:8px;background:#000}
+.v31-wimg[data-src]{min-height:90px;background:linear-gradient(90deg,#05070b,#111827,#05070b);background-size:200% 100%;animation:v31shim 1.6s linear infinite}
+@keyframes v31shim{to{background-position:-200% 0}}
+.v31-chips{display:flex;flex-wrap:wrap;gap:4px;list-style:none;margin:0;padding:0}
+.v31-chips li{padding:2px 7px;border-radius:999px;background:rgba(142,202,230,.13);font-size:11px;animation:v31in .3s ease both}
+.v31-chips li.ok{background:rgba(128,237,153,.16)}.v31-chips li.bad{background:rgba(255,107,107,.18)}
+.v31-qa{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:11px}
+.v31-qa th{font-weight:600;opacity:.6;text-align:right;padding:0 2px 2px}
+.v31-qa td{text-align:right;padding:2px;white-space:nowrap}
+.v31-qa td:first-child{text-align:left;max-width:92px;overflow:hidden;text-overflow:ellipsis}
+.v31-qa td i{display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:currentColor;vertical-align:1px}
+.v31-qa tr.ok td:first-child{color:#80ed99}.v31-qa tr.bad td:first-child{color:#ff6b6b}
+.v31-pop{position:absolute;z-index:6;width:min(260px,calc(100% - 16px));max-height:220px;overflow:auto;scrollbar-width:thin;overscroll-behavior:contain;pointer-events:auto;padding:8px 10px;border-radius:12px;background:rgba(16,20,30,.88);border:1px solid var(--v31-line);box-shadow:var(--v31-shadow);backdrop-filter:var(--v31-blur);-webkit-backdrop-filter:var(--v31-blur);animation:v31in .25s ease both}
+.v31-pop[hidden]{display:none}
+.v31-pop h5{display:flex;align-items:center;gap:7px;margin:0 0 4px;font-weight:800;font-size:13px}
+.v31-pop h5 i{width:12px;height:12px;border-radius:4px}
+.v31-pop dl{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:1px 6px;margin:0 0 5px;font-size:11.5px}
+.v31-pop dl dd{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v31-pop dt{opacity:.62}.v31-pop dd{margin:0;text-align:right;font-weight:650}
+.v31-relabel-d summary{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.06);cursor:pointer;list-style:none;font-weight:650;font-size:11.5px;user-select:none}
+.v31-relabel-d summary::-webkit-details-marker{display:none}
+.v31-relabel-d summary::after{content:'▾';opacity:.6}.v31-relabel-d[open] summary::after{content:'▴'}
+.v31-relabel-d summary:hover{background:rgba(244,162,97,.2)}
+.v31-relabel{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,auto);gap:4px;margin-top:5px;overflow-x:auto;overflow-y:hidden;padding-bottom:3px;scrollbar-width:thin}
+.v31-relabel button{white-space:nowrap;padding:3px 7px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:transparent;color:#e9eef7;font-weight:600;font-size:11px;font-family:inherit;cursor:pointer}
+.v31-relabel button:hover{background:rgba(244,162,97,.2);border-color:#f4a261}
+.v31-relabel button.cur{background:rgba(76,201,240,.22);border-color:#4cc9f0}
+.v31-scrub{position:absolute;left:50%;bottom:76px;transform:translateX(-50%);width:min(560px,calc(100% - 24px));max-width:calc(100% - 24px);box-sizing:border-box;display:flex;align-items:center;gap:6px;padding:4px;pointer-events:auto;border-radius:12px;background:var(--v31-glass);border:1px solid var(--v31-line);box-shadow:var(--v31-shadow);backdrop-filter:var(--v31-blur);-webkit-backdrop-filter:var(--v31-blur)}
+.v31-scrub[hidden]{display:none}
+.v31-track{position:relative;flex:1;height:22px;cursor:pointer;touch-action:none}
+.v31-ticks{position:absolute;left:0;right:0;top:9px;height:4px;border-radius:2px;overflow:hidden;opacity:.4}
+.v31-ticks i{position:absolute;top:0;bottom:0}
+.v31-fill{position:absolute;left:0;top:9px;height:4px;border-radius:2px;background:linear-gradient(90deg,#4cc9f0,#80ed99);pointer-events:none;transition:width .25s}
+.v31-thumb{position:absolute;top:4px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(76,201,240,.35);pointer-events:none;transition:left .25s}
+.v31-stepname{min-width:64px;max-width:110px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px}
+.v31-toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:7;padding:6px 12px;border-radius:12px;background:var(--v31-glass);border:1px solid var(--v31-line);backdrop-filter:var(--v31-blur);-webkit-backdrop-filter:var(--v31-blur);font-weight:650;pointer-events:none}
+.v31-toast[hidden]{display:none}
+.v31-toast.ok{color:#80ed99}.v31-toast.bad{color:#ff6b6b}
+.v31-tool[hidden]{display:none}
+@keyframes v31in{from{transform:translateY(5px)}to{transform:none}}
+@keyframes v31pulse{50%{opacity:.35}}
+@media (max-width:720px){
+  .v31-panel{width:184px;right:46px;top:58px;max-height:calc(100% - 58px - 190px)}
+  .v31-scrub{width:calc(100% - 96px);bottom:52px}
+  .v31-stepname{display:none}
+}
+@media (prefers-reduced-motion:reduce){.v31-card,.v31-part,.v31-chips li{animation:none}}
+.v31-pop h6{margin:2px 0 3px;font-size:11px;font-weight:750;opacity:.75;text-transform:none}
+.v31-pop h5 small{opacity:.6;font-weight:600}
+.tv3-tool.v31-partstool:not(.on){opacity:.55}
+
+/* Viewer UX 2026-10-18 (owner: «интерфейс убогий, сделай нормальную верстку … сделай чтобы можно было убрать меню превью
+   визуализации»): the panel, the scrub and the card are one presentation group (× / Esc / the toolbar icon); the layout
+   (right column, bottom centre over the clip bar, the card clamped) is computed by layout() in task-v31-stages.js */
+/* presentation off hides the cards panel and the scrub bar only: the part card still opens from the build's icon
+   hover / pick (owner 2026-10-18: «иконки без тултипов, их нажатие ни к чему не приводит») */
+.v31.pres-off .v31-panel,.v31.pres-off .v31-scrub{display:none}
+.tv3-tool.v31-prestool:not(.on){opacity:.55}
+.v31-pop.sheet{width:auto;right:8px;border-radius:14px 14px 12px 12px}
+@media (max-width:480px){
+  .v31-panel{width:auto;min-width:0;max-width:calc(100% - 72px)}
+  .v31.phone:not(.cards-open) .v31-cards{display:none}
+  .v31.phone .v31-now{cursor:pointer}
+  .v31.phone .v31-panel-head .v31-mapbtn{display:none}
+  .v31-scrub .v31-autobtn{display:none}
+  .v31-pop dl{grid-template-columns:auto 1fr}
+}
