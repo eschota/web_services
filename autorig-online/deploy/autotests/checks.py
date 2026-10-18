@@ -1097,7 +1097,15 @@ def vehicle_rig(run, rig) -> dict:
             "wheels_named": int(ch.get("wheels_named") or 0), "wheel_vertices": int(ch.get("wheel_vertices") or 0),
             "body_vertices": int(ch.get("body_vertices") or 0), "vehicle_score": int(det.get("score") or 0),
             "normaliser_error": 1 if (v.get("normaliser") or {}).get("error") else 0,
-            "wheels_norm_s": float(((v.get("normaliser") or {}).get("timings_s") or {}).get("total") or 0)}
+            "wheels_norm_s": float(((v.get("normaliser") or {}).get("timings_s") or {}).get("total") or 0),
+            # the front (owner 2026-10-18: «колёса задние поворачивают»): voted by the names, then Vision; and the
+            # scale from the wheels (the Ferrari 45575dfc shrank to 5 cm on the ruler judge)
+            "forward_axis": str(rig.get("forward_axis") or ""),
+            "front_source": str((v.get("front") or {}).get("front_source") or ""),
+            "front_voted": 1 if str((v.get("front") or {}).get("front_source") or "") in ("names", "vision", "user") else 0,
+            "front_review": int(bool(v.get("front_review"))),
+            "scale_source": str((v.get("scale") or {}).get("chosen_source") or ""),
+            "scale_height_m": float((v.get("scale") or {}).get("chosen_height_m") or 0)}
 
 
 

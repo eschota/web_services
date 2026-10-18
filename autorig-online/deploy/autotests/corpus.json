@@ -20774,7 +20774,7 @@
    "task": "52e76e46-92d2-4df6-83b6-f805030cc664",
    "cost": 2,
    "owner": "Vehicles · V3",
-   "defect": "Vehicles V3 (owner 2026-10-18 «тут две тачки залили, надо чтобы колеса риггались и все такое»; AGENTS.md «Never humanoid»): the Toyota Camry 52e76e46 (Z-up OBJ, 503 k vertices, tire_01..04 / disk_* nodes) went through fastrig as a 33-bone quadruped lying on its side (135 s) and the Ferrari 458 45575dfc (scene.zip, 3DWheel Front L / Rear R nodes) as a 26-bone biped; mt/vehicle_mesh.py: the detector (named wheels fitted by cylinders + vehicle words / parts / Vision) before the orientation judge, the up from the axles, vehicle_wheels_norm on the named wheel face sets (collider = visual), Root > Body + Root > Wheel_<name> with rigid weights, Drive / Steer / Idle / Suspension / Brake clips; measured 2026-10-18 (test tree /tmp/veh): 4 named wheels (tire_01..04 + disk_*), 2 axles, front steer, up +z turned to +y, 11.7 s, stand 0 edges over 4x",
+   "defect": "Vehicles V3 (owner 2026-10-18 «тут две тачки залили, надо чтобы колеса риггались и все такое»; AGENTS.md «Never humanoid»): the Toyota Camry 52e76e46 (Z-up OBJ, 503 k vertices, tire_01..04 / disk_* nodes) went through fastrig as a 33-bone quadruped lying on its side (135 s) and the Ferrari 458 45575dfc (scene.zip, 3DWheel Front L / Rear R nodes) as a 26-bone biped; mt/vehicle_mesh.py: the detector (named wheels fitted by cylinders + vehicle words / parts / Vision) before the orientation judge, the up from the axles, vehicle_wheels_norm on the named wheel face sets (collider = visual), Root > Body + Root > Wheel_<name> with rigid weights, Drive / Steer / Idle / Suspension / Brake clips; measured 2026-10-18 (test tree /tmp/veh): 4 named wheels (tire_01..04 + disk_*), 2 axles, front steer, up +z turned to +y, 11.7 s, stand 0 edges over 4x · 2026-10-18 22:30 owner: «неправильно определён перед у тачки … колёса задние поворачивают», «красная тачка провалена в пол» -> the front voted by the parts' names then Vision (vehicle/front_vote.json), the scale from the wheel radius (scale_check.vehicle_height); measured: Camry names -16.9 -> +z, 1.52 m; Ferrari «3DWheel Front L» -> +z, 1.17 m",
    "checks": [
     {
      "id": "mt_rig",
@@ -20834,6 +20834,26 @@
       "rig_check_4x": [
        "==",
        0
+      ],
+      "forward_axis": [
+       "==",
+       "+z"
+      ],
+      "front_voted": [
+       "==",
+       1
+      ],
+      "front_review": [
+       "==",
+       0
+      ],
+      "scale_source": [
+       "==",
+       "vehicle wheels"
+      ],
+      "scale_height_m": [
+       ">=",
+       1.3
       ]
      }
     },
@@ -20877,7 +20897,7 @@
    "task": "45575dfc-6e0c-455a-8b09-9eb3eb1aec88",
    "cost": 2,
    "owner": "Vehicles · V3",
-   "defect": "Vehicles V3 (owner 2026-10-18 «тут две тачки залили, надо чтобы колеса риггались и все такое»; AGENTS.md «Never humanoid»): the Toyota Camry 52e76e46 (Z-up OBJ, 503 k vertices, tire_01..04 / disk_* nodes) went through fastrig as a 33-bone quadruped lying on its side (135 s) and the Ferrari 458 45575dfc (scene.zip, 3DWheel Front L / Rear R nodes) as a 26-bone biped; mt/vehicle_mesh.py: the detector (named wheels fitted by cylinders + vehicle words / parts / Vision) before the orientation judge, the up from the axles, vehicle_wheels_norm on the named wheel face sets (collider = visual), Root > Body + Root > Wheel_<name> with rigid weights, Drive / Steer / Idle / Suspension / Brake clips; measured 2026-10-18: 4 named wheels (3DWheel Front L / R, Rear L / R), 2 axles, front steer, up +y kept, 8.3 s, stand 0 edges over 4x",
+   "defect": "Vehicles V3 (owner 2026-10-18 «тут две тачки залили, надо чтобы колеса риггались и все такое»; AGENTS.md «Never humanoid»): the Toyota Camry 52e76e46 (Z-up OBJ, 503 k vertices, tire_01..04 / disk_* nodes) went through fastrig as a 33-bone quadruped lying on its side (135 s) and the Ferrari 458 45575dfc (scene.zip, 3DWheel Front L / Rear R nodes) as a 26-bone biped; mt/vehicle_mesh.py: the detector (named wheels fitted by cylinders + vehicle words / parts / Vision) before the orientation judge, the up from the axles, vehicle_wheels_norm on the named wheel face sets (collider = visual), Root > Body + Root > Wheel_<name> with rigid weights, Drive / Steer / Idle / Suspension / Brake clips; measured 2026-10-18: 4 named wheels (3DWheel Front L / R, Rear L / R), 2 axles, front steer, up +y kept, 8.3 s, stand 0 edges over 4x · 2026-10-18 22:30 owner: «неправильно определён перед у тачки … колёса задние поворачивают», «красная тачка провалена в пол» -> the front voted by the parts' names then Vision (vehicle/front_vote.json), the scale from the wheel radius (scale_check.vehicle_height); measured: Camry names -16.9 -> +z, 1.52 m; Ferrari «3DWheel Front L» -> +z, 1.17 m",
    "checks": [
     {
      "id": "mt_rig",
@@ -20937,6 +20957,26 @@
       "rig_check_4x": [
        "==",
        0
+      ],
+      "forward_axis": [
+       "==",
+       "+z"
+      ],
+      "front_voted": [
+       "==",
+       1
+      ],
+      "front_review": [
+       "==",
+       0
+      ],
+      "scale_source": [
+       "==",
+       "vehicle wheels"
+      ],
+      "scale_height_m": [
+       ">=",
+       1.0
       ]
      }
     },
