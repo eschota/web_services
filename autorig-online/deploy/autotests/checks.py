@@ -850,6 +850,46 @@ def anthro_rig(ctx):
     return out
 
 
+def biped_tail(ctx, clips=("Idle", "Walking", "Running")):
+    """Biped tail · V3.1 (owner 2026-10-18, the monkey 8d2578e3): a biped whose analysis found a tail gets the tail
+    chain in its primary rig (mt/biped_tail.py). What the rig carries: the Tail bones under the Hips, the record, and the
+    tail region's numbers on the library clips (mt.biped_tail.region_metrics: the tail's vertices + their seam ring, the
+    secondary rig's own QA)."""
+    try:
+        from mt import biped_tail as _BT
+    except ImportError:
+        return {"pending": True, "why": "mt/biped_tail.py is not in the tree under test"}
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    bones = rig.get("bones") or []
+    tails = [b for b in bones if re.fullmatch(r"Tail\d*", str(b.get("name") or ""))]
+    root = next((b for b in tails if b.get("name") == "Tail"), None)
+    bt = rig.get("biped_tail") or {}
+    m = _BT.region_metrics(run, clips=clips)
+    # a moving limb (a foot kicking back in Running, a hand) passing through the hanging tail is not the tail's skin:
+    # the primary chain is static, the secondary layer's collision is what moves it; counted apart from the trunk
+    limb = re.compile(r"(Left|Right)(Foot|ToeBase|Leg|ForeArm|Hand)$")
+    pen_body = pen_limb = 0
+    for r_ in (m.get("clips") or {}).values():
+        for bone, n in (r_.get("pen_by_bone") or {}).items():
+            if limb.search(str(bone)):
+                pen_limb += int(n)
+            else:
+                pen_body += int(n)
+    if m.get("pen_free") and not any("pen_by_bone" in r_ for r_ in (m.get("clips") or {}).values()):
+        pen_body = m.get("pen_free")
+    return {"tail_bones": len(tails), "tail_parent_hips": 1 if root and root.get("parent") == "Hips" else 0,
+            "used": 1 if bt.get("used") else 0, "why": bt.get("why"), "profile": bt.get("profile"),
+            "tail_vertices": m.get("vertices"), "tail_max_stretch": m.get("max_stretch"),
+            "tail_edges_over_4x": m.get("edges_over_4x"), "tail_pen_free": m.get("pen_free"),
+            "tail_pen_total": m.get("pen_total"), "body_max_stretch": m.get("body_max_stretch"),
+            "tail_pen_body": pen_body, "tail_pen_limb_strike": pen_limb,
+            "stage_seconds": (rig.get("timings_s") or {}).get("biped_tail"),
+            "clips": {c: {k: v for k, v in r.items() if k in ("max_stretch", "edges_over_4x", "pen_free", "pen_root_band",
+                                                                    "pen_depth_pct_H", "pen_by_bone")}
+                      for c, r in (m.get("clips") or {}).items()}, "metrics_why": m.get("why")}
+
+
 def anthro_words(cases):
     """Anthro rig · V3: the words rule on a list of Vision `what` strings: {what: expected} -> mismatches (0 = all right)."""
     try:
@@ -1041,7 +1081,7 @@ def voxel_legs(input_name):
             "taper_ratio": e.get("taper_ratio"), "floor_contact": e.get("floor_contact"), "upright": e.get("upright")}
 
 
-def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, body=""):
+def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, body="", analysis=None):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
     mt/classic_mirror.py does at upload time. forward_axis: the front the conveyor's projections / Vision know
     (proj/forward.json), for a model whose symmetry alone cannot tell it (the potato 583622f3: guess 0.32)."""
@@ -1054,6 +1094,9 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, bod
     if body:                                             # Rig classes · V3: Vision's body field, as the conveyor's
         (run / "phases.json").write_text(json.dumps({"phases": [{"id": "classify", "result": {   # classify phase
             "what": words, "body": body, "props": ""}}]}))                                     # records it
+    for dest, name in (analysis or {}).items():           # Biped tail · V3.1: the analyser's files of the run
+        (run / "analysis").mkdir(parents=True, exist_ok=True)   # (parts_seg.json / .npz: labels on proj/model.glb, which
+        shutil.copyfile(_input(name), run / "analysis" / dest)   # is the corpus input itself), as the conveyor has them
     if v3_bound:                                         # Multi-limb rig · V3: like a hash-bound V3 source, the up
         (run / "v3").mkdir(parents=True, exist_ok=True)     # stage of rig_first leaves the model as uploaded
         (run / "v3" / "source.json").write_text(json.dumps({"schema": "autorig.v3.session-source/1", "source": "autotests"}))
@@ -1966,7 +2009,7 @@ def run_check(check: dict, ctx: dict) -> dict:
         return voxel_legs(inp)
     if k == "mt_rig_first":
         return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False),
-                            a.get("body", ""))
+                            a.get("body", ""), a.get("analysis"))
     if k == "mt_fast_analysis":
         return mt_fast_analysis(ctx, bool(a.get("apply")))
     if k == "hand_rig":
@@ -2061,6 +2104,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return constitution(ctx)
     if k == "anthro":
         return anthro_rig(ctx)
+    if k == "biped_tail":                                          # Biped tail · V3.1 (2026-10-18)
+        return biped_tail(ctx, tuple(a.get("clips") or ("Idle", "Walking", "Running")))
     if k == "anthro_words":
         return anthro_words(a.get("cases"))
     if k == "rig_joints":

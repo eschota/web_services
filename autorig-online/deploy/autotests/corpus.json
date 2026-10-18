@@ -1585,6 +1585,27 @@
    "what": "robot santa from a picture: a heavy biped, fur collar and beard over the chest, the arms hanging free of a wide coat, no skeleton (V3 run f98bc593, the paired control of 77cc1b88)",
    "sha256": "12f73722436bf19af6ad636908a650cb09462cc05f24d544f22fb8f061a8c069",
    "bytes": 13270132
+  },
+  "8d2578e3.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/21cea5c560b605f3a2ff/proj/model.glb",
+   "task": "8d2578e3-3a8f-4bab-b4b5-f9ef3ecc64fb",
+   "what": "monkey with a long tail, T pose (player_character.glb), the V3 run's proj/model.glb",
+   "sha256": "d78537cbca8d80b9490825f495646b2a8ab2442e4c99cb50e46eb1b40750e235",
+   "bytes": 8201028
+  },
+  "8d2578e3.parts_seg.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/21cea5c560b605f3a2ff/analysis/parts_seg.json",
+   "task": "8d2578e3-3a8f-4bab-b4b5-f9ef3ecc64fb",
+   "what": "the analyser's fine pass (SAM + mesh segmentation): the part records, tail 0.645",
+   "sha256": "5722e8921efcff3c0aa23388032fb49be5c9adc9337cb8ed8e1c99b76c0c5377",
+   "bytes": 90576
+  },
+  "8d2578e3.parts_seg.npz": {
+   "source": "/srv/autorig/data/motion_transfer/runs/21cea5c560b605f3a2ff/analysis/parts_seg.npz",
+   "task": "8d2578e3-3a8f-4bab-b4b5-f9ef3ecc64fb",
+   "what": "the analyser's per-vertex labels on proj/model.glb (the tail and a stray tail island on the knife)",
+   "sha256": "1af9fc749f4e7751e8b906fa7d61c516f9df4c6655c5be51a42f8a9093edfd93",
+   "bytes": 26301
   }
  },
  "profiles": {
@@ -18075,6 +18096,107 @@
       },
       "reason": "the wrist / elbow rings still lose 12-28 % in Waving1 / Hip Hop: the twist joint takes the roll, the rest is the linear blend across the bend (elbow 19-26 %, untouched by the twist); needs a volume-preserving blend (dual quaternion / delta mush at the joints)",
       "owner": "Biped skin · V3.1"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_tail",
+   "task": "8d2578e3-3a8f-4bab-b4b5-f9ef3ecc64fb",
+   "cost": 2,
+   "owner": "Biped tail · V3.1",
+   "defect": "Biped tail · V3.1 (owner 2026-10-18 «а тут почему хвост сразу не определился?», task 8d2578e3 the monkey, run 21cea5c560b605f3a2ff; spec docs/biped-tail-primary-spec-20261018.md): the analyser found the tail (SAM 0.645, 561 faces) but the biped template had no tail bone: the tail rode the Hips / Spine rigidly, and the secondary tail layer was judged on the analyser's mask, which also covered the knife in the hand (a stray tail island: tail-region stretch 23-37x, 58x, penetration 15-19k vertex-frames), so the layer was rejected. Fix: mt/biped_tail.py gives the biped the chain Tail..Tail11 under the Hips in the primary fastrig (the mask's largest connected piece, tail_engine.fit, the root band blended from the back's own trunk weights, never a leg), the secondary rig follows it (old_chain, primate profile) and judges the tail in its own region. After (scratch rerig): 12 tail bones, tail region max stretch 1.64 (secondary layer accepted, lag 0.25-0.33 s), edges over 4x 0, free-tail penetration 0; the primary alone 2.10 (Running)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8d2578e3.model.glb",
+     "params": {
+      "words": "monkey character",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "parts_seg.json": "8d2578e3.parts_seg.json",
+       "parts_seg.npz": "8d2578e3.parts_seg.npz"
+      }
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "tail",
+     "kind": "biped_tail",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "clips": [
+       "Idle",
+       "Walking",
+       "Running"
+      ]
+     },
+     "thresholds": {
+      "tail_bones": [
+       ">=",
+       4
+      ],
+      "tail_parent_hips": [
+       "==",
+       1
+      ],
+      "used": [
+       "==",
+       1
+      ],
+      "tail_max_stretch": [
+       "<=",
+       2.0
+      ],
+      "tail_edges_over_4x": [
+       "<=",
+       0
+      ],
+      "tail_pen_body": [
+       "<=",
+       0
+      ],
+      "tail_pen_limb_strike": [
+       "<=",
+       60
+      ]
+     },
+     "note": "gate run 20261018T130801Z on the corpus input: 12 Tail bones, tail region max stretch 1.19 / 1.22 / 1.78 (Idle / Walking / Running), 0 edges over 4x, 0 penetration into the trunk; in Running the left foot kicks back through the hanging tail (29 vertex-frames, 2.1 % H, LeftFoot capsule), counted as tail_pen_limb_strike",
+     "target": {
+      "thresholds": {
+       "tail_pen_free": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "the primary tail is a static chain: in Running the left foot kicks back through it (29 vertex-frames, 2.1 % H); a limb passing through the tail is the secondary tail layer's collision, which the corpus rig does not run",
+      "owner": "Biped tail · V3.1"
      }
     }
    ]
