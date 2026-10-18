@@ -1826,7 +1826,17 @@ def rig_contract_check(ctx, frames=12):
             "chain_layers": sum(1 for x in layers if x.get("kind") == "chain"),
             "contract": rig.get("contract"),
             "synthetic_faces": (d.get("synthetic") or {}).get("faces"),
-            "strip_max_stretch": max([float(x.get("strip_max_stretch") or 0) for x in c.values()] or [0]) or None}
+            "strip_max_stretch": max([float(x.get("strip_max_stretch") or 0) for x in c.values()] or [0]) or None,
+            "wrist_ring_dev_max_pct": _ring_max(c, "_wrist"), "elbow_ring_dev_max_pct": _ring_max(c, "_elbow"),
+            "twist_joints": len((rig.get("twist") or {}).get("joints") or [])}
+
+
+def _ring_max(clips, suffix, names=("Waving1", "Hip Hop Dancing")):
+    """Sleeve twist (2026-10-18): the largest |volume change| of the wrist / elbow rings in the clips that roll the
+    hands most (mt/rig_contract.py rings); None when the rig has no such ring."""
+    vals = [abs(float(v.get("volume_dev_pct") or 0)) for n, x in clips.items() if n in names
+            for k, v in ((x.get("rings") or {}).items()) if k.endswith(suffix)]
+    return round(max(vals), 3) if vals else None
 
 
 def stand_tear(ctx, clip="auto", fps=12):

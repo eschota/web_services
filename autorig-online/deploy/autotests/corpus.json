@@ -17997,6 +17997,87 @@
      }
     }
    ]
+  },
+  {
+   "id": "biped_sleeve_twist",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "cost": 2,
+   "owner": "Biped skin · V3.1",
+   "defect": "Sleeve twist · V3.1 (lead 2026-10-18, the picture Santa 4102abd1, run f98bc593): the hand's roll about the forearm (up to 93 deg in Waving1, 125 in Look Around) was carried by the Hand bone alone, so the wrist ring collapsed onto the bone (candy wrapper): wrist ring volume Waving1 -53.5 % (right) / -25.3 % (left), Hip Hop -23.4 / -19.2 %. Fix: mt/twist.py adds {Side}ForeArmTwist (a leaf joint under ForeArm at the segment middle, non-humanoid), shares the ForeArm weight with it along the segment (faded out of torso / coat vertices), and bakes 0.5 x the hand's roll into every clip. After (scratch): -19.9 / -11.8 % Waving1, -13.8 / -12.2 % Hip Hop; stand edges over 4x unchanged (60), Unity Humanoid valid 0 warnings, gltf 0 errors",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "4102abd1.model.glb",
+     "params": {
+      "words": "santa claus",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "rig_contract",
+     "kind": "rig_contract",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "clips": [
+       ">=",
+       1
+      ],
+      "twist_joints": [
+       "==",
+       2
+      ],
+      "wrist_ring_dev_max_pct": [
+       "<=",
+       30
+      ],
+      "edges_over_4x_sum": [
+       "<=",
+       150
+      ]
+     },
+     "note": "the wrist ring (mt/rig_contract.py rings: the arm's welded vertices within +-0.12 of the forearm about the wrist, volume = sum r^2 to the posed bone polyline) in Waving1 / Hip Hop at 12 frames; before the twist joints 53.5 % at 24 frames",
+     "target": {
+      "thresholds": {
+       "wrist_ring_dev_max_pct": [
+        "<=",
+        3.0
+       ],
+       "elbow_ring_dev_max_pct": [
+        "<=",
+        3.0
+       ]
+      },
+      "reason": "the wrist / elbow rings still lose 12-28 % in Waving1 / Hip Hop: the twist joint takes the roll, the rest is the linear blend across the bend (elbow 19-26 %, untouched by the twist); needs a volume-preserving blend (dual quaternion / delta mush at the joints)",
+      "owner": "Biped skin · V3.1"
+     }
+    }
+   ]
   }
  ]
 }
