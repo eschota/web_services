@@ -22,7 +22,7 @@
 // animation is ready (LivePartsOff; a tool bar button cycles icons / full / none). Hover on an icon opens the part's card,
 // a click (icon or mesh) pins it with the relabel buttons. A replay with the build in drives the voxels, bones and
 // weights in 3D instead of the splat. A build without it never gets these messages.
-const BUILD = 'v31-20261017.2';
+const BUILD = 'v31-20261018.1';
 const params = new URLSearchParams(location.search);
 const OFF = params.get('v31') === '0';
 const FIXTURE = params.get('v31fixture') === '1';
@@ -104,6 +104,9 @@ const FB = {
     v31_body_heavy: 'плотное', v31_body_slim: 'стройное', v31_body_normal: 'обычное', v31_body_athletic: 'атлетичное', v31_body_stocky: 'коренастое', v31_body_child: 'детское', v31_body_chibi: 'чиби', v31_body_toy_mascot: 'игрушка-маскот', v31_body_ultra_fat: 'очень полное', v31_body_slim_tall: 'высокое стройное', v31_body_long_limbed: 'длинноногое', v31_body_realistic: 'реалистичное', v31_body_toy: 'игрушка',
   },
 };
+// Viewer UX 2026-10-18 (owner: «сделай чтобы можно было убрать меню превью визуализации»): the presentation group
+Object.assign(FB.en, { v31_pres_show: 'Show the stages panel', v31_pres_hide: 'Hide the stages panel · Esc' });
+Object.assign(FB.ru, { v31_pres_show: 'Показать панель этапов', v31_pres_hide: 'Скрыть панель этапов · Esc', v31_relabel: 'Переименовать' });
 const CONTRACT_LABELS = ['body', 'torso', 'head', 'arm', 'leg', 'hand', 'foot', 'hair', 'beard', 'hat', 'glove', 'mitten',
   'coat', 'cloak', 'skirt', 'boot', 'wing', 'tail', 'ear', 'prop'];
 const STEP_COLOR = {
@@ -136,6 +139,7 @@ const ICON = {
   auto: '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>',
   map: '<path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  pres: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M14 4v16"/><path d="M16.5 8h2M16.5 11h2M16.5 14h2"/><path d="M6 16.5h5" stroke-width="2.2"/>',
   parts_icons: '<circle cx="7" cy="7" r="3.2"/><circle cx="17" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/>',
   parts_full: '<path d="M12 3c4 0 6 2.6 6 5.6 0 2.4-1.4 3.6-3 4.4v7h-6v-7c-1.6-.8-3-2-3-4.4C6 5.6 8 3 12 3z"/><circle cx="12" cy="8.5" r="2.4" fill="currentColor"/>',
   parts_none: '<circle cx="7" cy="7" r="3.2"/><circle cx="17" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/><path d="M4 20L20 4"/>',
@@ -239,6 +243,12 @@ function start(viewerEl) {
   replayTool.hidden = true;
   replayTool.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON.replay}</svg>`;
   if (tools) tools.insertBefore(replayTool, document.getElementById('tv3-build') || null);
+  const presTool = document.createElement('button');
+  presTool.className = 'tv3-tool v31-tool v31-prestool on';
+  presTool.type = 'button';
+  presTool.hidden = true;
+  presTool.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON.pres}</svg>`;
+  if (tools) tools.insertBefore(presTool, document.getElementById('tv3-build') || null);
   const partsTool = document.createElement('button');
   partsTool.className = 'tv3-tool v31-tool v31-partstool';
   partsTool.type = 'button';
@@ -392,7 +402,10 @@ function start(viewerEl) {
     replayTool.title = tr('v31_replay');
     replayTool.setAttribute('aria-label', tr('v31_replay'));
     $('.v31-mapbtn').title = tr('v31_map');
-    $('.v31-fold').title = tr('v31_skip');
+    $('.v31-fold').title = tr('v31_pres_hide');
+    $('.v31-fold').setAttribute('aria-label', tr('v31_pres_hide'));
+    presTool.title = tr(presHidden ? 'v31_pres_show' : 'v31_pres_hide');
+    presTool.setAttribute('aria-label', presTool.title);
     const html = cardsHtml();
     if (html !== lastCards) {
       const n0 = cards.children.length;
@@ -515,15 +528,35 @@ function start(viewerEl) {
       (chain.length ? `<dt>${esc(tr('v31_chain'))}</dt><dd title="${esc(chain.join(', '))}">${chain.length}</dd>` : '') +
       (beh ? `<dt>${esc(tr('v31_behaviour'))}</dt><dd>${esc(beh)}</dd>` : '') + '</dl>' +
       (qa ? `<h6>${esc(tr('v31_qa_part'))}</h6><dl>${qa}</dl>` : '') +
-      `<div class="v31-relabel" title="${esc(tr('v31_relabel'))}">${CONTRACT_LABELS.map((l) => `<button type="button" data-label="${l}" class="${l === cur ? 'cur' : ''}">${esc(labelName(l))}</button>`).join('')}</div>`;
+      `<details class="v31-relabel-d"><summary title="${esc(tr('v31_relabel'))}">${svg('relabel')}<span>${esc(tr('v31_relabel'))}</span></summary>` +
+      `<div class="v31-relabel">${CONTRACT_LABELS.map((l) => `<button type="button" data-label="${l}" class="${l === cur ? 'cur' : ''}">${esc(labelName(l))}</button>`).join('')}</div></details>`;
     pop.dataset.part = id;
     pop.dataset.hover = o.hover ? '1' : '';
     pop.hidden = false;
+    placePop(x, y, o);
+  }
+  function placePop(x, y, o) {
     const r = root.getBoundingClientRect();
+    const L = layout() || { barsTop: r.height - 16, colLeft: r.width - 16, panelBottom: 64, phone: false };
+    pop.classList.toggle('sheet', L.phone);
+    if (L.phone) {                                   // a phone: a bottom sheet over the bars' top
+      pop.style.left = '8px'; pop.style.top = 'auto'; pop.style.bottom = `${Math.round(r.height - L.barsTop + 8)}px`;
+      pop.style.maxHeight = `${Math.max(120, Math.round(L.barsTop - 72))}px`;
+      return;
+    }
+    pop.style.bottom = 'auto';
     const pw = Math.min(260, r.width - 16);
-    const left = o.right && x - r.left + 22 + pw < r.width - 8 ? x - r.left + 22 : x - r.left - pw - 12;
-    pop.style.left = `${Math.max(8, Math.min(r.width - pw - 8, left))}px`;
-    pop.style.top = `${Math.max(8, Math.min(r.height - 240, y - r.top - 20))}px`;
+    const maxRight = L.colLeft - 8, maxBottom = L.barsTop - 8;
+    pop.style.maxHeight = `${Math.max(120, Math.min(220, maxBottom - 8))}px`;
+    const ph = Math.min(pop.offsetHeight || 180, maxBottom - 8);
+    let left = o.right && x - r.left + 22 + pw < maxRight ? x - r.left + 22 : x - r.left - pw - 12;
+    let top = y - r.top - 20;
+    if (maxRight - 8 < pw || maxBottom - 8 < 120) {  // no room beside the icon: under the panel
+      left = L.colLeft; top = L.panelBottom + 8;
+      pop.style.maxHeight = `${Math.max(100, maxBottom - top)}px`;
+    }
+    pop.style.left = `${Math.round(Math.max(8, Math.min(maxRight - pw, left)))}px`;
+    pop.style.top = `${Math.round(Math.max(8, Math.min(maxBottom - ph, top)))}px`;
   }
   async function relabel(id, label) {
     let res = null;
@@ -571,7 +604,160 @@ function start(viewerEl) {
     const b = e.target.closest('button[data-label]');
     if (b && pop.dataset.part) relabel(pop.dataset.part, b.dataset.label);
   });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { pop.hidden = true; selected = null; paint(); } });
+  document.addEventListener('keydown', onEsc);
+
+  // ---------------------------------------------------------------- the presentation group (owner 2026-10-18: «сделай чтобы можно
+  // было убрать меню превью визуализации, нафига оно там висит и его нельзя убрать»). The cards panel, the scrub bar and
+  // the part card are one group: × on the panel, Esc and the toolbar icon hide it; the icon brings it back. On a finished
+  // run it goes away 4 s after the replay. The person's explicit choice is remembered (this browser, and the person's
+  // viewer settings v31_presentation through the build's SetSetting; scene-gate.js keeps v31_* out of the owner's
+  // defaults). Every decision: console «[v31-ui] …».
+  let presHidden = false, presAuto = 0, presPerson = null;     // presPerson: the remembered choice (true = hidden)
+  try { const v = localStorage.getItem('autorig_v31_presentation'); if (v === 'hidden') presPerson = true; else if (v === 'shown') presPerson = false; } catch (e) { /* storage off */ }
+  function uiLog(what) { try { console.info(`[v31-ui] ${what}`); } catch (e) { /* no console */ } }
+  function setPres(hidden, why, person) {
+    clearTimeout(presAuto);
+    presHidden = !!hidden;
+    root.classList.toggle('pres-off', presHidden);
+    if (presHidden) { pop.hidden = true; selected = null; }
+    presTool.classList.toggle('on', !presHidden);
+    presTool.title = tr(presHidden ? 'v31_pres_show' : 'v31_pres_hide');
+    presTool.setAttribute('aria-label', presTool.title);
+    if (person) {
+      presPerson = presHidden;
+      try { localStorage.setItem('autorig_v31_presentation', presHidden ? 'hidden' : 'shown'); } catch (e) { /* storage off */ }
+      try { const w = viewerEl.contentWindow; if (w && w.autorigUnity) w.autorigUnity.send('SetSetting', { v31_presentation: presHidden ? 0 : 1 }); } catch (e) { /* the viewer went away */ }
+    }
+    uiLog(`presentation ${presHidden ? 'hidden' : 'shown'} · ${why}${person ? ' (person)' : ''}`);
+    layout();
+  }
+  function presAutoHide(ms, why) {
+    clearTimeout(presAuto);
+    presAuto = setTimeout(() => {
+      if (presHidden || replayMode) return;
+      if (root.matches(':hover') && (panel.matches(':hover') || scrub.matches(':hover') || pop.matches(':hover'))) { presAutoHide(2000, why.replace(/ \(.*$/, '') + ' (waited for the pointer)'); return; }
+      setPres(true, `auto after the ${why}`, false);
+    }, ms);
+  }
+  function onEsc(e) {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    const t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+    try { const d = viewerEl.contentDocument; if (d && d.body && d.body.classList.contains('bp')) return; } catch (err) { /* cross-origin */ }
+    if (!root.classList.contains('on')) return;
+    if (!pop.hidden) { pop.hidden = true; selected = null; paint(); return; }
+    if (!presHidden) { if (replayMode) skip(); setPres(true, 'Esc', true); }
+  }
+  // the person's choice from the viewer settings (another device); this browser's choice is read above
+  fetch('/api/mt/viewer/settings', { credentials: 'same-origin', cache: 'no-store' }).then((x) => (x.ok ? x.json() : null))
+    .then((d) => {
+      const v = d && d.settings ? d.settings.v31_presentation : undefined;
+      if (v === 0 || v === 1) { presPerson = v === 0; if (presPerson && !presHidden) setPres(true, 'remembered (viewer settings)', false); }
+    }).catch(() => {});
+  if (presPerson === true) setPres(true, 'remembered (this browser)', false);
+
+  // the bones are the viewer's (index.html api.bones: one flag, one owner); the replay only says when it presents
+  const bonesQueue = [];
+  function bonesCall(fn, ...args) {
+    let w = null;
+    try { w = viewerEl.contentWindow; } catch (e) { w = null; }
+    const b = w && w.autorigUnity && w.autorigUnity.bones;
+    if (b && typeof b[fn] === 'function') { try { b[fn](...args); } catch (e) { console.warn('[v31-ui] bones', e); } return; }
+    bonesQueue.push([fn, args, Date.now()]);
+  }
+  setInterval(() => {
+    if (!bonesQueue.length) return;
+    let w = null;
+    try { w = viewerEl.contentWindow; } catch (e) { w = null; }
+    const b = w && w.autorigUnity && w.autorigUnity.bones;
+    if (!b) { while (bonesQueue.length && Date.now() - bonesQueue[0][2] > 60000) bonesQueue.shift(); return; }
+    bonesQueue.splice(0).forEach(([fn, args]) => { try { b[fn](...args); } catch (e) { console.warn('[v31-ui] bones', e); } });
+  }, 500);
+
+  // ---------------------------------------------------------------- one layout grid over the canvas (owner 2026-10-18: «сделай
+  // нормальную верстку»): the right column holds the viewer's right toolbar and, beside it, the panel (≤ 260 px, scrolls
+  // inside, never over the call window); the bottom centre holds the clip bar and above it the scrub (12 px gap, the
+  // same width rule, moved left of the call window when they would meet); the card stays inside what is left.
+  let lay = null;
+  function layout() {
+    const r = root.getBoundingClientRect();
+    if (!r.width || !r.height) return lay;
+    let d = null;
+    try { d = viewerEl.contentDocument; } catch (e) { d = null; }
+    const vr = viewerEl.getBoundingClientRect();
+    const box = (el) => {
+      if (!el) return null;
+      const b = el.getBoundingClientRect();
+      if (!b.width || !b.height) return null;
+      const cs = el.ownerDocument.defaultView.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return null;
+      const ox = vr.left - r.left, oy = vr.top - r.top;
+      return { l: ox + b.left, t: oy + b.top, r: ox + b.right, b: oy + b.bottom, w: b.width, h: b.height };
+    };
+    const vw = r.width, vh = r.height, phone = vw <= 480;
+    const clipsB = d ? box(d.getElementById('clips')) : null;
+    const fxB = d ? box(d.getElementById('fx')) : null;
+    const callB = d ? box(d.querySelector('#call.on')) : null;
+    // the scene strip (top right): its box is taller than what it draws, so the drawn children decide where it ends
+    let scpB = null;
+    if (d) {
+      const sp = d.getElementById('scp');
+      if (sp && box(sp)) [...sp.querySelectorAll('*')].forEach((el) => { const q = el.children.length ? null : box(el); if (q && q.h < 120) scpB = scpB ? { l: Math.min(scpB.l, q.l), r: Math.max(scpB.r, q.r), b: Math.max(scpB.b, q.b) } : q; });
+    }
+    root.classList.toggle('phone', phone);
+    // the bottom centre
+    let floor = vh - 12;
+    if (clipsB) floor = Math.min(floor, clipsB.t);
+    let sw = Math.min(560, Math.max(320, clipsB ? clipsB.w : 520), vw - 24);
+    let cx = vw / 2;
+    const sh = scrub.offsetHeight || 32;
+    let bandTop = floor - 12 - sh;
+    if (callB && callB.t < floor - 12 && callB.b > bandTop && callB.l < cx + sw / 2 + 12) {
+      const room = callB.l - 12 - 12;                 // left of the call window
+      if (room >= 220) {
+        sw = Math.min(sw, room);
+        cx = Math.max(12 + sw / 2, Math.min(cx, callB.l - 12 - sw / 2));
+      } else {                                         // no room beside it (a phone): above it
+        floor = Math.min(floor, callB.t);
+        bandTop = floor - 12 - sh;
+      }
+    }
+    scrub.style.left = `${Math.round(cx)}px`;
+    scrub.style.width = `${Math.round(sw)}px`;
+    scrub.style.bottom = `${Math.round(vh - floor + 12)}px`;
+    const scrubShown = !scrub.hidden && !presHidden;
+    const barsTop = scrubShown ? bandTop : floor;
+    // the right column
+    let pRight = fxB ? vw - fxB.l + 8 : 16;
+    const pw0 = Math.min(260, panel.offsetWidth || 236);
+    const top = Math.round(phone ? 56 : (scpB && scpB.r > vw - pRight - pw0 - 260 && scpB.l < vw - pRight ? Math.max(64, scpB.b + 8) : 64));
+    let pBottom = barsTop - 12;
+    const pw = Math.min(260, panel.offsetWidth || 236);
+    if (callB && callB.t < pBottom && callB.l < vw - pRight && callB.r > vw - pRight - pw) {
+      if (callB.t - 12 - top >= 160) pBottom = callB.t - 12;   // above the call window when there is room
+      else pRight = vw - callB.l + 8;                           // else beside it
+    }
+    panel.style.right = `${Math.round(pRight)}px`;
+    panel.style.top = `${top}px`;
+    panel.style.maxHeight = `${Math.round(Math.max(phone ? 40 : 96, pBottom - top))}px`;
+    const colLeft = vw - pRight - pw;
+    lay = { W: vw, H: vh, phone, barsTop, floor, colLeft: presHidden || !root.classList.contains('has-cards') ? vw - pRight : colLeft,
+      panelBottom: top + Math.min(panel.offsetHeight || 0, pBottom - top), clips: clipsB, call: callB, fx: fxB, scrub: { cx, sw } };
+    W.layout = lay;
+    // an open card follows the bars (they move when the scrub or the clip bar appear)
+    if (!pop.hidden) {
+      if (pop.classList.contains('sheet')) pop.style.bottom = `${Math.round(vh - barsTop + 8)}px`;
+      else {
+        const t = parseFloat(pop.style.top) || 0, maxT = barsTop - 8 - pop.offsetHeight;
+        if (t > maxT) pop.style.top = `${Math.round(Math.max(8, maxT))}px`;
+      }
+    }
+    return lay;
+  }
+  setInterval(layout, 600);
+  window.addEventListener('resize', layout);
+  // a phone: the panel is its head (the icon of the current stage); a tap on it opens the cards
+  nowEl.addEventListener('click', () => { if (root.classList.contains('phone')) root.classList.toggle('cards-open'); });
 
   // ---------------------------------------------------------------- the 3D side (Unity, LiveLayerParts.cs)
   let u3d = false, uSent = {}, uState = null, replay3d = false, drv = {}, hoverHide = 0;
@@ -625,7 +811,7 @@ function start(viewerEl) {
   function hookUnity() {
     const w = uwin();
     if (!w || w.__v31hook) return;
-    try { w.__v31hook = true; w.addEventListener('autorig-unity', onUnity); } catch (e) { /* cross-origin */ }
+    try { w.__v31hook = true; w.addEventListener('autorig-unity', onUnity); w.addEventListener('keydown', onEsc); } catch (e) { /* cross-origin */ }
   }
   hookUnity();
   setInterval(hookUnity, 500);
@@ -1003,6 +1189,8 @@ function start(viewerEl) {
     const token = ++playToken;
     playing = true;
     replayMode = true;
+    bonesCall('presenting', 'v31', 'stage replay');
+    clearTimeout(presAuto);
     // the build answers live_ready_v31 and has presented: the stages play in 3D, the panel stays docked
     if (u3d && unityReady()) { if (!replay3d) start3d(); setDocked(true); }
     else setDocked(false);
@@ -1027,6 +1215,10 @@ function start(viewerEl) {
     end3d();
     paint();
     if (!live || runDone) setDocked(true);
+    bonesCall('presentationEnd', 'v31', skipping ? 'skip' : 'replay end');
+    // a finished run: the stages panel and the scrub go away 4 s after the replay (the toolbar icon brings them back),
+    // unless the person chose to keep them
+    if ((!live || runDone) && presPerson !== false && !presHidden) presAutoHide(4000, skipping ? 'skip' : 'replay end');
     replayDone(skipping ? 'skip' : 'replay_end');
     skipping = false;
   }
@@ -1038,12 +1230,15 @@ function start(viewerEl) {
     root.classList.toggle('staging', !on);
     if (!on) { mapOn = false; root.classList.remove('mapon'); }
     replayTool.hidden = !steps.length;
+    presTool.hidden = !steps.length;
+    layout();
   }
   playBtn.addEventListener('click', () => { if (playing) pause(); else play(idx >= steps.length ? 0 : null); });
   skipBtn.addEventListener('click', skip);
-  $('.v31-fold').addEventListener('click', () => { if (!docked) skip(); else { collapsed = !collapsed; root.classList.toggle('collapsed', collapsed); } });
+  $('.v31-fold').addEventListener('click', () => { if (replayMode) skip(); setPres(true, 'close button', true); });
+  presTool.addEventListener('click', () => setPres(!presHidden, 'toolbar icon', true));
   $('.v31-mapbtn').addEventListener('click', () => { if (!docked) return; mapOn = !mapOn; root.classList.toggle('mapon', mapOn); });
-  replayTool.addEventListener('click', () => { collapsed = false; root.classList.remove('collapsed'); play(0); });
+  replayTool.addEventListener('click', () => { collapsed = false; root.classList.remove('collapsed'); if (presHidden && presPerson !== true) setPres(false, 'replay icon', false); play(0); });
   autoBtn.addEventListener('click', () => {
     autoReplay = !autoReplay;
     paint();
@@ -1218,6 +1413,7 @@ function start(viewerEl) {
       if (runDone && live && !replayMode && !d.events.length) {
         live = false;
         setDocked(true);
+        bonesCall('presentationEnd', 'v31', 'live run ended');
         if (!G.rigReady) { G.live = false; rigCheck('the run ended'); }
       }
       paint();
@@ -1239,6 +1435,7 @@ function start(viewerEl) {
     scrub.hidden = false;
     if (!done) {
       live = true;
+      bonesCall('presenting', 'v31', 'live run');
       if (G.live === null) {
         G.live = true;
         replayDone('live run: drawn as it arrives, no replay');
@@ -1251,7 +1448,7 @@ function start(viewerEl) {
     G.live = false;
     rigCheck('the run had finished before the page opened');
     if (autoReplay) play(0);
-    else { seek(steps.length); setDocked(true); replayDone('replay on load is off'); }
+    else { seek(steps.length); setDocked(true); replayDone('replay on load is off'); bonesCall('presentationEnd', 'v31', 'replay on load is off'); }
   }
   function unityReady() {
     try { const veil = viewerEl.contentDocument && viewerEl.contentDocument.getElementById('veil'); return !!(veil && veil.classList.contains('off')); } catch (e) { return false; }
@@ -1271,6 +1468,8 @@ function start(viewerEl) {
     root.remove();
     replayTool.remove();
     partsTool.remove();
+    presTool.remove();
+    bonesCall('presentationEnd', 'v31', 'no presentation for this run');
     openGate('no presentation for this run');
     W.mode = 'none';
   }
