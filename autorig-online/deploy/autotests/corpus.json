@@ -1123,6 +1123,489 @@
    "what": "demonic creature: head, two clawed arms, a tapering trail instead of legs (V3 run 385bcba5, the same source as 6 other tasks)",
    "sha256": "17deaddea800b7aafe03b88282b9c7561e0b430021899937c715c0bc6eaa6cf3",
    "bytes": 37394504
+  },
+  "parts_santa1.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dd3b2e1e9d5a4b205f63/proj/model.glb",
+   "run": "dd3b2e1e9d5a4b205f63",
+   "what": "creepy santa claus (77cc1b88) (parts corpus)",
+   "sha256": "533ec90903003f4c6f5358999bb4b2d1840517ed78571657bcc4ec6676d2ae7a",
+   "bytes": 11417944
+  },
+  "parts_santa1.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/santa1.parts_gt.json",
+   "run": "dd3b2e1e9d5a4b205f63",
+   "what": "hand part labels of santa1 (schema autorig.autotests.parts-gt/1)",
+   "sha256": "5817ce97851dd1cbfa2a75300e0daa55cf2e7da972f878874da61800d88c45f1",
+   "bytes": 4954
+  },
+  "parts_santa2.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f98bc5933a41cdcf035d/proj/model.glb",
+   "run": "f98bc5933a41cdcf035d",
+   "what": "santa claus (4102abd1) (parts corpus)",
+   "sha256": "12f73722436bf19af6ad636908a650cb09462cc05f24d544f22fb8f061a8c069",
+   "bytes": 13270132
+  },
+  "parts_santa2.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/santa2.parts_gt.json",
+   "run": "f98bc5933a41cdcf035d",
+   "what": "hand part labels of santa2 (schema autorig.autotests.parts-gt/1)",
+   "sha256": "78451c162f3d950d788e341126d398b37647242b0f24a8943565d433d980d60c",
+   "bytes": 4886
+  },
+  "parts_knight.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/9fb7d4d9be18ae658844/proj/model.glb",
+   "run": "9fb7d4d9be18ae658844",
+   "what": "armoured knight (parts corpus)",
+   "sha256": "b6ff7409f7c6530df9fea952e3aa3103d184d5e2e73c68981142a6346e6c221b",
+   "bytes": 8398056
+  },
+  "parts_knight.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/knight.parts_gt.json",
+   "run": "9fb7d4d9be18ae658844",
+   "what": "hand part labels of knight (schema autorig.autotests.parts-gt/1)",
+   "sha256": "aca038f2fb02d8c5e764496e67ffd00a87d2623c65570d4ca32a16d62db48bf1",
+   "bytes": 4396
+  },
+  "parts_hooded_robe.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/56301f51f8113d3a00b7/proj/model.glb",
+   "run": "56301f51f8113d3a00b7",
+   "what": "hooded figure in a robe (parts corpus)",
+   "sha256": "f5078faf6e28e51cf1d53dfdd0bbd0cb798b139f2820677b2da6763a26780bf0",
+   "bytes": 24429708
+  },
+  "parts_hooded_robe.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/hooded_robe.parts_gt.json",
+   "run": "56301f51f8113d3a00b7",
+   "what": "hand part labels of hooded_robe (schema autorig.autotests.parts-gt/1)",
+   "sha256": "8e61cde4b8ec0ebdc2b36dc446f733f42be2a36e03c02f92e558455ea098767b",
+   "bytes": 58785
+  },
+  "parts_witch.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a438fdd836bc9d43ad72/proj/model.glb",
+   "run": "a438fdd836bc9d43ad72",
+   "what": "witch in a dress and hat (parts corpus)",
+   "sha256": "d5ec9c2241d38678d42e6b804f03bbeffe31b0a242f639a4b91d9099a517c8c9",
+   "bytes": 26973008
+  },
+  "parts_witch.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/witch.parts_gt.json",
+   "run": "a438fdd836bc9d43ad72",
+   "what": "hand part labels of witch (schema autorig.autotests.parts-gt/1)",
+   "sha256": "762f7ad06a9954f1234826edb008a2e6b3186cbd518052ac51651534036fe5c8",
+   "bytes": 4664
+  },
+  "parts_anime_girl.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/4757baf09f0dc6202ce6/proj/model.glb",
+   "run": "4757baf09f0dc6202ce6",
+   "what": "anime girl in a skirt (parts corpus)",
+   "sha256": "5d6ecfbfa5466fccbfd3bb93cccba8b62e048091750255abe5ef4dda09460d6a",
+   "bytes": 436668
+  },
+  "parts_anime_girl.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/anime_girl.parts_gt.json",
+   "run": "4757baf09f0dc6202ce6",
+   "what": "hand part labels of anime_girl (schema autorig.autotests.parts-gt/1)",
+   "sha256": "e60d9abd6735ff9e3b52f27d248281be99be076510ca40750430a663527394a7",
+   "bytes": 3806
+  },
+  "parts_redhair_man.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/415bcd6ac676f4aa75b2/proj/model.glb",
+   "run": "415bcd6ac676f4aa75b2",
+   "what": "red-haired man (parts corpus)",
+   "sha256": "cfe96f38ba37edba38098681d18944a7e35a21e5a24af5bd3de1aaa8598ce1ba",
+   "bytes": 1553748
+  },
+  "parts_redhair_man.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/redhair_man.parts_gt.json",
+   "run": "415bcd6ac676f4aa75b2",
+   "what": "hand part labels of redhair_man (schema autorig.autotests.parts-gt/1)",
+   "sha256": "31bd3b0dbad59b4693595ec5873edb29d31aa027262fb498b53f350f2865b09a",
+   "bytes": 5695
+  },
+  "parts_plus_woman.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/cc22a7e0f640274a8ddf/proj/model.glb",
+   "run": "cc22a7e0f640274a8ddf",
+   "what": "plus-size woman (parts corpus)",
+   "sha256": "e36efe3dda2abcb70a4bf6a92853e520fe75cbc78604b8e0e50ccbc353aefdec",
+   "bytes": 14160944
+  },
+  "parts_plus_woman.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/plus_woman.parts_gt.json",
+   "run": "cc22a7e0f640274a8ddf",
+   "what": "hand part labels of plus_woman (schema autorig.autotests.parts-gt/1)",
+   "sha256": "93e53bbe0bdc5bfbf1ef0d50bbf8dbd00e1f3ea2f9a3d7fcdc4ccc80591f6232",
+   "bytes": 7918
+  },
+  "parts_woman_armsdown.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/213f2ef6c4edc42536d5/proj/model.glb",
+   "run": "213f2ef6c4edc42536d5",
+   "what": "woman, arms down (parts corpus)",
+   "sha256": "f85b7f2fbf9a17d4d3230af26308d149bf683ca51ba39fa57789242e8b780cea",
+   "bytes": 8938532
+  },
+  "parts_woman_armsdown.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/woman_armsdown.parts_gt.json",
+   "run": "213f2ef6c4edc42536d5",
+   "what": "hand part labels of woman_armsdown (schema autorig.autotests.parts-gt/1)",
+   "sha256": "8cac13ddd3978f6db8f7af1beba7fd11a245ac6ad7bbd50b32d4fee837c46134",
+   "bytes": 12050
+  },
+  "parts_chibi.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c6e2eb4c85a1c5a15f63/proj/model.glb",
+   "run": "c6e2eb4c85a1c5a15f63",
+   "what": "chibi in a cloak (parts corpus)",
+   "sha256": "f2a2be0e7122489eda9ae210fb1f21dd42d6c356eb12d2256c30a94963f10dd1",
+   "bytes": 102908
+  },
+  "parts_chibi.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/chibi.parts_gt.json",
+   "run": "c6e2eb4c85a1c5a15f63",
+   "what": "hand part labels of chibi (schema autorig.autotests.parts-gt/1)",
+   "sha256": "81aa8926b9d12c78aa0d528c382244570aae047904d0b36c6e6816ce170613cf",
+   "bytes": 2164
+  },
+  "parts_soldier.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0a27d3435c53e83cf05d/proj/model.glb",
+   "run": "0a27d3435c53e83cf05d",
+   "what": "soldier (parts corpus)",
+   "sha256": "40348a140f6d1fede794547a97cf390400f36426c41291636408863f915451f0",
+   "bytes": 366176
+  },
+  "parts_soldier.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/soldier.parts_gt.json",
+   "run": "0a27d3435c53e83cf05d",
+   "what": "hand part labels of soldier (schema autorig.autotests.parts-gt/1)",
+   "sha256": "b4e3be274bd3b45ba82b54ef5f569e57eb26681479ce5b83463fcd61a7a95a84",
+   "bytes": 2503
+  },
+  "parts_tpose_cartoon.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a9ecd34e602e14be9091/proj/model.glb",
+   "run": "a9ecd34e602e14be9091",
+   "what": "cartoon character in a T-pose (parts corpus)",
+   "sha256": "668436c99a7163f7a6ee2d3cfe7f9a6ee4657b56bb454da0f2213ce7e5808245",
+   "bytes": 630612
+  },
+  "parts_tpose_cartoon.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/tpose_cartoon.parts_gt.json",
+   "run": "a9ecd34e602e14be9091",
+   "what": "hand part labels of tpose_cartoon (schema autorig.autotests.parts-gt/1)",
+   "sha256": "57695fec430d93e222370a09fe0592e854ce1a101ee3becc5b75a6d6e6391325",
+   "bytes": 5572
+  },
+  "parts_furry.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/21cf3386197b7238b223/proj/model.glb",
+   "run": "21cf3386197b7238b223",
+   "what": "furry character with a tail (parts corpus)",
+   "sha256": "7e1bb4528e1dff7bdef5bd91497b8422936fde3e55bf52cbd4d82a7f91feaacf",
+   "bytes": 3720568
+  },
+  "parts_furry.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/furry.parts_gt.json",
+   "run": "21cf3386197b7238b223",
+   "what": "hand part labels of furry (schema autorig.autotests.parts-gt/1)",
+   "sha256": "1ff5369983a61decaeff6d708b51c79d023777a6d194f7b2b1bd2a0ad62b7688",
+   "bytes": 2481
+  },
+  "parts_demon.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ccfc481c738464250131/proj/model.glb",
+   "run": "ccfc481c738464250131",
+   "what": "demon (parts corpus)",
+   "sha256": "ee3c3a51da3bf99d1cb6bab453cc8caad8d7e2c161b0315971254a252781f506",
+   "bytes": 3110668
+  },
+  "parts_demon.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/demon.parts_gt.json",
+   "run": "ccfc481c738464250131",
+   "what": "hand part labels of demon (schema autorig.autotests.parts-gt/1)",
+   "sha256": "86dc690190983a93478c015552f0198bfcc35e5b181259ee0d4688b4986c9109",
+   "bytes": 5360
+  },
+  "parts_oneeye_monster.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/b5a4d055523540cd6600/proj/model.glb",
+   "run": "b5a4d055523540cd6600",
+   "what": "one-eyed monster (parts corpus)",
+   "sha256": "ffdee442ad56b45bded194698b88d439c15f9b3e3f246b2c35a8568aab342c09",
+   "bytes": 86307220
+  },
+  "parts_oneeye_monster.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/oneeye_monster.parts_gt.json",
+   "run": "b5a4d055523540cd6600",
+   "what": "hand part labels of oneeye_monster (schema autorig.autotests.parts-gt/1)",
+   "sha256": "38c276a385466d9886e1ffccdc4453165736c4896ddb244398dc648eadb2551b",
+   "bytes": 33356
+  },
+  "parts_demonic_legless.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/385bcba56b26eec48f6e/proj/model.glb",
+   "run": "385bcba56b26eec48f6e",
+   "what": "demonic creature without legs (a trail) (parts corpus)",
+   "sha256": "17deaddea800b7aafe03b88282b9c7561e0b430021899937c715c0bc6eaa6cf3",
+   "bytes": 37394504
+  },
+  "parts_demonic_legless.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/demonic_legless.parts_gt.json",
+   "run": "385bcba56b26eec48f6e",
+   "what": "hand part labels of demonic_legless (schema autorig.autotests.parts-gt/1)",
+   "sha256": "1a2216006a4dabd006087eba259a5157ffc6cf07ca647f8479ea5b42ac347b7f",
+   "bytes": 213629
+  },
+  "parts_red_dragon.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0fefeab8e9a9a154895f/proj/model.glb",
+   "run": "0fefeab8e9a9a154895f",
+   "what": "red dragon (parts corpus)",
+   "sha256": "662f3cbca61fd3f59ffebe75104f68a24642e78d56000c7fdcfffc4134a6c697",
+   "bytes": 2180512
+  },
+  "parts_red_dragon.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/red_dragon.parts_gt.json",
+   "run": "0fefeab8e9a9a154895f",
+   "what": "hand part labels of red_dragon (schema autorig.autotests.parts-gt/1)",
+   "sha256": "d830c35f8f7fb623b341e573443bf9e6cb76ab5ecdfe3e6e168ba49b970a06b3",
+   "bytes": 8182
+  },
+  "parts_horse.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/028d1acdb7187c532921/proj/model.glb",
+   "run": "028d1acdb7187c532921",
+   "what": "horse (parts corpus)",
+   "sha256": "96ac9bb0529aa55af46ee71d31c30c9ca23215b5f4960d49a55c341b843d2747",
+   "bytes": 971996
+  },
+  "parts_horse.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/horse.parts_gt.json",
+   "run": "028d1acdb7187c532921",
+   "what": "hand part labels of horse (schema autorig.autotests.parts-gt/1)",
+   "sha256": "786988e30722fe94c1d08565007613ada6dc03947e7bcdcf9a591f4c8c07a186",
+   "bytes": 3126
+  },
+  "parts_white_horse.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/75550318f8dde26027b3/proj/model.glb",
+   "run": "75550318f8dde26027b3",
+   "what": "white horse (parts corpus)",
+   "sha256": "63b6dc9763dd4bd29cfe1b01068c86cead1750a6faa56f078aafa9731ac89666",
+   "bytes": 2593492
+  },
+  "parts_white_horse.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/white_horse.parts_gt.json",
+   "run": "75550318f8dde26027b3",
+   "what": "hand part labels of white_horse (schema autorig.autotests.parts-gt/1)",
+   "sha256": "c064adcc54dfef373f33522dafdb81f8afb046a7802ea2c2e499c8136715f83c",
+   "bytes": 2931
+  },
+  "parts_saddled_horse.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c33c0d6f735cfb9e1c8f/proj/model.glb",
+   "run": "c33c0d6f735cfb9e1c8f",
+   "what": "saddled horse (parts corpus)",
+   "sha256": "c0379df7ed6ba478bc42d042e27b0590e6ecc2214eef99aaaebe4ddb17afb433",
+   "bytes": 3546580
+  },
+  "parts_saddled_horse.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/saddled_horse.parts_gt.json",
+   "run": "c33c0d6f735cfb9e1c8f",
+   "what": "hand part labels of saddled_horse (schema autorig.autotests.parts-gt/1)",
+   "sha256": "3235e4ffee25ad71cd37d6fb8f84ebf862824f039873d67db06afcc928dfe1bf",
+   "bytes": 6075
+  },
+  "parts_zebra.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c5ff1c6306858a9e5e8a/proj/model.glb",
+   "run": "c5ff1c6306858a9e5e8a",
+   "what": "zebra (parts corpus)",
+   "sha256": "3c482d67aad7cc9360d348f1fe650ea473c100838fcb19df1cb01c3260be514e",
+   "bytes": 4927408
+  },
+  "parts_zebra.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/zebra.parts_gt.json",
+   "run": "c5ff1c6306858a9e5e8a",
+   "what": "hand part labels of zebra (schema autorig.autotests.parts-gt/1)",
+   "sha256": "cf046fe195d0df9a3c24d80e7431f69feaa6f7e66dddb737328294a044311922",
+   "bytes": 2716
+  },
+  "parts_doberman.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/95cbe8fd652f7fd5972f/proj/model.glb",
+   "run": "95cbe8fd652f7fd5972f",
+   "what": "doberman (parts corpus)",
+   "sha256": "04a85f36892b5c66c3672e1b5905c7783cd63901d5de1e9d51ba449f29caec53",
+   "bytes": 98456
+  },
+  "parts_doberman.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/doberman.parts_gt.json",
+   "run": "95cbe8fd652f7fd5972f",
+   "what": "hand part labels of doberman (schema autorig.autotests.parts-gt/1)",
+   "sha256": "1d82ca1e6cd29011016bd83e4ba6004bd63f7a855b6832a749f9de3b67158479",
+   "bytes": 1869
+  },
+  "parts_deer.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/74d3849f9bf8a4154a7e/proj/model.glb",
+   "run": "74d3849f9bf8a4154a7e",
+   "what": "deer (parts corpus)",
+   "sha256": "6f10a7afeaf0838ecd250e08171db29b7f31d7313f2d9d55c33e7c3b3a63aafa",
+   "bytes": 15900520
+  },
+  "parts_deer.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/deer.parts_gt.json",
+   "run": "74d3849f9bf8a4154a7e",
+   "what": "hand part labels of deer (schema autorig.autotests.parts-gt/1)",
+   "sha256": "af56d09da33d003af66eb63a4faa26a8784d72291400c08b6cc856962aec062b",
+   "bytes": 3011
+  },
+  "parts_elephant.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/2b25bbe13b5117a3a2b6/proj/model.glb",
+   "run": "2b25bbe13b5117a3a2b6",
+   "what": "elephant (parts corpus)",
+   "sha256": "945a2f3356d78c8429c4aeab93586a28514929cf82f2fae861b0832451b76a05",
+   "bytes": 1611516
+  },
+  "parts_elephant.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/elephant.parts_gt.json",
+   "run": "2b25bbe13b5117a3a2b6",
+   "what": "hand part labels of elephant (schema autorig.autotests.parts-gt/1)",
+   "sha256": "c50409bd50248e2dde7858663cae50e6a80f21a1b0f1a9a6de24bca419ce9fe2",
+   "bytes": 4715
+  },
+  "parts_boar.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5b49fa4f622634597cbb/proj/model.glb",
+   "run": "5b49fa4f622634597cbb",
+   "what": "boar (parts corpus)",
+   "sha256": "3d102fb7ea3083b61aede3734ccedb7943042237cf98543ccfe07a7e1b598fa9",
+   "bytes": 665340
+  },
+  "parts_boar.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/boar.parts_gt.json",
+   "run": "5b49fa4f622634597cbb",
+   "what": "hand part labels of boar (schema autorig.autotests.parts-gt/1)",
+   "sha256": "cd24cb1fffe2a15efa1fe12731d234c44a2468484a7c73549d938acb3acaa448",
+   "bytes": 5303
+  },
+  "parts_bird_of_prey.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/48bc7952b573f99f1636/proj/model.glb",
+   "run": "48bc7952b573f99f1636",
+   "what": "bird of prey, wings spread (parts corpus)",
+   "sha256": "ca7d31b3cd2a9f131621d5029723c73245f1f6b0440f9a9eafe0f6258097c67e",
+   "bytes": 32817780
+  },
+  "parts_bird_of_prey.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/bird_of_prey.parts_gt.json",
+   "run": "48bc7952b573f99f1636",
+   "what": "hand part labels of bird_of_prey (schema autorig.autotests.parts-gt/1)",
+   "sha256": "cf857cbd5d1abd65945ac7837d02ffb3876c55328ad1082fc2e936ebb1e0f0d5",
+   "bytes": 3651
+  },
+  "parts_rooster.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/1b361561a6614ba5c8fd/proj/model.glb",
+   "run": "1b361561a6614ba5c8fd",
+   "what": "rooster (parts corpus)",
+   "sha256": "831659ddd3f0d54cc12edf9194ab841dff771c723830529184d73980034ecad8",
+   "bytes": 4144228
+  },
+  "parts_rooster.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/rooster.parts_gt.json",
+   "run": "1b361561a6614ba5c8fd",
+   "what": "hand part labels of rooster (schema autorig.autotests.parts-gt/1)",
+   "sha256": "27713c69c58c9298ef7a405842bcaeaac16836f3d984534a500fa076da976efd",
+   "bytes": 3695
+  },
+  "parts_hero.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3fe3648b902dcae448ba/proj/model.glb",
+   "run": "3fe3648b902dcae448ba",
+   "what": "superhero with a floor-length cape (a clear cloak) (parts corpus)",
+   "sha256": "0496d96cf9cc192d3d0ff74c717123e5e1337d0bc008b6df6fe4847adaaca77c",
+   "bytes": 3587148
+  },
+  "parts_hero.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/hero.parts_gt.json",
+   "run": "3fe3648b902dcae448ba",
+   "what": "hand part labels of hero (schema autorig.autotests.parts-gt/1)",
+   "sha256": "416ae228b119e962dfe5d14c86d467307de8a790af2709e5ed6007a1ab58484b",
+   "bytes": 5791
+  },
+  "parts_cape_mesh.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f6e483234400204fc7fe/proj/model.glb",
+   "run": "f6e483234400204fc7fe",
+   "what": "armoured knight with a cape and a staff (parts corpus)",
+   "sha256": "70bca399d84be19fdd166de687680eecd97b96fd8bb4bd873405768787330bbd",
+   "bytes": 13171988
+  },
+  "parts_cape_mesh.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/cape_mesh.parts_gt.json",
+   "run": "f6e483234400204fc7fe",
+   "what": "hand part labels of cape_mesh (schema autorig.autotests.parts-gt/1)",
+   "sha256": "3b49aada63d751eb3ddc39bc5af7bfe17c313546123f99994c633889d1bc2c8d",
+   "bytes": 8274
+  },
+  "parts_elf_woman.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/7146046d151eb301414d/proj/model.glb",
+   "run": "7146046d151eb301414d",
+   "what": "elf woman in a T-pose, hair down the back (parts corpus)",
+   "sha256": "a6a25a923c9fe3774cf1075d744ab4cdcc8293156c1a33e36ea0cf23d7325c68",
+   "bytes": 940752
+  },
+  "parts_elf_woman.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/elf_woman.parts_gt.json",
+   "run": "7146046d151eb301414d",
+   "what": "hand part labels of elf_woman (schema autorig.autotests.parts-gt/1)",
+   "sha256": "b420bb2584f2f24f1b759c53a401d9c4e56e50084baf88e22ced60f4477e6054",
+   "bytes": 4299
+  },
+  "parts_elf_girl.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/36d76becb174d3a4e945/proj/model.glb",
+   "run": "36d76becb174d3a4e945",
+   "what": "anime elf girl with very long hair (parts corpus)",
+   "sha256": "d03fe67bf5ff6f105a92bacf2c278b3b0aa5e37f6de558d7e5f22625807e69ff",
+   "bytes": 21054360
+  },
+  "parts_elf_girl.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/elf_girl.parts_gt.json",
+   "run": "36d76becb174d3a4e945",
+   "what": "hand part labels of elf_girl (schema autorig.autotests.parts-gt/1)",
+   "sha256": "5b21f650f5810ad55dc4f2aec6a2ead9954c48063fd1153074a9c276033b7db7",
+   "bytes": 138517
+  },
+  "parts_robe_woman.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/83f910e1bd94b57ed715/proj/model.glb",
+   "run": "83f910e1bd94b57ed715",
+   "what": "stout woman in a hooded robe (coat family) (parts corpus)",
+   "sha256": "0450bb2d5e7e1d5ee766b308c5c1345735b7f9fe46ee44f8e6b806cb4e1f6d21",
+   "bytes": 1181512
+  },
+  "parts_robe_woman.parts_gt.json": {
+   "source": "/srv/autorig/data/autotests/parts_gt/robe_woman.parts_gt.json",
+   "run": "83f910e1bd94b57ed715",
+   "what": "hand part labels of robe_woman (schema autorig.autotests.parts-gt/1)",
+   "sha256": "a07334ef0d214ad34dcce9f0c57f037869f2306fcddc7d6bcea7d9042179a4de",
+   "bytes": 6838
+  },
+  "5b8dcdac.tpose_slab.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/5b8dcdac_tpose_slab_030.glb",
+   "task": "5b8dcdac-4ca5-4ff8-acfa-016b5bbbf27e",
+   "what": "5b8dcdac «T Pose» (t_pose.glb, 895 291 vertices, no skeleton) decimated by a vertex grid of 240 cells over the largest extent to 96 897 vertices, extents kept 1.1005 x 1.1195 x 0.3417 (a T-pose standing on +y, z the thin axis); geometry only (positions + indices). Old code: -z «quadruped: 4 foot blobs» 0.9, lying, 32 quad bones.",
+   "sha256": "080e2841cee402044f09d766cb311db168d64409d2e786776da4f8342587330f",
+   "bytes": 3677984
+  },
+  "4102abd1.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f98bc5933a41cdcf035d/proj/model.glb",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "what": "robot santa from a picture: a heavy biped, fur collar and beard over the chest, the arms hanging free of a wide coat, no skeleton (V3 run f98bc593, the paired control of 77cc1b88)",
+   "sha256": "12f73722436bf19af6ad636908a650cb09462cc05f24d544f22fb8f061a8c069",
+   "bytes": 13270132
+  },
+  "8d2578e3.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/21cea5c560b605f3a2ff/proj/model.glb",
+   "task": "8d2578e3-3a8f-4bab-b4b5-f9ef3ecc64fb",
+   "what": "monkey with a long tail, T pose (player_character.glb), the V3 run's proj/model.glb",
+   "sha256": "d78537cbca8d80b9490825f495646b2a8ab2442e4c99cb50e46eb1b40750e235",
+   "bytes": 8201028
+  },
+  "8d2578e3.parts_seg.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/21cea5c560b605f3a2ff/analysis/parts_seg.json",
+   "task": "8d2578e3-3a8f-4bab-b4b5-f9ef3ecc64fb",
+   "what": "the analyser's fine pass (SAM + mesh segmentation): the part records, tail 0.645",
+   "sha256": "5722e8921efcff3c0aa23388032fb49be5c9adc9337cb8ed8e1c99b76c0c5377",
+   "bytes": 90576
+  },
+  "8d2578e3.parts_seg.npz": {
+   "source": "/srv/autorig/data/motion_transfer/runs/21cea5c560b605f3a2ff/analysis/parts_seg.npz",
+   "task": "8d2578e3-3a8f-4bab-b4b5-f9ef3ecc64fb",
+   "what": "the analyser's per-vertex labels on proj/model.glb (the tail and a stray tail island on the knife)",
+   "sha256": "1af9fc749f4e7751e8b906fa7d61c516f9df4c6655c5be51a42f8a9093edfd93",
+   "bytes": 26301
   }
  },
  "profiles": {
@@ -17065,6 +17548,80 @@
       "reason": "the far leak left (3.3 %, nearest-segment regions) is the stand's region rule, not the skin: RightHand <- RightUpLeg 1058 / LeftHand <- LeftUpLeg 789 are coat vertices under the mittens (40-52 welded rings from the hand skin, 1-5 from the thigh skin), Arm <- Spine the coat's side under the hanging arms (slices 42-67 % H); with the radii rule (leak_region radii) 1.3 %, tube 1.65 %. Decide the detector's region rule (Anim stand · V3)",
       "owner": "Anim stand · V3"
      }
+    },
+    {
+     "id": "rig_contract",
+     "kind": "rig_contract",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "clips": [
+       ">=",
+       1
+      ],
+      "contact_after": [
+       "==",
+       0
+      ],
+      "pose_reached": [
+       "==",
+       "opened"
+      ],
+      "chain_layers": [
+       ">=",
+       1
+      ],
+      "layers": [
+       ">=",
+       3
+      ],
+      "contract": [
+       "==",
+       "autorig.mt.rig/v3.1"
+      ],
+      "edges_over_4x_sum": [
+       "<=",
+       150
+      ],
+      "mirror_pct_H": [
+       "<=",
+       3.5
+      ]
+     },
+     "owner": "Biped skin · V3.1",
+     "note": "Rig contract V3.1 milestone 3 (2026-10-17): the skin solved in a contact-free standard pose (A/T by the probe), the sleeve | coat contacts released with hinged lids, voxel heat + delta-mush, the beard chain Hair_Beard_0..2. Scratch re-rig of 77cc1b88, 9 clips at 24 frames: edges over 2x 7259 -> 1767, over 4x 527 -> 101 (prod v3.2026-10-16.2 vs the candidate); the thresholds guard against a regression",
+     "target": {
+      "thresholds": {
+       "edges_over_2x_sum": [
+        "<=",
+        0
+       ],
+       "edges_over_4x_sum": [
+        "<=",
+        0
+       ],
+       "volume_dev_max_pct": [
+        "<=",
+        3.0
+       ],
+       "far_leak_max_pct": [
+        "<=",
+        1.0
+       ],
+       "mirror_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "the full contract (0 edges over 2x / 4x on every clip, volume within 3 %, far leak within 1 %, mirror within 1 % H) is not held yet: the coat skirt | thighs (Hips | UpLeg 29-54 % H) and the armpit hinge still stretch in Jump / Waving1 / Hip Hop; the mittens are asymmetric (Hand_tip 2.9 % H). Needs the hem bones under the Hips and the sleeve twist bones",
+      "owner": "Biped skin · V3.1"
+     }
     }
    ]
   },
@@ -17176,6 +17733,470 @@
        ">=",
        8
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "parts_labels_corpus",
+   "cost": 3,
+   "tier": "extended",
+   "defect": "V3.1 part entities (owner 2026-10-17): the two Santa tasks 77cc1b88 / 4102abd1 got different part labels. The common GPU analyser (mt.analyzer: GroundingDINO + SAM2 on the fleet mask service, back-projected and voted per face, fused with the geodesic Reeb segments of the voxel solid) must label the hand-labelled corpus. Spec targets: head / arms / legs IoU >= 0.9, cloak / beard / tail >= 0.8; the thresholds are the measured floor (a regression guard), the targets are the work still open",
+   "checks": [
+    {
+     "id": "parts_iou",
+     "kind": "parts_iou",
+     "paths": [
+      "mt"
+     ],
+     "role": "detector",
+     "tier": "extended",
+     "params": {
+      "models": [
+       "santa1",
+       "santa2",
+       "knight",
+       "hooded_robe",
+       "witch",
+       "anime_girl",
+       "redhair_man",
+       "plus_woman",
+       "woman_armsdown",
+       "chibi",
+       "soldier",
+       "tpose_cartoon",
+       "furry",
+       "demon",
+       "oneeye_monster",
+       "demonic_legless",
+       "red_dragon",
+       "horse",
+       "white_horse",
+       "saddled_horse",
+       "zebra",
+       "doberman",
+       "deer",
+       "elephant",
+       "boar",
+       "bird_of_prey",
+       "rooster",
+       "hero",
+       "cape_mesh",
+       "elf_woman",
+       "elf_girl",
+       "robe_woman"
+      ],
+      "pass": "fine"
+     },
+     "thresholds": {
+      "models_failed": [
+       "<=",
+       1
+      ],
+      "head_iou_mean": [
+       ">=",
+       0.52
+      ],
+      "arm_iou_mean": [
+       ">=",
+       0.48
+      ],
+      "leg_iou_mean": [
+       ">=",
+       0.6
+      ],
+      "tail_iou_mean": [
+       ">=",
+       0.45
+      ],
+      "wing_iou_mean": [
+       ">=",
+       0.45
+      ],
+      "cloth_iou_mean": [
+       ">=",
+       0.28
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "tpose_slab_030_upright",
+   "task": "5b8dcdac",
+   "cost": 1,
+   "defect": "Orientation · V3 (owner 2026-10-17, task 5b8dcdac «T Pose», run 9ca94222ced33d716a4e: «если вертикалка выше горизонталки это повод проверить позиционирование со старта»): a standing T-pose (extents 1.10 x 1.12 x 0.34) was laid on its back as -z «quadruped: 4 foot blobs» (0.9): the hands and feet seen along the thin axis; 0.34 / 1.12 = 0.305 passed the 0.25 x max slab guard, the -z trace took 59-62 s on 895k vertices and the 40 s cap skipped +y, so the confident pick stood (body plan quadruped, 32 bones, stretch 148x). Fix (mt/orient.py, mt/rig_first.py): a quadruped up is a slab under 0.5 x the smaller other span (ORIENT_SLAB_RATIO), a tall file (+y >= 0.95 x the largest extent, ORIENT_TALL_RATIO) has its own +y judged first by the voxel trace (clustered to <= 300k vertices), the judge's record is written to proj/orient.json on every pass.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "5b8dcdac.tpose_slab.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3"
+    }
+   ]
+  },
+  {
+   "id": "robot_santa_picture_biped",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "cost": 2,
+   "owner": "Biped skin · V3.1",
+   "defect": "Free arm · V3.1 (owner 2026-10-17 on the picture Santa 4102abd1, run f98bc593, the paired control of 77cc1b88: «тут до сих пор не могут правильно найтись плечи и руки ригаются вне сетки»): a heavy biped, fur collar and beard over the chest, arms hanging free of a wide coat. The fit put the shoulders at the belly (LeftArm 59.5 / RightArm 57.8 % H, 5.2 % H asymmetric), the neck at 69.4 % H, the hands beside the sleeves. Fix: mt/free_arm.py traces the free arm in the side slices; a fitted shoulder under the armpit moves to the arm root (one radius under its top), the fingertip to the trace's bottom, both sides mirrored; the neck over the shoulders (0.29 to the head top). After (scratch): Arm 76.2 / 76.2, mirror 0.0, Neck 81.9, hand 0.09 radii from the sleeve axis; 9 clips edges over 2x / 4x 5676 / 681 -> 1137 / 70",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "4102abd1.model.glb",
+     "params": {
+      "words": "santa claus",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "spine_order_ok": [
+       "==",
+       1
+      ],
+      "neck_over_ground_pct_H": [
+       "between",
+       [
+        76,
+        90
+       ]
+      ],
+      "left_arm_y_pct_H": [
+       ">=",
+       68
+      ],
+      "right_arm_y_pct_H": [
+       ">=",
+       68
+      ],
+      "shoulder_mirror_pct_H": [
+       "<=",
+       2
+      ],
+      "min_arm_off_axis_pct_H": [
+       ">=",
+       12
+      ]
+     },
+     "note": "free arm 2026-10-17: Arm 76.2 % H both sides (before 59.5 / 57.8), Neck 81.9 (before 69.4)"
+    },
+    {
+     "id": "rig_contract",
+     "kind": "rig_contract",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "clips": [
+       ">=",
+       1
+      ],
+      "contact_after": [
+       "==",
+       0
+      ],
+      "chain_layers": [
+       ">=",
+       1
+      ],
+      "edges_over_4x_sum": [
+       "<=",
+       150
+      ]
+     },
+     "target": {
+      "thresholds": {
+       "edges_over_2x_sum": [
+        "<=",
+        0
+       ],
+       "edges_over_4x_sum": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "the full contract is not held yet (coat skirt | thighs, armpit hinge); paired with bearded_arms_down_biped",
+      "owner": "Biped skin · V3.1"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_sleeve_twist",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "cost": 2,
+   "owner": "Biped skin · V3.1",
+   "defect": "Sleeve twist · V3.1 (lead 2026-10-18, the picture Santa 4102abd1, run f98bc593): the hand's roll about the forearm (up to 93 deg in Waving1, 125 in Look Around) was carried by the Hand bone alone, so the wrist ring collapsed onto the bone (candy wrapper): wrist ring volume Waving1 -53.5 % (right) / -25.3 % (left), Hip Hop -23.4 / -19.2 %. Fix: mt/twist.py adds {Side}ForeArmTwist (a leaf joint under ForeArm at the segment middle, non-humanoid), shares the ForeArm weight with it along the segment (faded out of torso / coat vertices), and bakes 0.5 x the hand's roll into every clip. After (scratch): -19.9 / -11.8 % Waving1, -13.8 / -12.2 % Hip Hop; stand edges over 4x unchanged (60), Unity Humanoid valid 0 warnings, gltf 0 errors",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "4102abd1.model.glb",
+     "params": {
+      "words": "santa claus",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "rig_contract",
+     "kind": "rig_contract",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "clips": [
+       ">=",
+       1
+      ],
+      "twist_joints": [
+       "==",
+       2
+      ],
+      "wrist_ring_dev_max_pct": [
+       "<=",
+       30
+      ],
+      "edges_over_4x_sum": [
+       "<=",
+       150
+      ]
+     },
+     "note": "the wrist ring (mt/rig_contract.py rings: the arm's welded vertices within +-0.12 of the forearm about the wrist, volume = sum r^2 to the posed bone polyline) in Waving1 / Hip Hop at 12 frames; before the twist joints 53.5 % at 24 frames",
+     "target": {
+      "thresholds": {
+       "wrist_ring_dev_max_pct": [
+        "<=",
+        3.0
+       ],
+       "elbow_ring_dev_max_pct": [
+        "<=",
+        3.0
+       ]
+      },
+      "reason": "the wrist / elbow rings still lose 12-28 % in Waving1 / Hip Hop: the twist joint takes the roll, the rest is the linear blend across the bend (elbow 19-26 %, untouched by the twist); needs a volume-preserving blend (dual quaternion / delta mush at the joints)",
+      "owner": "Biped skin · V3.1"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_tail",
+   "task": "8d2578e3-3a8f-4bab-b4b5-f9ef3ecc64fb",
+   "cost": 2,
+   "owner": "Biped tail · V3.1",
+   "defect": "Biped tail · V3.1 (owner 2026-10-18 «а тут почему хвост сразу не определился?», task 8d2578e3 the monkey, run 21cea5c560b605f3a2ff; spec docs/biped-tail-primary-spec-20261018.md): the analyser found the tail (SAM 0.645, 561 faces) but the biped template had no tail bone: the tail rode the Hips / Spine rigidly, and the secondary tail layer was judged on the analyser's mask, which also covered the knife in the hand (a stray tail island: tail-region stretch 23-37x, 58x, penetration 15-19k vertex-frames), so the layer was rejected. Fix: mt/biped_tail.py gives the biped the chain Tail..Tail11 under the Hips in the primary fastrig (the mask's largest connected piece, tail_engine.fit, the root band blended from the back's own trunk weights, never a leg), the secondary rig follows it (old_chain, primate profile) and judges the tail in its own region. After (scratch rerig): 12 tail bones, tail region max stretch 1.64 (secondary layer accepted, lag 0.25-0.33 s), edges over 4x 0, free-tail penetration 0; the primary alone 2.10 (Running)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8d2578e3.model.glb",
+     "params": {
+      "words": "monkey character",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "parts_seg.json": "8d2578e3.parts_seg.json",
+       "parts_seg.npz": "8d2578e3.parts_seg.npz"
+      }
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "tail",
+     "kind": "biped_tail",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "clips": [
+       "Idle",
+       "Walking",
+       "Running"
+      ]
+     },
+     "thresholds": {
+      "tail_bones": [
+       ">=",
+       4
+      ],
+      "tail_parent_hips": [
+       "==",
+       1
+      ],
+      "used": [
+       "==",
+       1
+      ],
+      "tail_max_stretch": [
+       "<=",
+       2.0
+      ],
+      "tail_edges_over_4x": [
+       "<=",
+       0
+      ],
+      "tail_pen_body": [
+       "<=",
+       0
+      ],
+      "tail_pen_limb_strike": [
+       "<=",
+       60
+      ]
+     },
+     "note": "gate run 20261018T130801Z on the corpus input: 12 Tail bones, tail region max stretch 1.19 / 1.22 / 1.78 (Idle / Walking / Running), 0 edges over 4x, 0 penetration into the trunk; in Running the left foot kicks back through the hanging tail (29 vertex-frames, 2.1 % H, LeftFoot capsule), counted as tail_pen_limb_strike",
+     "target": {
+      "thresholds": {
+       "tail_pen_free": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "the primary tail is a static chain: in Running the left foot kicks back through it (29 vertex-frames, 2.1 % H); a limb passing through the tail is the secondary tail layer's collision, which the corpus rig does not run",
+      "owner": "Biped tail · V3.1"
      }
     }
    ]
