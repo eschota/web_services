@@ -454,7 +454,7 @@ function start(viewerEl) {
     if (S.layers) {
       const L = S.layers.layers || [];
       out.push(`<section class="v31-card"><h4>${svg('layers')}<span>${esc(tr('v31_layers'))}</span><b class="${L.length ? '' : 'warn'}">${L.length}</b></h4>` +
-        (L.length ? `<ul class="v31-chips">${L.map((l) => `<li title="${esc((l.bones || []).join(', '))}">${esc(labelName(l.name))} <small>${(l.bones || []).length}</small></li>`).join('')}</ul>`
+        (L.length ? `<ul class="v31-chips">${L.map((l) => { const bl = Array.isArray(l.bones) ? l.bones : (l.bones && typeof l.bones === 'object' ? Object.values(l.bones).flat().map(String) : (l.chain || [])); const bn = Array.isArray(l.bones) ? l.bones.length : (typeof l.bones === 'number' ? l.bones : bl.length); return `<li title="${esc(bl.join(', '))}">${esc(labelName(l.name || l.label || l.id))} <small>${bn}</small></li>`; }).join('')}</ul>`
           : `<p class="v31-mute warn">${esc(tr('v31_no_layers'))}</p>`) + '</section>');
     }
     if (S.clips.length) {
