@@ -840,6 +840,11 @@ def _slim_status(j: Dict[str, Any]) -> Dict[str, Any]:
 
 # ----------------------------------------------------------------- compose
 
+QA_EXTERNAL_STATUS = os.environ.get("FLEET_QA_EXTERNAL_STATUS",
+                                    "/srv/autorig/data/motion_transfer/qa_external/status.json")
+QA_EXTERNAL_BOX = os.environ.get("FLEET_QA_EXTERNAL_BOX", "worker-4090")
+
+
 def _age(ts: Optional[float]) -> Optional[int]:
     if not ts:
         return None
@@ -1503,6 +1508,26 @@ def compose(col: Collector) -> Dict[str, Any]:
         hy = (b.get("services_object") or {}).get("hunyuan")
         if isinstance(hy, dict) and "models_array" not in hy:
             hy["models_array"] = ["hunyuan21"] if hy.get("reachable") else []
+    # the foreign-engine check (Rig contract V3.1 section 4; MT repo tools/qa_external, the user task «AutoRig External
+    # QA» on worker-4090 every 10 min): mt/qa_external.py keeps status.json (last install, the pending count of the
+    # last GET /api/mt/qa-external/pending); the box agent lists the task in its scheduled_tasks
+    qs = _read_json(QA_EXTERNAL_STATUS, {}) or {}
+    for b in boxes_out:
+        if b["id"] != QA_EXTERNAL_BOX:
+            continue
+        last = qs.get("last") if isinstance(qs.get("last"), dict) else {}
+        tasks = ((b.get("services_object") or {}).get("fleet_agent") or {}).get("scheduled_tasks") or []
+        task = next((t for t in tasks if str(t).startswith("AutoRig External QA")), "")
+        b.setdefault("services_object", {})["qa_external"] = {
+            "task_string": task, "pending_count_int": qs.get("pending_count"),
+            "pending_checked_age_seconds_int": _age(qs.get("pending_checked_at")),
+            "pending_days_float": qs.get("pending_days"),
+            "last_run_string": last.get("run") or "", "last_at_string": last.get("at") or "",
+            "last_by_string": last.get("by") or "", "last_pass_bool": last.get("pass"),
+            "installed_total_int": qs.get("installed_total"),
+            "state_string": ("no task" if not task else "idle" if not qs.get("pending_count") else
+                             f"{qs.get('pending_count')} pending"),
+        }
     # the farm runner file each box runs (box agent: sha256-checked self-update between jobs, 2026-10-13)
     latest_runner = _runner_sha()
     for b in boxes_out:
