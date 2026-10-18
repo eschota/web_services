@@ -647,6 +647,31 @@ Owner rule, 2026-10-10:
   `character` mean a biped). Every orientation pass writes its judge evidence into `proj/orient.json` (candidates,
   arm chains, feet, seconds), and the «transform» defect report shows it. Corpus case `tpose_slab_030_upright`.
 
+## Santa V3.1: What Was Decided On The Way (lead decisions, 2026-10-17/18)
+
+* **Skin in a contact-free pose is live** (rig version `v3.2026-10-17.1`): the open pose is the cheaper of A / T,
+  voxel-checked, the weights solved there and the rig returned to rest; garment layers (beard, sleeves, hem) are real
+  layers; the stand, gltf-validator, Unity Humanoid and Blender are the proof on both Santas (77cc1b88, 4102abd1).
+* **Synthetic geometry never counts as a tear.** Lids and strips that the release creates are marked on the primitive
+  (`extras._SYNTHETIC`, `rig.json skin.release.synthetic`); every stretch metric (the probe, the anim stand, the
+  rig_contract check, the Blender check, stand_tear) counts the source mesh's edges only; the synthetic part gets its
+  own checks (faces crossing the body, flipped faces, `strip_max_stretch` informational).
+* **The armpit is a lid, not a loft.** The loft strip between the sleeve rim and the body rim closed the cavity in a
+  picture that was an artefact (the stand's fast fix had pulled the rims back together); measured honestly it folds
+  and crosses the body (420 / 358 faces vs 137 for the lid). The lid stays and must read as cloth: double-sided,
+  the cuff's material and UV island, recessed 1 % H (`lid_sides`, `lid_uv`, `lid_recess_pct_H`). `release_fill
+  loft` is written only when no strip face flips, which in practice is never.
+* **Secondary layers are strap chains.** Every seam of a cloth / chain part with the body is a pinned band (fused or
+  contact), the weights blend geodesically from the root to the seam band, the dynamics hang between the two
+  anchors; a coat keeps its body on the skin bones and only the hem below the crotch becomes chains; one explicit
+  `gate_rule` in every verdict (penetration may grow 0.02 % of vertex-frames, edges over 4x by 2, or 4 when
+  penetration falls by half). A layer that fails the honest gate is not activated; nothing is reverted by hand.
+* **Entity masks follow the rig.** The analyser's part masks (`analysis/parts/entity_<id>.u32`) are in the rig's
+  vertex order, so every re-rig refreshes them before the secondary rig runs.
+* **The file's own up first** (owner rule of 2026-10-17, section above): the orientator's animal word lists had
+  literal backspace characters instead of word boundaries until 2026-10-17; they are real now and a biped Vision
+  body overrules an animal word.
+
 ## Rig Contract V3.1 (owner order, 2026-10-17)
 
 > запиши контракт v3.1 и добавь туда обязательный скиннинг не в позе контакта, а в свободную А или Т позу, ту что
