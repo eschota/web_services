@@ -734,10 +734,41 @@ def rig_joints(ctx):
                 out[f"{side.lower()}_hand_off_axis_pct_H"] = round(float(np.hypot(hd[0] - hips[0], hd[2] - hips[2])) / H * 100, 2)
         offs = [v for k, v in out.items() if k.endswith("_arm_off_axis_pct_H")]
         out["min_arm_off_axis_pct_H"] = min(offs) if offs else None
+    try:                                                 # Joints · biped (owner 2026-10-15..17, spec
+        out.update(limb_shares(heads, H, y0))            # biped-joints-owner-remarks-20261018): hip / knee / ankle
+    except Exception as exc:                             # heights, the knee and elbow shares of their chains
+        out["limb_shares_error"] = f"{type(exc).__name__}: {exc}"[:160]
     try:                                                 # Spine order · V3 (2026-10-16, 77cc1b88 the bearded Santa:
         out.update(spine_order(run, rig, heads, H))      # Neck at 41 % H under the Hips, shoulders 5.4 % H apart)
     except Exception as exc:                             # noqa: BLE001 - the other numbers stand
         out["spine_order_error"] = f"{type(exc).__name__}: {exc}"[:160]
+    return out
+
+
+def limb_shares(heads, H, y0):
+    """Joints · biped: UpLeg / Leg / Foot heights (% H over the lowest joint, both sides' mean), the thigh's share
+    of hip -> ankle (table 0.50) and the upper arm's share of shoulder -> wrist (table 0.56), the shortest forearm."""
+    out = {}
+    pct = lambda n: float(heads[n][1] - y0) / H * 100
+    for k, name in (("UpLeg", "upleg_pct_H"), ("Leg", "knee_pct_H"), ("Foot", "ankle_pct_H")):
+        v = [pct(s + k) for s in ("Left", "Right") if s + k in heads]
+        if v:
+            out[name] = round(sum(v) / len(v), 2)
+    ln = lambda a, b: float(np.linalg.norm(np.asarray(heads[a]) - np.asarray(heads[b])))
+    ks, es, fa = [], [], []
+    for s in ("Left", "Right"):
+        if all(s + n in heads for n in ("UpLeg", "Leg", "Foot")):
+            t, sh = ln(s + "UpLeg", s + "Leg"), ln(s + "Leg", s + "Foot")
+            ks.append(t / max(t + sh, 1e-12))
+        if all(s + n in heads for n in ("Arm", "ForeArm", "Hand")):
+            u, f = ln(s + "Arm", s + "ForeArm"), ln(s + "ForeArm", s + "Hand")
+            es.append(u / max(u + f, 1e-12))
+            fa.append(f / H * 100)
+    if ks:
+        out["knee_share_min"], out["knee_share_max"] = round(min(ks), 3), round(max(ks), 3)
+    if es:
+        out["elbow_share_min"], out["elbow_share_max"] = round(min(es), 3), round(max(es), 3)
+        out["forearm_pct_H_min"] = round(min(fa), 2)
     return out
 
 
@@ -1027,6 +1058,49 @@ def mt_arm_clearance(ctx):
 QUAD_FORWARD_YAW = {"+z": 0.0, "-z": 180.0, "+x": -90.0, "-x": 90.0}   # mt.fastrig.FORWARD_YAW
 
 
+def multileg_legs(run, rig) -> dict:
+    """Multileg · V3 (owner 2026-10-18 «сделай пауков»): the creature rig's legs per side, the mirrored pairs (creature
+    pair_limbs), the dropped tips, and the orientation the rig stood on (proj/orient.json), for the spider / insect
+    cases: a spider stands on its +y with 4 / 4 legs in 4 pairs."""
+    cr = rig.get("creature") or {}
+    if not cr:
+        return {}
+    names = [str(b.get("name") or "") for b in rig.get("bones") or []]
+    pr = cr.get("pairs") or {}
+    o = {}
+    try:
+        o = json.loads((pathlib.Path(run) / "proj" / "orient.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    return {"legs_left": sum(1 for n in names if re.fullmatch(r"LeftLeg\d+", n)),
+            "legs_right": sum(1 for n in names if re.fullmatch(r"RightLeg\d+", n)),
+            "legs_mid": sum(1 for n in names if re.fullmatch(r"Limb\d+", n)),
+            "leg_pairs": int(pr.get("pairs") or 0), "expected_pairs": pr.get("expected"),
+            "dropped_tips": len(pr.get("dropped") or []), "up": o.get("up"), "up_plan": o.get("plan"),
+            "legs_symmetric": int(sum(1 for n in names if re.fullmatch(r"LeftLeg\d+", n))
+                                  == sum(1 for n in names if re.fullmatch(r"RightLeg\d+", n)))}
+
+
+def vehicle_rig(run, rig) -> dict:
+    """Vehicles V3 (owner 2026-10-18 «тут две тачки залили, надо чтобы колеса риггались и все такое»; mt/vehicle_mesh.py):
+    the wheels on their axles, the up the file stood on and whether it was turned, the vertices per part, the
+    detector's score, for the car cases (the Camry 52e76e46: Z-up OBJ, 4 named wheels, 2 axles, front steer)."""
+    v = rig.get("vehicle") or {}
+    if not v and str(rig.get("body_plan") or "") != "vehicle":
+        return {}
+    wl = v.get("wheels") or []
+    ch = rig.get("checks") or {}
+    det = v.get("detect") or {}
+    return {"wheels": len(wl), "axles": len(v.get("axles") or []), "steer_wheels": len(v.get("steer_wheels") or []),
+            "wheel_pairs": sum(1 for a in (v.get("axles") or []) if sum(1 for w in wl if int(w.get("axle", -1)) == a) == 2),
+            "vehicle_up": str(v.get("up") or ""), "vehicle_turned": int(bool(v.get("turned"))),
+            "wheels_named": int(ch.get("wheels_named") or 0), "wheel_vertices": int(ch.get("wheel_vertices") or 0),
+            "body_vertices": int(ch.get("body_vertices") or 0), "vehicle_score": int(det.get("score") or 0),
+            "normaliser_error": 1 if (v.get("normaliser") or {}).get("error") else 0,
+            "wheels_norm_s": float(((v.get("normaliser") or {}).get("timings_s") or {}).get("total") or 0)}
+
+
+
 def quad_leg_frame(run, rig) -> dict:
     """Quad legs · V3 (2026-10-14): a quadruped rig's legs in its fit frame (rig.json forward_axis + proj/yaw.json, as
     mt.fastrig.build turns it: +Z the head end, +Y up, +X the model's left), from rig.json alone:
@@ -1137,7 +1211,7 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, bod
             "rig_check_4x": sum(int(v.get("edges_over_4x") or 0) for k, v in
                                 ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items()
                                 if str(k).startswith("t=") and isinstance(v, dict)),
-            **quad_leg_frame(run, rig)}                  # Quad legs · V3 (2026-10-14)
+            **quad_leg_frame(run, rig), **multileg_legs(run, rig), **vehicle_rig(run, rig)}   # Quad legs · V3 (2026-10-14); Multileg · V3; Vehicles V3 (2026-10-18)
 
 
 def hand_rig(ctx):
@@ -1525,7 +1599,15 @@ def multilimb_rig(ctx):
         if a.get("name") == "rig_check":
             continue
         clip_extra += sum(1 for c in a.get("channels") or [] if node.get(c["target"]["node"]) in extra)
+    try:                                                 # Classification first (2026-10-18, 98d0fbca): the class the
+        cj = json.loads((run / "analysis" / "class.json").read_text())   # three voters wrote (category, arm verdict)
+    except (OSError, ValueError):
+        cj = {}
+    lim = cj.get("limbs") or {}
     return {"arms": counts.get("arms", 0), "arm_pairs": counts.get("arm_pairs", 0), "wings": counts.get("wings", 0),
+            "legs": counts.get("legs", 0), "class_category": cj.get("category"), "class_verdict": lim.get("verdict"),
+            "class_multi_votes": int((lim.get("votes") or {}).get("multi") or 0),
+            "class_needs_review": int(bool(lim.get("needs_review"))),
             "wing_pairs": counts.get("wing_pairs", 0), "tails": counts.get("tails", 0), "crests": counts.get("crests", 0),
             "use": int(bool(ml.get("use"))), "extra_chains": len(chains), "extra_bones": len(extra),
             "chains_without_vertices": sum(1 for c in chains if not c.get("vertices")),
@@ -1575,6 +1657,13 @@ def rig_upright(ctx):
         out["hips_above_feet_pct_H"] = round((heads["Hips"][1] - max(feet)) / H * 100, 1)
     oj = ctx["run"] / "proj" / "orient.json"
     out["up"] = json.loads(oj.read_text()).get("up") if oj.is_file() else None
+    fc = rig.get("fit_check") or {}                      # Joints · biped / orientation (2026-10-18): an unsure up goes
+    out["fit_check_ok"] = int(bool(fc.get("ok")))        # to review, the rig's front is the one forward.json record
+    out["orientation_review"] = int(bool(fc.get("orientation_review")))
+    fj = ctx["run"] / "proj" / "forward.json"
+    fw = json.loads(fj.read_text()).get("forward_axis") if fj.is_file() else None
+    out["forward_axis"] = rig.get("forward_axis")
+    out["forward_record_match"] = int(fw is None or fw == rig.get("forward_axis"))
     bake = ctx["run"] / "proj" / "skin_bake.json"
     out["skin_baked"] = int(bool(json.loads(bake.read_text()).get("applied"))) if bake.is_file() else 0
     return out
@@ -1989,6 +2078,26 @@ def parts_iou(ctx, models, pass_="fine", santa=("santa1", "santa2")):
 
 
 # ------------------------------------------------------------------------------------------------ dispatch
+def proportion_guard(ctx, rig_json, moves_json, glb=None, analysis=None):
+    """Joints · biped (2026-10-18): a joint judge proposal recorded on a real task (04f017eb: knees +5 % H and ankles
+    to 10.9 % H; 315ffe03: elbows 2 % H from the shoulders, ankles to 11 % H) through mt.proportions.guard_moves on the
+    pre-judge rig, as joint_gate.apply_fix does. -> proposed, dropped, kept, the dropped joints."""
+    from mt import proportions as BP
+    run = pathlib.Path(ctx["work"]) / "guard_run"
+    shutil.rmtree(run, ignore_errors=True)
+    (run / "rig").mkdir(parents=True)
+    if glb:
+        shutil.copyfile(_input(glb), run / "rig" / "rigged.glb")
+    for dest, name in (analysis or {}).items():
+        (run / "analysis").mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_input(name), run / "analysis" / dest)
+    doc = json.loads(_input(rig_json).read_text())
+    moves = json.loads(_input(moves_json).read_text())
+    kept, dropped = BP.guard_moves(doc, moves, run=run)
+    return {"proposed": len(moves), "dropped": len(dropped), "kept": len(kept), "dropped_joints": sorted(dropped),
+            "why": dropped}
+
+
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
     a = check.get("params") or {}
@@ -2005,6 +2114,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         target = run / "rig" / "rigged.glb"
     elif inp:
         target = _input(inp)
+    if k == "proportion_guard":                                    # Joints · biped (2026-10-18)
+        return proportion_guard(ctx, a["rig_json"], a["moves"], a.get("glb"), a.get("analysis"))
     if k == "voxel_legs":                                          # Legless rig · V3 (2026-10-17)
         return voxel_legs(inp)
     if k == "mt_rig_first":

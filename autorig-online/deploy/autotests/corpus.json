@@ -1606,6 +1606,587 @@
    "what": "the analyser's per-vertex labels on proj/model.glb (the tail and a stray tail island on the knife)",
    "sha256": "1af9fc749f4e7751e8b906fa7d61c516f9df4c6655c5be51a42f8a9093edfd93",
    "bytes": 26301
+  },
+  "98d0fbca.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/7b9e58332f1f7a8c4e77/proj/model.glb",
+   "task": "98d0fbca-ab9c-475a-a873-926872eeaa45",
+   "what": "anthropomorphic cat soldier, four arms and a tail (proj/model.glb)",
+   "sha256": "2931d1fde9379dbd94602945b741c42a937d54431a3113eb8cfbf3b1b2704ea0",
+   "bytes": 2422868
+  },
+  "98d0fbca.parts_seg.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/7b9e58332f1f7a8c4e77/analysis/parts_seg.json",
+   "task": "98d0fbca-ab9c-475a-a873-926872eeaa45",
+   "what": "the analyser's per-view GroundingDINO + SAM2 instances (hand x3, tail) on proj/model.glb",
+   "sha256": "26842a3d8e512c6c2f4699655ca66c33a844058eb953bde18400c2f8b5ff7cac",
+   "bytes": 85937
+  },
+  "98d0fbca.parts_seg.npz": {
+   "source": "/srv/autorig/data/motion_transfer/runs/7b9e58332f1f7a8c4e77/analysis/parts_seg.npz",
+   "task": "98d0fbca-ab9c-475a-a873-926872eeaa45",
+   "what": "the analyser's face labels on proj/model.glb",
+   "sha256": "09a8e9698fa38b6d304f2502e502869c3e431a1c7d8d1a23a07bb6ec8974c9fa",
+   "bytes": 36974
+  },
+  "98d0fbca.vision_legs.json": {
+   "source": "/srv/autorig/audits/multilimb-four-arms-20261018/vision_legs.json",
+   "task": "98d0fbca-ab9c-475a-a873-926872eeaa45",
+   "what": "the cached Vision sheet answer (LEGS two, ARMS four, TAIL yes), so the gate never asks the router",
+   "sha256": "08295643cdd70b6b12dc716b096581f2f4d8fef24f4ae4a0f1ee5dd27e0e6bd2",
+   "bytes": 346
+  },
+  "1434596b.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3262d873bf8ac479ca54/proj/model.glb",
+   "task": "1434596b-137a-4150-9941-b01b01da1b7b",
+   "what": "biped, the V3 run 3262d873bf8ac479ca54's proj/model.glb",
+   "sha256": "8a214f43ac8a118d887d44f5938a78198f76e135e9852ab188d2e44ba117fa67",
+   "bytes": 9789144
+  },
+  "1434596b.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3262d873bf8ac479ca54/analysis/constitution.json",
+   "task": "1434596b-137a-4150-9941-b01b01da1b7b",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "32f776055d3ccbe3de47008370725bbd9e6de3f4d45d6e7649b238ee7190804d",
+   "bytes": 1468
+  },
+  "1434596b.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3262d873bf8ac479ca54/analysis/category.json",
+   "task": "1434596b-137a-4150-9941-b01b01da1b7b",
+   "what": "the run's Vision category",
+   "sha256": "8bb7980c3d9626554dbe765ae5d90ba90aa9e86a81407a37709b57e66e194c3b",
+   "bytes": 159
+  },
+  "9e69c222.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c34fa6fc729334da1b79/proj/model.glb",
+   "task": "9e69c222-9331-4c88-bb4d-e71193cad4fa",
+   "what": "humanoid warrior, the V3 run c34fa6fc729334da1b79's proj/model.glb",
+   "sha256": "ba838ab569606bbf08b6d6b97bbae04ab09d185ce82b6030934942c7afd546cf",
+   "bytes": 6587024
+  },
+  "9e69c222.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c34fa6fc729334da1b79/analysis/constitution.json",
+   "task": "9e69c222-9331-4c88-bb4d-e71193cad4fa",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "b0b9e7e964f85b78ef01742c5ccb6c8d9ab569ee1e7a667658b5920a8a83893d",
+   "bytes": 1890
+  },
+  "9e69c222.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c34fa6fc729334da1b79/analysis/category.json",
+   "task": "9e69c222-9331-4c88-bb4d-e71193cad4fa",
+   "what": "the run's Vision category",
+   "sha256": "52ab85350a27d84837c242685509d066ad3a43139c64227d09d95a8be478dd43",
+   "bytes": 185
+  },
+  "c78a6e57.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/e684d189d072280d2a86/proj/model.glb",
+   "task": "c78a6e57-292f-420d-865d-d8e1f7723a7a",
+   "what": "male character model backpack, gloves, the V3 run e684d189d072280d2a86's proj/model.glb",
+   "sha256": "b04dfced472015bc5afb8396dfc072057af754edf688d9f609c77d6425a0bf56",
+   "bytes": 6213856
+  },
+  "c78a6e57.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/e684d189d072280d2a86/analysis/constitution.json",
+   "task": "c78a6e57-292f-420d-865d-d8e1f7723a7a",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "9ae2e37d7e53157422c27f8dfeeb66d4f34c19a1183f3e90aa32fad35fa3bf00",
+   "bytes": 1961
+  },
+  "c78a6e57.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/e684d189d072280d2a86/analysis/category.json",
+   "task": "c78a6e57-292f-420d-865d-d8e1f7723a7a",
+   "what": "the run's Vision category",
+   "sha256": "467a2f830266652da6d6e6155b97cedeea66184a9cf26649fdfb146d88672bfb",
+   "bytes": 182
+  },
+  "79ebc1d5.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a0258ed623f071d73474/proj/model.glb",
+   "task": "79ebc1d5-41cb-4ba5-814a-1b7ede600dec",
+   "what": "Muay Thai fighter boxing gloves, the V3 run a0258ed623f071d73474's proj/model.glb",
+   "sha256": "58403625cd21e497210415f99a7b6d9894ea7f26ca5b186a0bb31e9efccd806c",
+   "bytes": 7311572
+  },
+  "79ebc1d5.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a0258ed623f071d73474/analysis/constitution.json",
+   "task": "79ebc1d5-41cb-4ba5-814a-1b7ede600dec",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "531f0bdd33ace5b516c337049d612aca2c787eef4dc9d0e7c2a4875f193b362b",
+   "bytes": 1960
+  },
+  "79ebc1d5.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a0258ed623f071d73474/analysis/category.json",
+   "task": "79ebc1d5-41cb-4ba5-814a-1b7ede600dec",
+   "what": "the run's Vision category",
+   "sha256": "dbc5ea417848b83d316288b636e7b2dbe32e4c4a2e6109fe9d89ccff58618a3a",
+   "bytes": 179
+  },
+  "9ca0133c.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/04f017ebbd9f51dad4ac/proj/model.glb",
+   "task": "9ca0133c-16f4-4399-847c-cdd23d3c6b47",
+   "what": "goth woman, the V3 run 04f017ebbd9f51dad4ac's proj/model.glb",
+   "sha256": "47563681f4210abaaeecc9ceb1a3e17436f3437d8470deeaed3ee9d6fbd06ad7",
+   "bytes": 7473964
+  },
+  "9ca0133c.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/04f017ebbd9f51dad4ac/analysis/constitution.json",
+   "task": "9ca0133c-16f4-4399-847c-cdd23d3c6b47",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "b6bf4961a925bd38727758587bea460440dbb7cbfd33d2fdf248d51c514227a8",
+   "bytes": 1959
+  },
+  "9ca0133c.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/04f017ebbd9f51dad4ac/analysis/category.json",
+   "task": "9ca0133c-16f4-4399-847c-cdd23d3c6b47",
+   "what": "the run's Vision category",
+   "sha256": "dcdc696a3084d45b36470b9f078b2caefe56ba6eff7d99108f1adca97b377267",
+   "bytes": 181
+  },
+  "9ca0133c.prejudge_rig.json": {
+   "source": "/srv/autorig/data/var/joints_biped_fixtures/9ca0133c.prejudge_rig.json",
+   "task": "9ca0133c-16f4-4399-847c-cdd23d3c6b47",
+   "what": "the joint judge proposal recorded on the task",
+   "sha256": "37254cd12212916e8860c1e78ef5acd5cec4c00e6dc90979288f0aa8d5f8d1eb",
+   "bytes": 19124
+  },
+  "9ca0133c.judge_moves.json": {
+   "source": "/srv/autorig/data/var/joints_biped_fixtures/9ca0133c.judge_moves.json",
+   "task": "9ca0133c-16f4-4399-847c-cdd23d3c6b47",
+   "what": "the joint judge proposal recorded on the task",
+   "sha256": "ebd06a7a1397f87a42dd7ea075e1923d01766a3a4777e3182f30a2f1bca87b0a",
+   "bytes": 333
+  },
+  "b178ebb1.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a73199ebd8a8d18f2a4b/proj/model.glb",
+   "task": "b178ebb1-b8b8-40e2-8de6-21004fce2089",
+   "what": "chibi boy, the V3 run a73199ebd8a8d18f2a4b's proj/model.glb",
+   "sha256": "d5363856288ee703f3a24f7ebc86cbf41bc46a13e10da1c3e8d392eb15fb5782",
+   "bytes": 6205408
+  },
+  "b178ebb1.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a73199ebd8a8d18f2a4b/analysis/constitution.json",
+   "task": "b178ebb1-b8b8-40e2-8de6-21004fce2089",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "8a942c82fc5902a41bf9048b6934ac8ac5b144af4f4df22d4de221601619b64c",
+   "bytes": 1871
+  },
+  "b178ebb1.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a73199ebd8a8d18f2a4b/analysis/category.json",
+   "task": "b178ebb1-b8b8-40e2-8de6-21004fce2089",
+   "what": "the run's Vision category",
+   "sha256": "fef486e89b304c5478e00bed01ab88e1a65a12528a45275e49778d020f3ef4c8",
+   "bytes": 176
+  },
+  "1aa3ad1d.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/8ddc3d871fde87c4f4bc/proj/model.glb",
+   "task": "1aa3ad1d-f291-472a-92c4-227d483d0189",
+   "what": "masked humanoid character, the V3 run 8ddc3d871fde87c4f4bc's proj/model.glb",
+   "sha256": "b66ef8b24949e102603ce00f2226803833f955fe015e59307ffec1e35cb09937",
+   "bytes": 26349740
+  },
+  "1aa3ad1d.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/8ddc3d871fde87c4f4bc/analysis/constitution.json",
+   "task": "1aa3ad1d-f291-472a-92c4-227d483d0189",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "bc80d5f601066095685e0c4fcc63f725b6de7aec67cd35ab780149992a3b205e",
+   "bytes": 2007
+  },
+  "1aa3ad1d.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/8ddc3d871fde87c4f4bc/analysis/category.json",
+   "task": "1aa3ad1d-f291-472a-92c4-227d483d0189",
+   "what": "the run's Vision category",
+   "sha256": "fc8d00b6b1ad007478a8be56404cef9776640f4de51209f9f308d94cd4e33244",
+   "bytes": 196
+  },
+  "454869b9.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5040df44533af6e12677/proj/model.glb",
+   "task": "454869b9-533f-40c6-8182-6dfdd41598a2",
+   "what": "stylized female warrior, the V3 run 5040df44533af6e12677's proj/model.glb",
+   "sha256": "26dcfb4386d07fa9ba580863ef8d2c22ea317deb3bdb8747eabf9d6600223903",
+   "bytes": 18554096
+  },
+  "454869b9.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5040df44533af6e12677/analysis/constitution.json",
+   "task": "454869b9-533f-40c6-8182-6dfdd41598a2",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "e8181e2bf4afe8d100cdc9ca6977a44f958116827fbf0475c48a2c1e696c78eb",
+   "bytes": 1504
+  },
+  "454869b9.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5040df44533af6e12677/analysis/category.json",
+   "task": "454869b9-533f-40c6-8182-6dfdd41598a2",
+   "what": "the run's Vision category",
+   "sha256": "d3a3754998d79bbe30e0280a927f77c5f2b1524e397a6e7276bf80e873111372",
+   "bytes": 192
+  },
+  "fff6ba76.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5ec337c199e6e1bb31ea/proj/model.glb",
+   "task": "fff6ba76-90b4-46ec-b6d8-2526ed0e144d",
+   "what": "girl in vest, the V3 run 5ec337c199e6e1bb31ea's proj/model.glb",
+   "sha256": "7903b2933274592afa49ad393bf37e169a288592e0f0c6228de1bb85d3aba1f7",
+   "bytes": 3966132
+  },
+  "fff6ba76.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5ec337c199e6e1bb31ea/analysis/constitution.json",
+   "task": "fff6ba76-90b4-46ec-b6d8-2526ed0e144d",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "3a982442c75437b4b1b9fbc82b397a9abe9b00aeacd43d30ec331dfc22c620d8",
+   "bytes": 1971
+  },
+  "fff6ba76.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5ec337c199e6e1bb31ea/analysis/category.json",
+   "task": "fff6ba76-90b4-46ec-b6d8-2526ed0e144d",
+   "what": "the run's Vision category",
+   "sha256": "c1cbd714a4306f6a6627ca8217686e26d38eae27744a29f215bb0ef0b932b84a",
+   "bytes": 174
+  },
+  "fb8a81a3.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/315ffe0319fbad7e3b49/proj/model.glb",
+   "task": "fb8a81a3-a41c-4b87-8b7e-092582373895",
+   "what": "farm boy, the V3 run 315ffe0319fbad7e3b49's proj/model.glb",
+   "sha256": "d8cec528febf5d2f4ff138c0179bf0c1d643c0b2be09a2302255eaa7dcb62911",
+   "bytes": 14862304
+  },
+  "fb8a81a3.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/315ffe0319fbad7e3b49/analysis/constitution.json",
+   "task": "fb8a81a3-a41c-4b87-8b7e-092582373895",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "4cb99a90adcc355563896cceaafcfcc5c22a24275c961874d80536ce371c1be7",
+   "bytes": 1504
+  },
+  "fb8a81a3.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/315ffe0319fbad7e3b49/analysis/category.json",
+   "task": "fb8a81a3-a41c-4b87-8b7e-092582373895",
+   "what": "the run's Vision category",
+   "sha256": "76a435cd92e924ec722190a668b81ca312ef1158db1273056b6ad1e39aed5269",
+   "bytes": 170
+  },
+  "fb8a81a3.prejudge_rig.json": {
+   "source": "/srv/autorig/data/var/joints_biped_fixtures/fb8a81a3.prejudge_rig.json",
+   "task": "fb8a81a3-a41c-4b87-8b7e-092582373895",
+   "what": "the joint judge proposal recorded on the task",
+   "sha256": "1d8426bb221eb7f494900583cf3c3a5b8a5afe64689086b55e5ce077019cb907",
+   "bytes": 19161
+  },
+  "fb8a81a3.judge_moves.json": {
+   "source": "/srv/autorig/data/var/joints_biped_fixtures/fb8a81a3.judge_moves.json",
+   "task": "fb8a81a3-a41c-4b87-8b7e-092582373895",
+   "what": "the joint judge proposal recorded on the task",
+   "sha256": "d47609578775c3b97e6707973f5237717ae9f3ecd7aa21ee3faedde252bf3a8b",
+   "bytes": 230
+  },
+  "67d2fa97.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f8d96ef379c1b83df05d/proj/model.glb",
+   "task": "67d2fa97-f6ce-48ef-a837-001ec1211f53",
+   "what": "stylized rat, the V3 run f8d96ef379c1b83df05d's proj/model.glb",
+   "sha256": "03c3327bc09c0b39a7bdbb6d02dc15bf89faa95cfff4740b47b648ad7b724ba6",
+   "bytes": 197764
+  },
+  "67d2fa97.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f8d96ef379c1b83df05d/analysis/constitution.json",
+   "task": "67d2fa97-f6ce-48ef-a837-001ec1211f53",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "07e97b0cf052e6afcaa415077f54236a20dada039a1808255c020e4ad4b8ece0",
+   "bytes": 1869
+  },
+  "67d2fa97.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f8d96ef379c1b83df05d/analysis/category.json",
+   "task": "67d2fa97-f6ce-48ef-a837-001ec1211f53",
+   "what": "the run's Vision category",
+   "sha256": "eb6cf2853415bcf0472ffb86b256e0098f5e923496f2f6a8ab64c8f5a5bd3f9c",
+   "bytes": 174
+  },
+  "35a6d01c.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/9e7a8447b5449a71afa9/proj/model.glb",
+   "task": "35a6d01c-d93d-494f-b2f7-909f792842dd",
+   "what": "man with headset, the V3 run 9e7a8447b5449a71afa9's proj/model.glb",
+   "sha256": "6f93f72dfd634bba4da8d22c5911d982b953189035c2b758fcf20d75f1174e7a",
+   "bytes": 18247696
+  },
+  "35a6d01c.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/9e7a8447b5449a71afa9/analysis/constitution.json",
+   "task": "35a6d01c-d93d-494f-b2f7-909f792842dd",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "c07c46ab1f0f8120b2109f9f492f779948f9d88a882ef066e9daad32b41da1a5",
+   "bytes": 1981
+  },
+  "35a6d01c.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/9e7a8447b5449a71afa9/analysis/category.json",
+   "task": "35a6d01c-d93d-494f-b2f7-909f792842dd",
+   "what": "the run's Vision category",
+   "sha256": "05281dc56c7e016995019a6a2b4108a2ed5cc3b86c394095b5f10ec685851ff7",
+   "bytes": 187
+  },
+  "d86f7590.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/134e14dd11b2f2a16576/proj/model.glb",
+   "task": "d86f7590-57b3-47f6-b748-25d58b94be6a",
+   "what": "fox humanoid, the V3 run 134e14dd11b2f2a16576's proj/model.glb",
+   "sha256": "4edf68bae58b899c9aa723075b47b182754535a913b2eec37764d0d1e73ffbed",
+   "bytes": 34304968
+  },
+  "d86f7590.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/134e14dd11b2f2a16576/analysis/constitution.json",
+   "task": "d86f7590-57b3-47f6-b748-25d58b94be6a",
+   "what": "the run's constitution (geometry + Vision)",
+   "sha256": "110b0daf71578359823bd83817b40f5bedde1cc87bf1d90fc38362204fe35507",
+   "bytes": 1852
+  },
+  "d86f7590.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/134e14dd11b2f2a16576/analysis/category.json",
+   "task": "d86f7590-57b3-47f6-b748-25d58b94be6a",
+   "what": "the run's Vision category",
+   "sha256": "406e47e3a5386904d5393d692009ff575c7ccd62def5e35d90d9e6803da3fb74",
+   "bytes": 179
+  },
+  "8a0f6687.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ddd39493994e7d67302f/proj/model.glb",
+   "task": "8a0f6687-ed6d-470c-b826-5f21b99a37d8",
+   "what": "stylized humanoid figure, the V3 run ddd39493994e7d67302f's proj/model.glb",
+   "sha256": "6d24a6e81f801d691c775ec6825a7c94f999b76a8e694d7fdec6c076ad37981d",
+   "bytes": 186040
+  },
+  "8a0f6687.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ddd39493994e7d67302f/analysis/category.json",
+   "task": "8a0f6687-ed6d-470c-b826-5f21b99a37d8",
+   "what": "the run's Vision category",
+   "sha256": "d11d4f67fb9b95d9da1ebe57011ed6a71d5597b0d54c8cc6894896d750c59370",
+   "bytes": 195
+  },
+  "ff16cf79.model_source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5baf3a309d49c230ecae/proj/model_source.glb",
+   "task": "ff16cf79-dd46-4869-8177-618027ec0bd4",
+   "what": "black cat, the V3 run 5baf3a309d49c230ecae's proj/model_source.glb",
+   "sha256": "f86f80d521538360d9b00b82c5c50aeaa095a442fa0e68630377dd408d00d1b1",
+   "bytes": 2690348
+  },
+  "ff16cf79.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5baf3a309d49c230ecae/analysis/category.json",
+   "task": "ff16cf79-dd46-4869-8177-618027ec0bd4",
+   "what": "the run's Vision category",
+   "sha256": "42ce50186eaf090fcc459cdd9110b505de28562947d184dbb88f29fc72fd9697",
+   "bytes": 183
+  },
+  "5e612bd3.model_source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3a1583a63e68ec668955/proj/model_source.glb",
+   "task": "5e612bd3-9529-4e7d-99a1-1aee03b8a60c",
+   "what": "stylized character, the V3 run 3a1583a63e68ec668955's proj/model_source.glb",
+   "sha256": "27c67bec96bb6b8bac4523571d85e75c7dbabbd1623369995f2620883f4bfdf9",
+   "bytes": 1480620
+  },
+  "5e612bd3.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3a1583a63e68ec668955/analysis/category.json",
+   "task": "5e612bd3-9529-4e7d-99a1-1aee03b8a60c",
+   "what": "the run's Vision category",
+   "sha256": "d2dbb71fa3f4f533c46eabfadeefbab6408bdbae95f4c74001f6ce004232372e",
+   "bytes": 180
+  },
+  "fe7df7cb.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/6c0cc20e484dc422a90c/proj/model.glb",
+   "task": "fe7df7cb-8bcd-4144-91a0-bcef34eac2b7",
+   "what": "run 6c0cc20e484dc422a90c proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "6301f3703d0426ea87286a57a934ed0ecebd38d5503c8c398ecf7e80b633d197",
+   "bytes": 5171428
+  },
+  "69fc3ed7.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/99f5e7bd628bf49db7fa/proj/model.glb",
+   "task": "69fc3ed7-5a45-4c4c-b336-7626f3b08ee6",
+   "what": "run 99f5e7bd628bf49db7fa proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "fe90f96c49def753a509a5e1389a933600dc482dd02413367405c6824fddf15d",
+   "bytes": 10813468
+  },
+  "bdad52d2.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f4b53d242aad55232429/proj/model.glb",
+   "task": "bdad52d2-704e-4a76-950a-2174cf6f0e94",
+   "what": "run f4b53d242aad55232429 proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "12bf74f6da832968d4e66fc23d79d6a75736e4f17049a325b455f226c5066334",
+   "bytes": 555800
+  },
+  "ea257456.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/b3834d7a7177970b55bb/proj/model.glb",
+   "task": "ea257456-9cac-4a98-a966-9bea9f2731e5",
+   "what": "run b3834d7a7177970b55bb proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "6313fd76382debc698537f7fd6d833d904f3e7a6f35906250c2d9323b80c2f66",
+   "bytes": 201036
+  },
+  "fb742be2.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/99ddbffe5873bd665e30/proj/model.glb",
+   "task": "fb742be2-f4f2-44a2-aa71-7407b7b8a31b",
+   "what": "run 99ddbffe5873bd665e30 proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "4707e220b223acbe4b585048e5d1ba54b2c403ceeb0f819ca598f7e08509eb2e",
+   "bytes": 2319832
+  },
+  "10b101d0.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/b83a2d02cf94e8bcf590/proj/model.glb",
+   "task": "10b101d0-034e-4c69-83ab-22deca7610f7",
+   "what": "run b83a2d02cf94e8bcf590 proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "c76f3b22feaf8eb18464b7fc2c3390500908369a4100fbdbbcd9ed3dff46e280",
+   "bytes": 367556
+  },
+  "db9a5d7f.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/210c5c9696d4d9dac39e/proj/model.glb",
+   "task": "db9a5d7f-ec41-4f3a-81e8-e8d535045e47",
+   "what": "run 210c5c9696d4d9dac39e proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "69278c6102ec7ce16e397f57de5fabdb3636d853350d630cf90bad0712d9701c",
+   "bytes": 4712556
+  },
+  "48ba22da.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ef03cfb1941a25215d8e/proj/model.glb",
+   "task": "48ba22da-21b8-4a5d-95af-145dbc7134f2",
+   "what": "run ef03cfb1941a25215d8e proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "4fd8d8b9cfb3db77d3d833e06474f40e237b84e075469c4942c1288b66f022e2",
+   "bytes": 154076
+  },
+  "a778f21c.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/1bf0a8fede4f1b33cbf1/proj/model.glb",
+   "task": "a778f21c-0863-4f67-80e1-a84e1cc65f94",
+   "what": "run 1bf0a8fede4f1b33cbf1 proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "2c6b42559f98901a35d01cd95a55ae5e75d787970dc9d15d062848c30c01db11",
+   "bytes": 28084244
+  },
+  "963c64da.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/fd0cac6cef91df5a0a0d/proj/model.glb",
+   "task": "963c64da-dd04-46fd-b6f9-c5e72200ddce",
+   "what": "run fd0cac6cef91df5a0a0d proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "be56194b26dd33cbcf765b4884e0358aa858dd26640e07ac1c998bdc45c05b3a",
+   "bytes": 814260
+  },
+  "b29c3abc.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/78102b536e5216cfb37b/proj/model.glb",
+   "task": "b29c3abc-8988-4cad-ad34-ff2d3dc9e961",
+   "what": "run 78102b536e5216cfb37b proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "88ff2a175565b7fe95abf4100b7767f9dd93893c40598238fdb3b8c999a32132",
+   "bytes": 360912
+  },
+  "8ad96928.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/aa542dc271f096d50e3e/proj/model.glb",
+   "task": "8ad96928-6c23-468e-9460-c8e3103ee2c9",
+   "what": "run aa542dc271f096d50e3e proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "54aa5d97506f6cb654a04edcf8401d093bb1d5ad457ee535a55edc1e1769d20d",
+   "bytes": 2409972
+  },
+  "c63956a3.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0a63bac45b97b036b7c6/proj/model.glb",
+   "task": "c63956a3-4b71-4f46-a5ae-ad7cc7254867",
+   "what": "run 0a63bac45b97b036b7c6 proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "ac4a34573946da1c92c772d0b3dff29ff0be9683996fadc2452243874ea3bf4d",
+   "bytes": 149248
+  },
+  "4f58ad67.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/79bca9570a593a129245/proj/model.glb",
+   "task": "4f58ad67-01ab-4244-8c5c-0ac089ea8659",
+   "what": "run 79bca9570a593a129245 proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "bb30445de3d5742f85c51d78f8d904610b00d43e03ff65816c808a52914fc8e7",
+   "bytes": 235172
+  },
+  "22bca0bf.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/91c9971abff8d92bca6c/proj/model.glb",
+   "task": "22bca0bf-bafe-4546-992b-cb4dec07a0fc",
+   "what": "run 91c9971abff8d92bca6c proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "e7777ae8671c77c074d5b9c0c6f92f5ff9cfe2156f61604f84067fa209ed1bdf",
+   "bytes": 7674056
+  },
+  "5258eef3.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/e7074bd8fe2121e4f7fb/proj/model.glb",
+   "task": "5258eef3-07bb-4b95-9191-42de70134fe8",
+   "what": "run e7074bd8fe2121e4f7fb proj/model.glb (Seams V3 corpus, 2026-10-18)",
+   "sha256": "a7f287a00208b61a9915c6329f7ebc7b664359040337e9f08677196c3518c0ec",
+   "bytes": 28218740
+  },
+  "2f7bf14a.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/4307095cd7f8241ccca9/proj/model.glb",
+   "task": "2f7bf14a-b260-4a71-a5ed-878f00833db3",
+   "what": "run 4307095cd7f8241ccca9 proj/model.glb, 868k vertices (Seams V3)",
+   "sha256": "327ed933baa27bc9ffca6bff5824f6df241673ff1305965bf866022ceb668986",
+   "bytes": 81282744
+  },
+  "a778f21c.category.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/1bf0a8fede4f1b33cbf1/analysis/category.json",
+   "task": "a778f21c-0863-4f67-80e1-a84e1cc65f94",
+   "what": "run 1bf0a8fede4f1b33cbf1 analysis/category.json (Seams V3)",
+   "sha256": "d380d3bcb97daf7d4da6c10cbc72c005c760d74e9c9ed7e94361465ae371afca",
+   "bytes": 187
+  },
+  "a778f21c.constitution.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/1bf0a8fede4f1b33cbf1/analysis/constitution.json",
+   "task": "a778f21c-0863-4f67-80e1-a84e1cc65f94",
+   "what": "run 1bf0a8fede4f1b33cbf1 analysis/constitution.json (Seams V3)",
+   "sha256": "c4890c3fb3997af8c35d74f540efb44770e58dbbd0a0bb2a1fbe93feb5025b46",
+   "bytes": 1955
+  },
+  "28ff1a80.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/80e74fe10d70fea29d4f/proj/model_source.glb",
+   "task": "28ff1a80-0034-4547-8398-6bd9ae4df0a0",
+   "what": "mechanical spider-like robot Spider",
+   "sha256": "41dd466c528434d481cbd4dc34a5d88f4b9d0b782dd0b3913abd605cea7f9d73",
+   "bytes": 1906088
+  },
+  "626e28c6.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5a23cd8fbbc01c2309a4/proj/model_source.glb",
+   "task": "626e28c6-0848-491e-bfca-e24f089f7c9a",
+   "what": "stylized spider",
+   "sha256": "f24bd0a8ae9f4128ddcf185821d697165c4d7f4fc7d254bd6fd513d7921f24c9",
+   "bytes": 93384
+  },
+  "4e12d1fa.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/07a33553bccf9c13e345/proj/model.glb",
+   "task": "4e12d1fa-1ce3-4bcc-bfe6-05f86a291232",
+   "what": "mechanical insectoid creature",
+   "sha256": "4b76fec4b2c5ff2bbed7b22009649104a329a35932d3f5e721948c442bc250b3",
+   "bytes": 674656
+  },
+  "1f17d436.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/8786ff7b354c7b9ef674/proj/model.glb",
+   "task": "1f17d436-ec55-4177-9402-c4958244f96e",
+   "what": "brown spider",
+   "sha256": "f0945ad7fdd486af9cd72ff4b709f099144be41ef63483b4a91ac2a8f88b2e8a",
+   "bytes": 4846336
+  },
+  "6a490b56.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/6b86fdebce23e692afd1/proj/model.glb",
+   "task": "6a490b56-f454-400f-a813-3b05f902ec0c",
+   "what": "Skeletal arachnid monster",
+   "sha256": "a51d0b2c53efdb66e3af2ad8162112d789065d0e95ad53ca815b71f0bb6ff4c4",
+   "bytes": 3558324
+  },
+  "6266e91e.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/82d1997ff8554fd0a238/proj/model.glb",
+   "task": "6266e91e-1d86-468c-8892-3138ca4c567a",
+   "what": "spider",
+   "sha256": "0e3a7cb50277a058f927e1e7916b20b815d15b0b080b374844783236dd76dffa",
+   "bytes": 26325696
+  },
+  "5f7ec8a7.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/52ceec6615d8aa0a399e/proj/model.glb",
+   "task": "5f7ec8a7-982a-49c9-88f9-946370137354",
+   "what": "robotic spider creature",
+   "sha256": "ca04408bd32ca264efcfc2b33e6da2228d19e1cbb9d43cb3281dc608c2c65f13",
+   "bytes": 16574132
+  },
+  "28e6be70.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/91b95ed7651a88e97ed2/proj/model.glb",
+   "task": "28e6be70-9854-44e1-8cd8-37dc140d1bd4",
+   "what": "insect mascot",
+   "sha256": "fb96abf371aaffd4ad84211c6638c9174828f6ba10245e04e98ab1411d9ed9d3",
+   "bytes": 43660008
+  },
+  "adce576d.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0fcf38ecc665ef70c5a3/proj/model.glb",
+   "task": "adce576d-bb29-4206-bc92-83ea8b8be61f",
+   "what": "praying mantis",
+   "sha256": "f24367f1903905fa90e5f21a41abc388a67047ac01bc4d5d1880ea198e11af9e",
+   "bytes": 1372660
+  },
+  "52e76e46.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/1febe7d298a6e7763757/proj/model_source.glb",
+   "task": "52e76e46-92d2-4df6-83b6-f805030cc664",
+   "what": "Toyota_Camry_XV30_2004",
+   "sha256": "b55bbb2c1f7153f90dd4e4e44f957aeb4d53341a20b194f052e2b04b755cfb85",
+   "bytes": 21713696
+  },
+  "45575dfc.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0c7cb2f0f373bc605200/proj/model_source.glb",
+   "task": "45575dfc-6e0c-455a-8b09-9eb3eb1aec88",
+   "what": "scene",
+   "sha256": "69f70af978dc1a27d42d1f8d4139ff6704bdadbba6bf606d95fc6ac7051e9efe",
+   "bytes": 5497412
   }
  },
  "profiles": {
@@ -8484,16 +9065,24 @@
      },
      "owner": "Anim stand · V3",
      "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
-     },
      "measured_2026_10_14": {
       "worst_edge_ratio": 69.36,
       "edges_over_4x": 755,
       "tear": true,
       "clip": "Running",
       "status": "failed"
+     },
+     "measured_2026_10_18": {
+      "worst_edge_ratio": 20.965,
+      "edges_over_4x": 366,
+      "tear": false,
+      "clip": "Running",
+      "was": {
+       "worst_edge_ratio": 37.553,
+       "edges_over_4x": 524,
+       "tear": true
+      },
+      "by": "multilimb agent: four arms and a tail (label_stats legacy, exit labelling for the extra arms and the tail), XPASS in 4 runs"
      }
     },
     {
@@ -18198,6 +18787,2191 @@
       "reason": "the primary tail is a static chain: in Running the left foot kicks back through it (29 vertex-frames, 2.1 % H); a limb passing through the tail is the secondary tail layer's collision, which the corpus rig does not run",
       "owner": "Biped tail · V3.1"
      }
+    }
+   ]
+  },
+  {
+   "id": "anthro_four_arms_tail",
+   "task": "98d0fbca-ab9c-475a-a873-926872eeaa45",
+   "cost": 3,
+   "defect": "owner 2026-10-18 («тут 4 руки и хвост, пайплайн не отработал как задумано»): a four-armed anthropomorphic cat soldier with a tail was rigged as a plain biped (25 bones): class.json's voters overwritten by garments (same schema), the voxel trace rooted in the belly (the lower arms became a leg and a sub-limb, the tail a sub of the left leg), the lower arms judged stubs, the tail curl skinned to LeftArm; stand Running worst edge 621.9, 777 edges over 4x, numeric QA 0/9. Fix (docs/multilimb-anthro-four-arms-spec-20261018.md): classification first with the arm count (mt/legless.py arm voters: voxels, Vision, analyser -> class.json limbs), the re-rooted trace with per-limb exits, {Side}Shoulder2 > Arm2 > ForeArm2 > Hand2, the voxel tail limb as the anthro tail, extra arm lobes in the open pose",
+   "owner": "Multi-limb rig · V3",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "98d0fbca.model.glb",
+     "params": {
+      "words": "anthropomorphic cat soldier",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "parts_seg.json": "98d0fbca.parts_seg.json",
+       "parts_seg.npz": "98d0fbca.parts_seg.npz",
+       "vision_legs.json": "98d0fbca.vision_legs.json"
+      }
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       36
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "note": "gate tree 2026-10-18: 41 bones (37 once the two collar bumps get no ear chain: multilimb appendage_free_cells), 8 clips, 13-20 s"
+    },
+    {
+     "id": "mt_multilimb",
+     "kind": "multilimb_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "use": [
+       "==",
+       1
+      ],
+      "arm_pairs": [
+       "==",
+       2
+      ],
+      "arms": [
+       "==",
+       4
+      ],
+      "tails": [
+       "==",
+       1
+      ],
+      "legs": [
+       "==",
+       2
+      ],
+      "class_category": [
+       "==",
+       "multilimb"
+      ],
+      "class_needs_review": [
+       "==",
+       0
+      ],
+      "cross_chain_weight_after": [
+       "<=",
+       0.001
+      ],
+      "clip_channels_extra": [
+       ">=",
+       90
+      ],
+      "chains_without_vertices": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ]
+     },
+     "note": "gate tree 2026-10-18: arms 4, pairs 2, legs 2, tails 1, extra bones 12, clip channels 96, class voters 3/3 multilimb, cross 0.0 (prod before: arms 2, pairs 1, legs 1, use 0, class voters overwritten)"
+    },
+    {
+     "id": "mt_anthro",
+     "kind": "anthro",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "tail_bones": [
+       "==",
+       4
+      ]
+     },
+     "note": "the anthro tail from the traced voxel limb (anthro_tail.json mode voxel_limb): 461 vertices, 63.8 % H"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       120
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "measured_2026_10_18": {
+      "before": {
+       "worst_edge_ratio": 621.9,
+       "edges_over_4x": 777,
+       "tear": true
+      },
+      "after": {
+       "worst_edge_ratio": 13.775,
+       "edges_over_4x": 81,
+       "tear": false
+      },
+      "clip": "Running"
+     }
+    },
+    {
+     "id": "mt_numeric",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "thresholds": {
+      "complete": [
+       "==",
+       true
+      ],
+      "clips_passed": [
+       ">=",
+       9
+      ]
+     },
+     "note": "before 0/9 (max stretched 1157), after 9/9 (max 181)"
+    },
+    {
+     "id": "mt_cleared",
+     "kind": "mt_arm_clearance",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "severity_rank": [
+       "<=",
+       1
+      ],
+      "min_arm_vertices": [
+       ">=",
+       1
+      ]
+     },
+     "note": "the conveyor's arm clearance after the retarget (what the customer gets): before high/high (Jump, the lower pair 10.4 / 14.3 % H deep) -> none/none, abduction 13 / 12 deg. limb_collision reads one arm chain per side (the last matching: {Side}Arm2); the primaries are not measured on a four-armed rig (open, owner Limb collision · V3)"
+    }
+   ]
+  },
+  {
+   "id": "anthro_fox_no_table",
+   "task": "d86f7590-57b3-47f6-b748-25d58b94be6a",
+   "cost": 3,
+   "defect": "Joints · biped (elbows button 2026-10-15, d86f7590 too_wide 5.05): an anthro fox (digitigrade legs) keeps its own hips (55.9 % H): the human table moved them to 46 % H in a first candidate, so category anthro is excluded.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "d86f7590.model.glb",
+     "params": {
+      "words": "fox humanoid",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "d86f7590.constitution.json",
+       "category.json": "d86f7590.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        51,
+        60
+       ]
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "biped_baggy_trousers_hips_elbows",
+   "task": "9e69c222-9331-4c88-bb4d-e71193cad4fa",
+   "cost": 2,
+   "defect": "Joints · biped (owner 2026-10-17, 9e69c222: «колени локти криво подобраны суставы»): baggy gi trousers, the crotch estimate read the hem: UpLeg 22.4, knee 13.8 % H; the wrist at the search's near edge, upper arm share 0.67. After: UpLeg 46.8, knee 28.9, share 0.53.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "9e69c222.model.glb",
+     "params": {
+      "words": "humanoid warrior",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "9e69c222.constitution.json",
+       "category.json": "9e69c222.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        41,
+        53
+       ]
+      ],
+      "knee_pct_H": [
+       "between",
+       [
+        23,
+        33
+       ]
+      ],
+      "elbow_share_min": [
+       ">=",
+       0.45
+      ],
+      "elbow_share_max": [
+       "<=",
+       0.66
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_boxing_gloves_arms",
+   "task": "79ebc1d5-41cb-4ba5-814a-1b7ede600dec",
+   "cost": 2,
+   "defect": "Joints · biped (owner 2026-10-17, 79ebc1d5: «тут опять скелет неправильный»): boxing gloves at the hips: shoulders at 39.4 % H, elbows 7.6 shoulder widths; on 2026-10-18 the gloves made it a hand rig. After: biped, Arm 77.6 % H, UpLeg 49.1, knee 27.3.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "79ebc1d5.model.glb",
+     "params": {
+      "words": "Muay Thai fighter boxing gloves",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "79ebc1d5.constitution.json",
+       "category.json": "79ebc1d5.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        43,
+        55
+       ]
+      ],
+      "knee_pct_H": [
+       "between",
+       [
+        23,
+        33
+       ]
+      ],
+      "left_arm_y_pct_H": [
+       ">=",
+       65
+      ],
+      "right_arm_y_pct_H": [
+       ">=",
+       65
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_coat_heel_axis",
+   "task": "454869b9-533f-40c6-8182-6dfdd41598a2",
+   "cost": 3,
+   "defect": "Joints · biped (owner 2026-10-17 DEV, 454869b9: «неправильная ось, проходит мимо центра суставов … сустав должен быть в центре пятки»): a long coat and a weapon hanging between the boots: the ankle section was the box of every crossing, the ankle at the boot's inner back edge (3.55 % H off the section centre). Fix: leg_fit section_loops (the boot's own contour). After 1.24 % H, ankle 3.9 % H.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "454869b9.model.glb",
+     "params": {
+      "words": "stylized female warrior",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "454869b9.constitution.json",
+       "category.json": "454869b9.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "ankle_pct_H": [
+       "<=",
+       7
+      ],
+      "upleg_pct_H": [
+       "between",
+       [
+        45,
+        57
+       ]
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "biped_farm_boy_elbow",
+   "task": "fb8a81a3-a41c-4b87-8b7e-092582373895",
+   "cost": 3,
+   "defect": "Joints · biped (elbows button 2026-10-17, fb8a81a3 narrow 1.030): the judge moved the elbows 7.9 % H into the shoulders (share 0.13) and the ankles to 11 % H; the fit: share 0.67, ankle 5.0.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "fb8a81a3.model.glb",
+     "params": {
+      "words": "farm boy",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "fb8a81a3.constitution.json",
+       "category.json": "fb8a81a3.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "elbow_share_max": [
+       "<=",
+       0.7
+      ],
+      "ankle_pct_H": [
+       "<=",
+       7
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "tier": "extended"
+    },
+    {
+     "id": "judge_guard",
+     "kind": "proportion_guard",
+     "paths": [
+      "mt"
+     ],
+     "params": {
+      "rig_json": "fb8a81a3.prejudge_rig.json",
+      "moves": "fb8a81a3.judge_moves.json",
+      "glb": "fb8a81a3.model.glb",
+      "analysis": {
+       "constitution.json": "fb8a81a3.constitution.json",
+       "category.json": "fb8a81a3.category.json"
+      }
+     },
+     "thresholds": {
+      "dropped": [
+       ">=",
+       4
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "the knees / ankles (9ca0133c) and the elbows + ankles (fb8a81a3) the judge moved are dropped by mt.proportions.guard_moves",
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "biped_gloves_not_hands",
+   "task": "c78a6e57-292f-420d-865d-d8e1f7723a7a",
+   "cost": 2,
+   "defect": "Joints · biped (owner 2026-10-15, c78a6e57: «не может найти кости таза и коленей и локтей»): hips at the shorts' hem (34.5 % H), knees 20.4, forearm half the upper arm (0.67); on 2026-10-18 the word «gloves» made handrig.detect rig the whole body as a HAND (weak 2-branch reading). After: biped, UpLeg 47.1, knee 27.0, share 0.56.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "c78a6e57.model.glb",
+     "params": {
+      "words": "male character model backpack, gloves",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "c78a6e57.constitution.json",
+       "category.json": "c78a6e57.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        41,
+        53
+       ]
+      ],
+      "knee_pct_H": [
+       "between",
+       [
+        22,
+        32
+       ]
+      ],
+      "elbow_share_min": [
+       ">=",
+       0.45
+      ],
+      "elbow_share_max": [
+       "<=",
+       0.66
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_knee_not_high",
+   "task": "9ca0133c-16f4-4399-847c-cdd23d3c6b47",
+   "cost": 2,
+   "defect": "Joints · biped (owner 2026-10-17, 9ca0133c: «сустав коленей выше чем нужно»): the fit put the knee at 27.8 % H, the joint judge moved it 4.5-5.6 % H up to its ControlNet pose (32 %) and the ankles to 10.9 % H. The fit is held here; judge_guard holds the judge (mt.proportions.guard_moves in joint_gate.apply_fix).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "9ca0133c.model.glb",
+     "params": {
+      "words": "goth woman",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "9ca0133c.constitution.json",
+       "category.json": "9ca0133c.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "knee_pct_H": [
+       "between",
+       [
+        24,
+        31
+       ]
+      ],
+      "ankle_pct_H": [
+       "<=",
+       8
+      ],
+      "upleg_pct_H": [
+       "between",
+       [
+        44,
+        55
+       ]
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     }
+    },
+    {
+     "id": "judge_guard",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "params": {
+      "rig_json": "9ca0133c.prejudge_rig.json",
+      "moves": "9ca0133c.judge_moves.json",
+      "glb": "9ca0133c.model.glb",
+      "analysis": {
+       "constitution.json": "9ca0133c.constitution.json",
+       "category.json": "9ca0133c.category.json"
+      }
+     },
+     "thresholds": {
+      "dropped": [
+       ">=",
+       4
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "the knees / ankles (9ca0133c) and the elbows + ankles (fb8a81a3) the judge moved are dropped by mt.proportions.guard_moves",
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     },
+     "kind_pending": "proportion_guard",
+     "pending": {
+      "reason": "mt.proportions (the Joints · biped install) is not on prod yet: proportion_guard imports it and ERRORs on every other agent's gate; back to proportion_guard with that install",
+      "owner": "Joints · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_masked_hips",
+   "task": "1aa3ad1d-f291-472a-92c4-227d483d0189",
+   "cost": 3,
+   "defect": "Joints · biped (unknown button 2026-10-17, 1aa3ad1d: joints.proportion): UpLeg 34.0, knee 20.2 % H. After: 49.9 / 28.6.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "1aa3ad1d.model.glb",
+     "params": {
+      "words": "masked humanoid character",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "1aa3ad1d.constitution.json",
+       "category.json": "1aa3ad1d.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        44,
+        56
+       ]
+      ],
+      "knee_pct_H": [
+       "between",
+       [
+        24,
+        33
+       ]
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "biped_thighs_together_hips",
+   "task": "1434596b-137a-4150-9941-b01b01da1b7b",
+   "cost": 2,
+   "defect": "Joints · biped (owner 2026-10-15, 1434596b: «колени и таз не правильно рассчитаны … это явно гуманоид и обычный человек, у него известные пропорции»): thighs pressed together, the silhouette gap opened at the knees: UpLeg 33.4 % H, knee 19.5 % H (table 50.5 / 28.5). Fix: mt/proportions.py table anchor (hip_tol 6 % H), the constitution's crotch surface as an estimate. After (scratch): UpLeg 51.6, knee 29.1.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "1434596b.model.glb",
+     "params": {
+      "words": "",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "1434596b.constitution.json",
+       "category.json": "1434596b.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        45,
+        56
+       ]
+      ],
+      "knee_pct_H": [
+       "between",
+       [
+        24,
+        33
+       ]
+      ],
+      "knee_share_min": [
+       ">=",
+       0.42
+      ],
+      "spine_order_ok": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_vest_elbow",
+   "task": "fff6ba76-90b4-46ec-b6d8-2526ed0e144d",
+   "cost": 3,
+   "defect": "Joints · biped (owner 2026-10-16, fff6ba76: «неправильно выставлен локоть»): A-pose, elbow share 0.52, the judge-pinned forearm outside the mesh.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "fff6ba76.model.glb",
+     "params": {
+      "words": "girl in vest",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "fff6ba76.constitution.json",
+       "category.json": "fff6ba76.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "elbow_share_min": [
+       ">=",
+       0.45
+      ],
+      "elbow_share_max": [
+       "<=",
+       0.66
+      ],
+      "upleg_pct_H": [
+       "between",
+       [
+        40,
+        52
+       ]
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "chibi_headset_front",
+   "task": "35a6d01c-d93d-494f-b2f7-909f792842dd",
+   "cost": 3,
+   "defect": "Joints · biped (owner 2026-10-16, 35a6d01c: «тут с ригом проблемы кажется»): the run's forward_user.json -x (written a minute after the remark; the face is +z) rigged the arms front / back; with the projections' +z the arms are right. Chibi: no table.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "35a6d01c.model.glb",
+     "params": {
+      "words": "man with headset",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "35a6d01c.constitution.json",
+       "category.json": "35a6d01c.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        28,
+        38
+       ]
+      ],
+      "min_arm_off_axis_pct_H": [
+       ">=",
+       8
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "chibi_hips_keep_short_legs",
+   "task": "b178ebb1-b8b8-40e2-8de6-21004fce2089",
+   "cost": 2,
+   "defect": "Joints · biped (elbows button 2026-10-16, b178ebb1 narrow 1.118): a chibi keeps its short legs; the human table never applies (constitution chibi 0.96): UpLeg 22.4 % H before and after.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "b178ebb1.model.glb",
+     "params": {
+      "words": "chibi boy",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "b178ebb1.constitution.json",
+       "category.json": "b178ebb1.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        18,
+        27
+       ]
+      ],
+      "elbow_share_min": [
+       ">=",
+       0.45
+      ],
+      "elbow_share_max": [
+       "<=",
+       0.66
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py"
+    }
+   ]
+  },
+  {
+   "id": "orient_cat_on_back_review",
+   "task": "ff16cf79-dd46-4869-8177-618027ec0bd4",
+   "cost": 1,
+   "defect": "Joints · biped / orientation (transform report 2026-10-16, ff16cf79): a black cat lying on its back, «no feet / paws found: the file's own up» +y 0.4: rigged upside down and shipped. Fix: a quadruped whose up is under 0.5 confidence fails the fit check with the judge's evidence (review); forward.json = the rig's front.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "ff16cf79.model_source.glb",
+     "params": {
+      "words": "black cat",
+      "v3_bound": true,
+      "body": "quadruped",
+      "analysis": {
+       "category.json": "ff16cf79.category.json"
+      }
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "orientation_review": [
+       "==",
+       1
+      ],
+      "fit_check_ok": [
+       "==",
+       0
+      ],
+      "forward_record_match": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Joints · biped",
+     "xfail": {
+      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "orient_flat_mannequin_first_turn",
+   "task": "8a0f6687-ed6d-470c-b826-5f21b99a37d8",
+   "cost": 1,
+   "defect": "Joints · biped / orientation (transform report 2026-10-17, 8a0f6687): a mannequin lying flat (extents 1.29 x 0.45 x 2.38), up +z biped 0.6, NOT turned: the rig was fitted with the torso along +y and the legs along +z; the projections' +z front (read in the unturned frame, where +z was its up) became the rig's front. Today's orient turns it (+z 0.9); a flat file's +y is never kept as up for a biped read on another axis (ORIENT_FLAT_FILE_RATIO 0.5); forward.json is the rig's one record. Open: the projections' front after a first turn (its frame is not recorded; dropping it broke demon_four_arms_wings, whose projections are already upright).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8a0f6687.model.glb",
+     "params": {
+      "words": "stylized humanoid figure",
+      "v3_bound": true,
+      "body": "biped",
+      "analysis": {
+       "category.json": "8a0f6687.category.json"
+      }
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+z"
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       20
+      ],
+      "forward_record_match": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Joints · biped"
+    }
+   ]
+  },
+  {
+   "id": "orient_toy_forward_record",
+   "task": "5e612bd3-9529-4e7d-99a1-1aee03b8a60c",
+   "cost": 1,
+   "defect": "Joints · biped / orientation (transform report 2026-10-16, 5e612bd3): forward.json said -x, the rig +x (from the projections): two records. Fix: forward.json is rewritten to the rig's front with its source and the guess kept.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "5e612bd3.model_source.glb",
+     "params": {
+      "words": "stylized character",
+      "v3_bound": true,
+      "body": "biped",
+      "analysis": {
+       "category.json": "5e612bd3.category.json"
+      }
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "forward_record_match": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Joints · biped",
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "stylized_rat_short_legs",
+   "task": "67d2fa97-f6ce-48ef-a837-001ec1211f53",
+   "cost": 3,
+   "defect": "Joints · biped (owner 2026-10-16, 67d2fa97: «плохо заанимированы ноги»): a blob rat; the human table never applies; legs UpLeg 18 % H.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "67d2fa97.model.glb",
+     "params": {
+      "words": "stylized rat",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "constitution.json": "67d2fa97.constitution.json",
+       "category.json": "67d2fa97.category.json"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "upleg_pct_H": [
+       "between",
+       [
+        14,
+        23
+       ]
+      ]
+     },
+     "owner": "Joints · biped",
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "multileg_spider_robot",
+   "task": "28ff1a80-0034-4547-8398-6bd9ae4df0a0",
+   "cost": 2,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; measured 2026-10-18 (test tree /tmp/spider_mt): 4 / 4 legs, 4 pairs, +y, stand front_right 0 edges over 4x (3921 on the +x rig), 9.5 s",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "28ff1a80.model.glb",
+     "params": {
+      "words": "mechanical spider-like robot Spider"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       4
+      ],
+      "legs_right": [
+       "==",
+       4
+      ],
+      "leg_pairs": [
+       "==",
+       4
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       0
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3"
+    }
+   ]
+  },
+  {
+   "id": "multileg_spider_stylized",
+   "task": "626e28c6-0848-491e-bfca-e24f089f7c9a",
+   "cost": 2,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; measured 2026-10-18: 4 / 4 legs, 4 pairs, stand 0 edges over 4x (was 3), 33 s",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "626e28c6.model.glb",
+     "params": {
+      "words": "stylized spider"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       4
+      ],
+      "legs_right": [
+       "==",
+       4
+      ],
+      "leg_pairs": [
+       "==",
+       4
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       0
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3"
+    }
+   ]
+  },
+  {
+   "id": "multileg_insectoid",
+   "task": "4e12d1fa-1ce3-4bcc-bfe6-05f86a291232",
+   "cost": 2,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; measured 2026-10-18: 3 / 3 legs, 3 pairs, stand 0 edges over 4x, 4.5 s",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "4e12d1fa.model.glb",
+     "params": {
+      "words": "mechanical insectoid creature"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       3
+      ],
+      "legs_right": [
+       "==",
+       3
+      ],
+      "leg_pairs": [
+       "==",
+       3
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       0
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3"
+    }
+   ]
+  },
+  {
+   "id": "multileg_brown_spider",
+   "task": "1f17d436-ec55-4177-9402-c4958244f96e",
+   "cost": 2,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; measured 2026-10-18: 4 / 4 legs, stand 13 edges over 4x (was 178; adjacent-leg seams, jump 0.3), 27 s",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "1f17d436.model.glb",
+     "params": {
+      "words": "brown spider"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       4
+      ],
+      "legs_right": [
+       "==",
+       4
+      ],
+      "leg_pairs": [
+       "==",
+       4
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       30
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3"
+    }
+   ]
+  },
+  {
+   "id": "multileg_skeletal_arachnid",
+   "task": "6a490b56-f454-400f-a813-3b05f902ec0c",
+   "cost": 2,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; measured 2026-10-18: 4 / 4 legs, stand 67 edges over 4x (was 2128), leg tube on, 24 s",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "6a490b56.model.glb",
+     "params": {
+      "words": "Skeletal arachnid monster"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       4
+      ],
+      "legs_right": [
+       "==",
+       4
+      ],
+      "leg_pairs": [
+       "==",
+       4
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       100
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3"
+    }
+   ]
+  },
+  {
+   "id": "multileg_spider_1m",
+   "task": "6266e91e-1d86-468c-8892-3138ca4c567a",
+   "cost": 3,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; measured 2026-10-18: 4 / 4 legs; stand 1418 -> 258 (tube on) / 692 (off) edges over 4x: hard seams (weight jump 1.0) between adjacent leg chains of a 1M-vertex, 34237-shell mesh",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "6266e91e.model.glb",
+     "params": {
+      "words": "spider"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       4
+      ],
+      "legs_right": [
+       "==",
+       4
+      ],
+      "leg_pairs": [
+       "==",
+       4
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       60
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3",
+     "xfail": {
+      "reason": "hard seams between adjacent leg chains on a 1M-vertex, 34237-shell spider: the proxy graph does not connect the shells; seam softening across chains is the next step",
+      "owner": "Multileg · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "multileg_robotic_spider_shells",
+   "task": "5f7ec8a7-982a-49c9-88f9-946370137354",
+   "cost": 2,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; measured 2026-10-18: 4 / 4 legs; stand 348 -> 126 edges over 4x, pairs RightLeg1 | Spine with weight jump 1.0 (5877 shells)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "5f7ec8a7.model.glb",
+     "params": {
+      "words": "robotic spider creature"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       4
+      ],
+      "legs_right": [
+       "==",
+       4
+      ],
+      "leg_pairs": [
+       "==",
+       4
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       60
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3",
+     "xfail": {
+      "reason": "hard seams (jump 1.0) between separate shells of the legs and the trunk: a shell that spans two bones gets no blend; seam softening is the next step",
+      "owner": "Multileg · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "multileg_insect_mascot",
+   "task": "28e6be70-9854-44e1-8cd8-37dc140d1bd4",
+   "cost": 2,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; measured 2026-10-18: 3 / 3 legs; stand 742 -> 273 edges over 4x (hind legs | Tail1 abdomen seam, jump 0.4)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "28e6be70.model.glb",
+     "params": {
+      "words": "insect mascot"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       3
+      ],
+      "legs_right": [
+       "==",
+       3
+      ],
+      "leg_pairs": [
+       "==",
+       3
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       60
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3",
+     "xfail": {
+      "reason": "the hind legs' seam with the abdomen (Tail1) on a thick-bodied insect; the abdomen / leg boundary needs the body-depth rule per trunk bone",
+      "owner": "Multileg · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "multileg_mantis",
+   "task": "adce576d-bb29-4206-bc92-83ea8b8be61f",
+   "cost": 2,
+   "owner": "Multileg · V3",
+   "defect": "Multileg · V3 (owner 2026-10-18 «СДЕЛАЙ ПАУКОВ. ОТДЕЛЬНО ФАБЛОМ.», notice of task 28ff1a80 / run 80e74fe1, transform defect report): the robot spider was stood on its end (+x) by the humanoid limb judge and rigged with 2 legs; mt/creature.py: expected pairs from the words (spider 4, crab 5, insect 3), mirrored leg pairing, the body axis the legs mirror about, leg trim, a fine grid (128) for thin or too few legs, the body-depth rule, shell labels, a per-limb leg tube chosen by the rig check on the source mesh edges; mt/rig_first._multileg_up: no biped judge for a spider / insect / crab, a turn only onto a side with 6+ foot blobs, the file's own +y when no side has 4; owner 2026-10-18 «Новая категория» report adce576d (Vision «praying mantis», body multi-legged); measured: 3 / 3 legs, stand 112 edges over 4x (raptorial forelegs | Hips, jump 0.34), tube off by the measured pick (on: 2085)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "adce576d.model.glb",
+     "params": {
+      "words": "praying mantis"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "legs_left": [
+       "==",
+       3
+      ],
+      "legs_right": [
+       "==",
+       3
+      ],
+      "leg_pairs": [
+       "==",
+       3
+      ],
+      "up": [
+       "==",
+       "+y"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       150
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Multileg · V3"
+    }
+   ]
+  },
+  {
+   "id": "vehicle_camry_zup",
+   "task": "52e76e46-92d2-4df6-83b6-f805030cc664",
+   "cost": 2,
+   "owner": "Vehicles · V3",
+   "defect": "Vehicles V3 (owner 2026-10-18 «тут две тачки залили, надо чтобы колеса риггались и все такое»; AGENTS.md «Never humanoid»): the Toyota Camry 52e76e46 (Z-up OBJ, 503 k vertices, tire_01..04 / disk_* nodes) went through fastrig as a 33-bone quadruped lying on its side (135 s) and the Ferrari 458 45575dfc (scene.zip, 3DWheel Front L / Rear R nodes) as a 26-bone biped; mt/vehicle_mesh.py: the detector (named wheels fitted by cylinders + vehicle words / parts / Vision) before the orientation judge, the up from the axles, vehicle_wheels_norm on the named wheel face sets (collider = visual), Root > Body + Root > Wheel_<name> with rigid weights, Drive / Steer / Idle / Suspension / Brake clips; measured 2026-10-18 (test tree /tmp/veh): 4 named wheels (tire_01..04 + disk_*), 2 axles, front steer, up +z turned to +y, 11.7 s, stand 0 edges over 4x",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "52e76e46.model.glb",
+     "params": {
+      "words": "Toyota_Camry_XV30_2004"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "vehicle"
+      ],
+      "bones": [
+       "==",
+       6
+      ],
+      "wheels": [
+       "==",
+       4
+      ],
+      "axles": [
+       "==",
+       2
+      ],
+      "wheel_pairs": [
+       "==",
+       2
+      ],
+      "steer_wheels": [
+       "==",
+       2
+      ],
+      "vehicle_up": [
+       "==",
+       "+z"
+      ],
+      "vehicle_turned": [
+       "==",
+       1
+      ],
+      "wheels_named": [
+       "==",
+       4
+      ],
+      "normaliser_error": [
+       "==",
+       0
+      ],
+      "rig_check_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       1.5
+      ],
+      "edges_over_4x": [
+       "<=",
+       0
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Vehicles · V3",
+     "note": "rigid parts: the body and each wheel one bone, no edge stretches"
+    }
+   ]
+  },
+  {
+   "id": "vehicle_ferrari_scene",
+   "task": "45575dfc-6e0c-455a-8b09-9eb3eb1aec88",
+   "cost": 2,
+   "owner": "Vehicles · V3",
+   "defect": "Vehicles V3 (owner 2026-10-18 «тут две тачки залили, надо чтобы колеса риггались и все такое»; AGENTS.md «Never humanoid»): the Toyota Camry 52e76e46 (Z-up OBJ, 503 k vertices, tire_01..04 / disk_* nodes) went through fastrig as a 33-bone quadruped lying on its side (135 s) and the Ferrari 458 45575dfc (scene.zip, 3DWheel Front L / Rear R nodes) as a 26-bone biped; mt/vehicle_mesh.py: the detector (named wheels fitted by cylinders + vehicle words / parts / Vision) before the orientation judge, the up from the axles, vehicle_wheels_norm on the named wheel face sets (collider = visual), Root > Body + Root > Wheel_<name> with rigid weights, Drive / Steer / Idle / Suspension / Brake clips; measured 2026-10-18: 4 named wheels (3DWheel Front L / R, Rear L / R), 2 axles, front steer, up +y kept, 8.3 s, stand 0 edges over 4x",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "45575dfc.model.glb",
+     "params": {
+      "words": "scene"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "vehicle"
+      ],
+      "bones": [
+       "==",
+       6
+      ],
+      "wheels": [
+       "==",
+       4
+      ],
+      "axles": [
+       "==",
+       2
+      ],
+      "wheel_pairs": [
+       "==",
+       2
+      ],
+      "steer_wheels": [
+       "==",
+       2
+      ],
+      "vehicle_up": [
+       "==",
+       "+y"
+      ],
+      "vehicle_turned": [
+       "==",
+       0
+      ],
+      "wheels_named": [
+       "==",
+       4
+      ],
+      "normaliser_error": [
+       "==",
+       0
+      ],
+      "rig_check_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       1.5
+      ],
+      "edges_over_4x": [
+       "<=",
+       0
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Vehicles · V3",
+     "note": "rigid parts: the body and each wheel one bone, no edge stretches"
     }
    ]
   }
