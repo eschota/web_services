@@ -19406,7 +19406,7 @@
     },
     {
      "id": "judge_guard",
-     "kind": "proportion_guard",
+     "kind": "pending_detector",
      "paths": [
       "mt"
      ],
@@ -19429,6 +19429,11 @@
      "note": "the knees / ankles (9ca0133c) and the elbows + ankles (fb8a81a3) the judge moved are dropped by mt.proportions.guard_moves",
      "xfail": {
       "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
+      "owner": "Joints · biped"
+     },
+     "kind_pending": "proportion_guard",
+     "pending": {
+      "reason": "mt.proportions (the Joints · biped install) is not on prod yet: proportion_guard imports it and ERRORs on every other agent's gate; back to proportion_guard with that install",
       "owner": "Joints · biped"
      }
     }
