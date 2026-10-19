@@ -738,6 +738,27 @@ Owner rule, 2026-10-10:
   from behind / side, held objects cut out and generated as `prop` on the hand bone, multiple characters split.
 * Acceptance set: the two Santas (77cc1b88, 4102abd1), 50d0b9b4, 591c0b79, 3aa044dc — automatic, no manual fixes.
 
+## The Owner's Own Picture Tasks Go To Tripo (owner order, 2026-10-19)
+
+> если задачу делаю я — отправляй сразу в Tripo на качественную генерацию
+
+* A picture task whose owner is an administrator (`owner_type == "user"` and `config.is_admin_email`) sends its full
+  generation to Tripo (`backend/generation_tripo.py`: apiv3 `POST /v3/generation/image-to-model`, textured PBR, detailed
+  texture, model `v2.5-20250123`) instead of renderfin's farm Hunyuan; the fast preview tier still runs beside it and the
+  Tripo model binds as the upgrade. Everyone else stays on the free farm (the «No Paid APIs» rule below).
+* Switches in the autorig-storage environment: `AUTORIG_PICTURE_TRIPO` = `admin` (default) | `all` | `off`;
+  `AUTORIG_TRIPO_MODEL`, `AUTORIG_TRIPO_TEXTURE` (`detailed`). The key lives only in `/srv/autorig/secrets/tripo.env`
+  (`TRIPO_API_KEY`), never in Git, logs or task output. Records: `/srv/autorig/data/var/tripo/jobs/<tripo id>.json`;
+  the credits per task: `/srv/autorig/data/var/tripo/ledger.jsonl` (`credits_consumed`, 40 per Santa on 2026-10-19).
+* The job id is `tripo:<tripo task id>`; `render_prompting.poll_character_gen` answers it in renderfin's job shape, so the
+  generation pump, the fast-tier upgrade and the V3 binding are unchanged; the GLB lands once in
+  `/u/<token>/tripo.glb`. A Tripo job is never cancelled through renderfin.
+* Why: on 2026-10-19 the owner's two Santa tasks (9e7c06e8, 3efed899) waited 35 min at «hunyuan» because every Hunyuan box
+  failed the 7 GB VRAM gate (the LLM holds the 1080 Ti converters, f12 unreachable); Tripo returned both in 66 / 83 s.
+* The same day: the isolate wait before the generation is 12 s (was 7: the Santa cutout took 7.95 s on f13 and the
+  backdrop went to both tiers, so the mini model grew planes between the limbs), and the fast tier takes the cutout when
+  it landed meanwhile.
+
 ## Picture Intake: Fast Model in ~5 s, Then Progressive Upgrade (owner order, 2026-10-17)
 
 > нельзя это вот на фаст мини перевести, чтобы 3д модель появлялась через 5 секунд, а потом просто улучшалась
