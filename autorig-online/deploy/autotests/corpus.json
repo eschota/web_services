@@ -2187,6 +2187,76 @@
    "what": "scene",
    "sha256": "69f70af978dc1a27d42d1f8d4139ff6704bdadbba6bf606d95fc6ac7051e9efe",
    "bytes": 5497412
+  },
+  "9e7c06e8.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/622589890605a564ae80/proj/model.glb",
+   "task": "9e7c06e8-3163-40da-b7fa-ad909beebd35",
+   "what": "Santa Claus from a picture (20k vertices): the arms hang along a coat, mittens; the owner: «руки до ладоней не дошли … пайплайн не видит собственного анализатора?»",
+   "sha256": "899f7f833d93b4866257dafecb32b43720e5df33a6e5d0083e03c6f2e5e61110",
+   "bytes": 720776
+  },
+  "9e7c06e8.parts_seg.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/622589890605a564ae80/analysis/parts_seg.json",
+   "task": "9e7c06e8-3163-40da-b7fa-ad909beebd35",
+   "what": "the analyser's part records (hand.L / hand.R / arm.L / arm.R confidences)",
+   "sha256": "92084a72574c9336435f675efb8f3d2b5a14bd111d6c180dbb7c3db3a5c61902",
+   "bytes": 73795
+  },
+  "9e7c06e8.parts_seg.npz": {
+   "source": "/srv/autorig/data/motion_transfer/runs/622589890605a564ae80/analysis/parts_seg.npz",
+   "task": "9e7c06e8-3163-40da-b7fa-ad909beebd35",
+   "what": "the analyser's per-vertex labels on proj/model.glb (SAM + GroundingDINO)",
+   "sha256": "28873fa957000c0bdb6e128dcabb289f08b854ca034e4045bfc6620585c376e6",
+   "bytes": 45670
+  },
+  "77cc1b88.parts_seg.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dd3b2e1e9d5a4b205f63/analysis/parts_seg.json",
+   "task": "77cc1b88-be21-4d73-85a3-9c0e9551c4d1",
+   "what": "the analyser's part records (hand.L / hand.R / arm.L / arm.R confidences)",
+   "sha256": "ba14f8ca877676487f5c959be4aaa60ad1446250b6c4ff9c51d0dcfe8a2250d5",
+   "bytes": 81781
+  },
+  "77cc1b88.parts_seg.npz": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dd3b2e1e9d5a4b205f63/analysis/parts_seg.npz",
+   "task": "77cc1b88-be21-4d73-85a3-9c0e9551c4d1",
+   "what": "the analyser's per-vertex labels on proj/model.glb (SAM + GroundingDINO)",
+   "sha256": "914783cf3756997946d9bb108dfa3e5477311463b06e1bbac0501fb68050e29a",
+   "bytes": 54913
+  },
+  "4102abd1.parts_seg.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f98bc5933a41cdcf035d/analysis/parts_seg.json",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "what": "the analyser's part records (hand.L / hand.R / arm.L / arm.R confidences)",
+   "sha256": "e9828d33ac03629487adb11ecce8905f393bcad81cd5963d72a9c9b0b85bb631",
+   "bytes": 76217
+  },
+  "4102abd1.parts_seg.npz": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f98bc5933a41cdcf035d/analysis/parts_seg.npz",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "what": "the analyser's per-vertex labels on proj/model.glb (SAM + GroundingDINO)",
+   "sha256": "64993fb96205372562182c7154ebe184e141421e121fea47cbac3c8fa9958877",
+   "bytes": 53220
+  },
+  "f7c06db3.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f7c06db3f71a4723f713/proj/model.glb",
+   "task": "9e7c06e8-3163-40da-b7fa-ad909beebd35",
+   "what": "the Tripo model of the Santa 9e7c06e8 (166k vertices, faces +x): a beard fills the chest; the first rig had the Neck 10.6 % H under the shoulders",
+   "sha256": "6183f848763a0db1e2e0d0548465ee0c1735dac56edac6f98be792a87d8a8537",
+   "bytes": 18544672
+  },
+  "f7c06db3.parts_seg.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f7c06db3f71a4723f713/analysis/parts_seg.json",
+   "task": "9e7c06e8-3163-40da-b7fa-ad909beebd35",
+   "what": "the analyser's part records (hand.L / hand.R / arm.L / arm.R confidences)",
+   "sha256": "1fee0e9626a8028dc6142269ca11cbcecb188dcc6ee499ae6d3de88c10c48959",
+   "bytes": 81408
+  },
+  "f7c06db3.parts_seg.npz": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f7c06db3f71a4723f713/analysis/parts_seg.npz",
+   "task": "9e7c06e8-3163-40da-b7fa-ad909beebd35",
+   "what": "the analyser's per-vertex labels on proj/model.glb (SAM + GroundingDINO)",
+   "sha256": "37b73a9e1d87c7d153988a8d90e2feeebfa85bbcbb75729f1be6e8bab500e00b",
+   "bytes": 272099
   }
  },
  "profiles": {
@@ -2427,20 +2497,11 @@
      "on": "mt_rig",
      "thresholds": {
       "outside": [
-       "<=",
-       2
+       "==",
+       0
       ]
      },
-     "target": {
-      "thresholds": {
-       "outside": [
-        "==",
-        0
-       ]
-      },
-      "reason": "Hips and Spine of the fast rig sit outside the voxel solid (live judge)",
-      "owner": "Rig tools · V3"
-     }
+     "target": null
     },
     {
      "id": "mt_fast",
@@ -3942,10 +4003,6 @@
       "tear": false,
       "clip": "Running",
       "status": "failed"
-     },
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -4192,10 +4249,6 @@
       "tear": false,
       "clip": "Running",
       "status": "failed"
-     },
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -4773,10 +4826,6 @@
       "tear": false,
       "clip": "Running",
       "status": "failed"
-     },
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -6803,10 +6852,6 @@
       "tear": true,
       "clip": "Running",
       "status": "failed"
-     },
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -7308,10 +7353,6 @@
       "tear": false,
       "clip": "Running",
       "status": "invalid"
-     },
-     "xfail": {
-      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -8641,10 +8682,6 @@
        "<=",
        5
       ]
-     },
-     "xfail": {
-      "reason": "fused legs stretch, no-gap (2026-10-12: no weld splits for non-bipeds; the old split hid the stretch behind gaps)",
-      "owner": "Rig path · V3"
      }
     },
     {
@@ -9277,10 +9314,6 @@
       "tear": true,
       "clip": "Running",
       "status": "failed"
-     },
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -11665,10 +11698,6 @@
       "tear": true,
       "clip": "Running",
       "status": "failed"
-     },
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -13139,10 +13168,6 @@
       "tear": false,
       "clip": "Running",
       "status": "invalid"
-     },
-     "xfail": {
-      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -13763,10 +13788,6 @@
        "<=",
        50
       ]
-     },
-     "xfail": {
-      "reason": "the tail shell welded along the hind legs takes their cores (geodesic_assign); a split there opens a 9-40 % H gap on this triangle-soup mesh (welded share 0.32, boar_unwelded_gaps), so leg_core_own=trunk leaves them on the tail. Needs the shell welded / split by Rig classes (boar_tail_shell)",
-      "owner": "Rig classes V3"
      }
     },
     {
@@ -14210,10 +14231,6 @@
        ">=",
        9
       ]
-     },
-     "xfail": {
-      "reason": "the sitting-pose fit (splayed hind legs read as the front pair, forward -z) - equine milestone 2",
-      "owner": "Fable monsters/animals"
      }
     },
     {
@@ -14523,10 +14540,6 @@
      },
      "owner": "Anim stand · V3",
      "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
-     },
      "measured_2026_10_14": {
       "worst_edge_ratio": 31.705,
       "edges_over_4x": 133,
@@ -15231,10 +15244,6 @@
       "tear": true,
       "clip": "Running",
       "status": "failed"
-     },
-     "xfail": {
-      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
-      "owner": "Seams · V3"
      }
     }
    ]
@@ -16670,10 +16679,6 @@
        "quadruped"
       ]
      },
-     "xfail": {
-      "reason": "body plan from the traced paws lands with Orientation · V3 .11 (no Vision answer: the rig-derived category said biped)",
-      "owner": "Orientation · V3"
-     },
      "tier": "base"
     },
     {
@@ -17411,10 +17416,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "Wings V3 not landed: the wings agent stopped on the Sonnet weekly limit (2026-10-15) before multilimb.wing_probe / the arm reach search reached production; the case blocked every MT release (lead, 2026-10-15)",
-      "owner": "Wings · V3"
      }
     },
     {
@@ -19110,11 +19111,7 @@
       ]
      },
      "owner": "Joints · biped",
-     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
-     }
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py"
     }
    ]
   },
@@ -19149,10 +19146,6 @@
        ">=",
        20
       ]
-     },
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
      }
     },
     {
@@ -19187,11 +19180,7 @@
       ]
      },
      "owner": "Joints · biped",
-     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
-     }
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py"
     }
    ]
   },
@@ -19368,10 +19357,6 @@
        ">=",
        20
       ]
-     },
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
      }
     },
     {
@@ -19406,11 +19391,7 @@
       ]
      },
      "owner": "Joints · biped",
-     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
-     }
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py"
     }
    ]
   },
@@ -19475,15 +19456,11 @@
       ]
      },
      "owner": "Joints · biped",
-     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
-     }
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py"
     },
     {
      "id": "judge_guard",
-     "kind": "pending_detector",
+     "kind": "proportion_guard",
      "paths": [
       "mt"
      ],
@@ -19503,16 +19480,7 @@
       ]
      },
      "owner": "Joints · biped",
-     "note": "the knees / ankles (9ca0133c) and the elbows + ankles (fb8a81a3) the judge moved are dropped by mt.proportions.guard_moves",
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
-     },
-     "kind_pending": "proportion_guard",
-     "pending": {
-      "reason": "mt.proportions (the Joints · biped install) is not on prod yet: proportion_guard imports it and ERRORs on every other agent's gate; back to proportion_guard with that install",
-      "owner": "Joints · biped"
-     }
+     "note": "the knees / ankles (9ca0133c) and the elbows + ankles (fb8a81a3) the judge moved are dropped by mt.proportions.guard_moves"
     }
    ]
   },
@@ -19644,11 +19612,7 @@
       ]
      },
      "owner": "Joints · biped",
-     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py",
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
-     }
+     "note": "spec docs/biped-joints-owner-remarks-spec-20261018.md (MT repo), mt/proportions.py"
     }
    ]
   },
@@ -19887,11 +19851,7 @@
        1
       ]
      },
-     "owner": "Joints · biped",
-     "xfail": {
-      "reason": "awaits the Joints · biped install (mt/proportions.py + fastrig/leg_fit/joint_gate patches; its gate 20261018T170152Z: 427 PASS, blocked only by gorilla_bust_legless stand 98 > 90); the case passes with that tree and fails on today's prod",
-      "owner": "Joints · biped"
-     }
+     "owner": "Joints · biped"
     }
    ]
   },
@@ -21012,6 +20972,394 @@
      },
      "owner": "Vehicles · V3",
      "note": "rigid parts: the body and each wheel one bone, no edge stretches"
+    }
+   ]
+  },
+  {
+   "id": "biped_arm_parts_guide_santa",
+   "task": "9e7c06e8-3163-40da-b7fa-ad909beebd35",
+   "cost": 2,
+   "owner": "Joints · biped",
+   "defect": "owner 2026-10-19 on 9e7c06e8 (run 622589890605a564ae80, docs/joints-shoulder-height-brief-20261018.md (Дополнение 2026-10-19)): LeftArm at 69 % H, 10.7 % H under the arm lobe's top (82 % H), the Hand joint on the sleeve cuff 8.7 % H from the mitten's wrist, the chain bending in; the analyser had hand.L / hand.R at 0.80 / 0.83 and fit_biped never read them. Fix: mt/arm_guide.py (arm_fit_parts guide): the shoulder from the lobe's top - 3 % H, the wrist from the hand mask, the elbow on the arm's own section, never above the armpit. Scratch: under top 2.9 / 4.1, Hand -> wrist 0.6 / 0.8, Running 518 -> 526 edges over 4x (the model's own seam, Seams · V3), worst 47.6 -> 46.6",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "9e7c06e8.model.glb",
+     "params": {
+      "words": "Santa Claus",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "parts_seg.json": "9e7c06e8.parts_seg.json",
+       "parts_seg.npz": "9e7c06e8.parts_seg.npz"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "base"
+    },
+    {
+     "id": "arm_guide",
+     "kind": "arm_guide",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "owner": "Joints · biped",
+     "thresholds": {
+      "guide_applied": [
+       "==",
+       1
+      ],
+      "hand_to_wrist_max": [
+       "<=",
+       2.0
+      ],
+      "arm_under_top_min": [
+       ">=",
+       2.0
+      ],
+      "arm_under_top_max": [
+       "<=",
+       5.0
+      ],
+      "neck_minus_arm_min": [
+       ">=",
+       2.0
+      ]
+     },
+     "tier": "base"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "owner": "Joints · biped",
+     "thresholds": {
+      "edges_over_4x": [
+       "<=",
+       545
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       50
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "tier": "base"
+    }
+   ]
+  },
+  {
+   "id": "biped_arm_parts_guide_coat_santa",
+   "task": "77cc1b88-be21-4d73-85a3-9c0e9551c4d1",
+   "cost": 2,
+   "owner": "Joints · biped",
+   "defect": "the Santa 77cc1b88 (docs/joints-shoulder-height-brief-20261018.md (Дополнение 2026-10-19)): the arm guide on a sleeve fused to a coat. One sleeve radius in (5.5 % H) put the shoulder into the coat and an elbow above the armpit ran the forearm along the coat's side (Running 5 -> 292 edges over 4x); shoulder_plan fit + the elbow under the free-arm armpit: Arm 8.7 -> 3.0 % H under the top, Hand -> wrist 1.2, Running 12 edges, worst 7.4 (before 5 / 7.6)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "77cc1b88.model.glb",
+     "params": {
+      "words": "Santa Claus",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "parts_seg.json": "77cc1b88.parts_seg.json",
+       "parts_seg.npz": "77cc1b88.parts_seg.npz"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "base"
+    },
+    {
+     "id": "arm_guide",
+     "kind": "arm_guide",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "owner": "Joints · biped",
+     "thresholds": {
+      "guide_applied": [
+       "==",
+       1
+      ],
+      "hand_to_wrist_max": [
+       "<=",
+       2.0
+      ],
+      "arm_under_top_min": [
+       ">=",
+       2.0
+      ],
+      "arm_under_top_max": [
+       "<=",
+       5.0
+      ],
+      "neck_minus_arm_min": [
+       ">=",
+       2.0
+      ]
+     },
+     "tier": "base"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "owner": "Joints · biped",
+     "thresholds": {
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       10
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "tier": "base"
+    }
+   ]
+  },
+  {
+   "id": "biped_arm_parts_guide_leaky_hand",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "cost": 2,
+   "owner": "Joints · biped",
+   "defect": "the robot Santa 4102abd1 (docs/joints-shoulder-height-brief-20261018.md (Дополнение 2026-10-19)): hand.L of the analyser leaks up the forearm (29-63 % H): the hand is its distal hand_max_len_pct_H (16). Hand -> wrist 4.6 -> 0.6 % H, Arm under the top 2.6 -> 2.8, Running 6 -> 9 edges over 4x",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "4102abd1.model.glb",
+     "params": {
+      "words": "Santa Claus",
+      "body": "biped",
+      "forward_axis": "+z",
+      "analysis": {
+       "parts_seg.json": "4102abd1.parts_seg.json",
+       "parts_seg.npz": "4102abd1.parts_seg.npz"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "base"
+    },
+    {
+     "id": "arm_guide",
+     "kind": "arm_guide",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "owner": "Joints · biped",
+     "thresholds": {
+      "guide_applied": [
+       "==",
+       1
+      ],
+      "hand_to_wrist_max": [
+       "<=",
+       2.0
+      ],
+      "arm_under_top_min": [
+       ">=",
+       2.0
+      ],
+      "arm_under_top_max": [
+       "<=",
+       5.0
+      ],
+      "neck_minus_arm_min": [
+       ">=",
+       2.0
+      ]
+     },
+     "tier": "base"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "owner": "Joints · biped",
+     "thresholds": {
+      "edges_over_4x": [
+       "<=",
+       15
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       10
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "tier": "base"
+    }
+   ]
+  },
+  {
+   "id": "biped_arm_parts_guide_tripo_santa",
+   "task": "9e7c06e8-3163-40da-b7fa-ad909beebd35",
+   "cost": 4,
+   "owner": "Joints · biped",
+   "defect": "the Tripo Santa of 9e7c06e8 (run f7c06db3f71a4723f713, docs/joints-shoulder-height-brief-20261018.md (Дополнение 2026-10-19)): the left fit shoulder 39.7 % H off (mirrored later), a beard over the chest put the Neck 10.6 % H under the shoulders («плечи от головы как ногу»). The guide trusts an anchor that mirrors the other side's, and the neck follows the parts' shoulders: Neck - Arm -10.6 -> +5.7 % H, Arm under the top 9.8 -> 3.4, Hand -> wrist 8.8 -> 1.0, Running 101 -> 36 edges, worst 47.8 -> 25.5",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "f7c06db3.model.glb",
+     "params": {
+      "words": "Santa Claus",
+      "body": "biped",
+      "forward_axis": "+x",
+      "analysis": {
+       "parts_seg.json": "f7c06db3.parts_seg.json",
+       "parts_seg.npz": "f7c06db3.parts_seg.npz"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "arm_guide",
+     "kind": "arm_guide",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "owner": "Joints · biped",
+     "thresholds": {
+      "guide_applied": [
+       "==",
+       1
+      ],
+      "hand_to_wrist_max": [
+       "<=",
+       2.0
+      ],
+      "arm_under_top_min": [
+       ">=",
+       2.0
+      ],
+      "arm_under_top_max": [
+       "<=",
+       5.0
+      ],
+      "neck_minus_arm_min": [
+       ">=",
+       2.0
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "owner": "Joints · biped",
+     "thresholds": {
+      "edges_over_4x": [
+       "<=",
+       60
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       35
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "tier": "extended"
     }
    ]
   }
