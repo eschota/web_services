@@ -113,7 +113,7 @@ class PartsBuildRoutesTests(unittest.TestCase):
 
     def body(self, **kw):
         return {"part": "hat", "label": "hat", "provider": "tripo", "variant": "v31std", "child_run": CRUN,
-                "parent_run": PRUN, **kw}
+                "parent_run": PRUN, "color": "#c81e28", **kw}
 
     def load(self, tid):
         async def go():
@@ -154,6 +154,7 @@ class PartsBuildRoutesTests(unittest.TestCase):
         view = routes.parts_view(self.load(PARENT))
         self.assertIsNone(view["parent"])
         self.assertEqual(view["children"][0]["url"], f"/task?id={child.id}")
+        self.assertEqual(view["children"][0]["color"], "#c81e28")
         cview = routes.parts_view(child)
         self.assertEqual(cview["parent"]["parent_task"], PARENT)
         self.assertEqual(self.client.get(f"/api/task/{child.id}/parts").json()["parent"]["part"], "hat")
