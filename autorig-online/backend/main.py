@@ -17376,6 +17376,19 @@ app.include_router(
     )
 )
 
+# Build 3D model by Parts (2026-10-20, MT docs/parts-build-spec-20261020.md §3): a part's child task and the
+# parent / children navigation (parts_build_routes.py; the MT service autorig-parts calls POST .../parts/child).
+from parts_build_routes import build_parts_build_router
+
+app.include_router(
+    build_parts_build_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+    )
+)
+
 # Downloads · V3 (2026-10-10): the task page's download mode. V3 files only, exported on request
 # (FBX by the Blender export workers), every download and export behind the unlimited subscription.
 from task_downloads_v3 import build_task_downloads_v3_router

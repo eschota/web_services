@@ -535,6 +535,14 @@ def build_task_page_v3_router(*, get_db: Callable[..., Any], get_current_user: C
                            db: Any = Depends(get_db)):
         task = await authorized(task_id, request, user, db)
         state = await build_state(task, db, task_model=task_model, cache_dir=cache_dir, is_admin=admin(user))
+        try:                                     # Build 3D model by Parts (2026-10-20): parent / children navigation
+            import parts_build_routes
+            state["parts"] = parts_build_routes.parts_view(task)
+            if parts_build_routes.is_child(task):        # a part's task is never re-rigged on open
+                state["rig_version"] = parts_build_routes.child_rig_version()
+                return JSONResponse(state, headers=_NO_STORE)
+        except Exception as exc:  # noqa: BLE001 - never costs the page
+            log.warning("parts view failed for %s: %s", task_id, exc)
         try:                                     # Only current-version rigs (2026-10-11): the open re-rigs an old rig
             import rerig_on_open
             state["rig_version"] = rerig_on_open.state(task, request)
@@ -555,6 +563,12 @@ def build_task_page_v3_router(*, get_db: Callable[..., Any], get_current_user: C
         """The page's «re-rig with the new pipeline» button (owner 2026-10-19): one request per (task, rig version,
         rig-path sha) for mt/rerig_open.py; the answer is the rig-version state with `button`."""
         task = await authorized(task_id, request, user, db)
+        try:                                     # Build 3D model by Parts (2026-10-20): a part's task is never re-rigged
+            import parts_build_routes
+            if parts_build_routes.is_child(task):
+                return JSONResponse(parts_build_routes.child_rig_version(), headers=_NO_STORE)
+        except ImportError:
+            pass
         import rerig_on_open
         out = rerig_on_open.request_button(task, request, user_email=getattr(user, "email", None) if user else None,
                                            is_admin=admin(user))
