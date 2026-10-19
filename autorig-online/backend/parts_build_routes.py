@@ -11,7 +11,8 @@ character is its own task, of the parent's owner, with a navigation link to the 
   ``poster_llm_title = "<parent title> · <part label>"``, the collection «Parts of <parent>» (one guid per parent),
   ``viewer_settings.parts = {parent_task, parent_run, part, label, provider, variant, child_run}`` and
   ``viewer_settings.v3.session = {mt_run_id, viewer_url, files_base}``. The parent gets
-  ``viewer_settings.parts.children[] += {task, part, label, provider, variant, run}``. No credits are charged, no
+  ``viewer_settings.parts.children[] += {task, part, label, provider, variant, run, color}`` (the part's colour, so
+  the viewer draws the children strip from v3-view alone). No credits are charged, no
   Telegram notice is sent (both notified_at stamps are set), no YouTube upload. One child per (part, provider, variant,
   child run): a repeated call answers the existing task.
 * ``GET /api/task/{id}/parts`` -> ``{parent, children[]}`` (the same block ``GET /api/task/{id}/v3-view`` carries as
@@ -40,6 +41,7 @@ _RUN = re.compile(r"^[0-9a-f]{20}$")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _PART = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 _VARIANT = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
+_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _NO_STORE = {"Cache-Control": "no-store"}
 COPY_FIELDS = ("owner_type", "owner_id", "is_public", "input_type", "owner_language", "content_rating", "content_score",
                "content_classified_at", "content_classifier_version", "v3_category", "v3_subcategory")
@@ -74,12 +76,14 @@ def parts_view(task: Any) -> Optional[dict]:
         return None
     parent = None
     if p.get("parent_task"):
-        parent = {k: p.get(k) for k in ("parent_task", "parent_run", "part", "label", "provider", "variant", "child_run")}
+        parent = {k: p.get(k) for k in ("parent_task", "parent_run", "part", "label", "provider", "variant", "child_run",
+                                        "color")}
         parent["url"] = f"/task?id={p['parent_task']}"
     children = []
     for c in p.get("children") or []:
         if isinstance(c, dict) and _UUID.fullmatch(str(c.get("task") or "")):
-            children.append({**{k: c.get(k) for k in ("task", "part", "label", "provider", "variant", "run", "at")},
+            children.append({**{k: c.get(k) for k in ("task", "part", "label", "provider", "variant", "run", "at",
+                                                      "color")},
                              "url": f"/task?id={c['task']}"})
     if parent is None and not children:
         return None
@@ -117,8 +121,10 @@ def _clean(body: dict) -> dict:
     if variant is not None and not _VARIANT.fullmatch(str(variant)):
         raise HTTPException(400, {"error_string": "bad_variant"})
     label = re.sub(r"\s+", " ", str(body.get("label") or part.replace("_", " ")))[:80]
+    color = str(body.get("color") or "")
     return {"part": part, "child_run": run, "parent_run": prun or None, "provider": provider,
-            "variant": None if variant is None else str(variant), "label": label}
+            "variant": None if variant is None else str(variant), "label": label,
+            "color": color if _COLOR.fullmatch(color) else None}
 
 
 async def create_child(db: Any, task_model: Any, parent: Any, body: dict) -> tuple[Any, bool]:
@@ -153,7 +159,8 @@ async def create_child(db: Any, task_model: Any, parent: Any, body: dict) -> tup
                    "session": {"mt_run_id": run, "viewer_url": f"{UNITY_PAGE}?run={run}",
                                "files_base": f"/api/mt/files/{run}/"}},
             "parts": {"parent_task": str(parent.id), "parent_run": b["parent_run"], "part": b["part"],
-                      "label": b["label"], "provider": b["provider"], "variant": b["variant"], "child_run": run}},
+                      "label": b["label"], "provider": b["provider"], "variant": b["variant"], "child_run": run,
+                      "color": b["color"]}},
             ensure_ascii=False),
     }
     for k, v in values.items():
@@ -165,7 +172,7 @@ async def create_child(db: Any, task_model: Any, parent: Any, body: dict) -> tup
     parts = dict(parts)
     parts["children"] = list(parts.get("children") or []) + [{
         "task": child.id, "part": b["part"], "label": b["label"], "provider": b["provider"], "variant": b["variant"],
-        "run": run, "at": now.isoformat() + "Z"}]
+        "run": run, "color": b["color"], "at": now.isoformat() + "Z"}]
     if b["parent_run"]:
         parts.setdefault("run", b["parent_run"])
     ps["parts"] = parts
