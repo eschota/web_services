@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261017.1';
+const BUILD = 'tv3-20261019.2';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -12,7 +12,7 @@ const els = {
   stage: $('tv3-stage'), viewer: $('tv3-viewer'), card: $('tv3-card'), steps: $('tv3-steps'),
   bar: document.querySelector('#tv3-card .tv3-bar'), fill: $('tv3-fill'), line: $('tv3-line'),
   pct: $('tv3-pct'), chip: $('tv3-chip'), classic: $('tv3-classic'), share: $('tv3-share'),
-  full: $('tv3-full'), build: $('tv3-build'),
+  full: $('tv3-full'), build: $('tv3-build'), rerig: $('tv3-rerig'),
   status: $('tv3-status'), statusTitle: $('tv3-status-title'), statusSub: $('tv3-status-sub'),
   statusPct: $('tv3-status-pct'), statusFill: $('tv3-status-fill'), statusSteps: $('tv3-status-steps'),
 };
@@ -32,6 +32,9 @@ const FALLBACK = {
     taskv3_status_step: 'step {n} of {total}', taskv3_status_ready_sub: 'The rig is in the viewer, animations are playing',
     taskv3_status_review_sub: 'The rig is published; the quality check asks for a look', taskv3_status_fail_sub: 'Tap for the classic page and a restart',
     taskv3_status_details: 'tap for details',
+    taskv3_tool_rerig: 'Re-rig with the new pipeline', taskv3_rerig_queued: 'Re-rig queued',
+    taskv3_rerig_running: 'Re-rigging with the new pipeline…', taskv3_rerig_failed: 'Re-rig failed; tap to try again',
+    taskv3_rerig_done: 'Re-rigged with the current pipeline', taskv3_rerig_later: 'Re-rig unavailable right now',
     live_stage_cl_prepare: 'Preparing the model', live_stage_cl_openpose: 'Finding arms, legs and fingers',
     live_stage_cl_pose: 'Straightening the pose', live_stage_cl_rig: 'Rigging', live_stage_cl_retarget: 'Animations',
     live_stage_cl_export: 'Unity package', live_stage_cl_preview: 'Preview video', live_stage_cl_finish: 'Packing the results',
@@ -48,6 +51,9 @@ const FALLBACK = {
     taskv3_status_step: 'шаг {n} из {total}', taskv3_status_ready_sub: 'Риг во вьювере, анимации играют',
     taskv3_status_review_sub: 'Риг опубликован; проверка качества просит взглянуть', taskv3_status_fail_sub: 'Нажмите: классическая страница и перезапуск',
     taskv3_status_details: 'нажмите для подробностей',
+    taskv3_tool_rerig: 'Переригать новой версией пайплайна', taskv3_rerig_queued: 'Перериг в очереди',
+    taskv3_rerig_running: 'Переригаю новой версией пайплайна…', taskv3_rerig_failed: 'Перериг не удался; нажмите, чтобы повторить',
+    taskv3_rerig_done: 'Переригано текущей версией пайплайна', taskv3_rerig_later: 'Перериг сейчас недоступен',
     live_stage_cl_prepare: 'Готовлю модель', live_stage_cl_openpose: 'Ищу руки, ноги и пальцы',
     live_stage_cl_pose: 'Выравниваю позу', live_stage_cl_rig: 'Ригаю', live_stage_cl_retarget: 'Анимации',
     live_stage_cl_export: 'Пакет для Unity', live_stage_cl_preview: 'Превью-видео', live_stage_cl_finish: 'Упаковываю результат',
@@ -374,8 +380,55 @@ function render(state) {
   if (hasViewer && topStatus(state, status, finished, hasViewer, stageTitle, progress, waiting)) els.chip.hidden = true;
   else if (!hasViewer && els.status) els.status.hidden = true;
 
+  // Re-rig button (owner 2026-10-19): the pipeline on the server is newer than this rig (a version bump, or an
+  // install under the same version: the rig-path sha) -> the button; its own request's state while it runs.
+  const rerigBusy = syncRerig(state.rig_version, status);
+  if (rerigBusy) return 4000;
   if ((finished && rigged) || status === 'error') return 30000;
   return status === 'created' ? 4000 : 2500;
+}
+
+let rerigPressed = false;
+function syncRerig(rv, status) {
+  const b = els.rerig;
+  if (!b) return false;
+  const btn = (rv && rv.button) || {};
+  const st = String(btn.state || 'none');
+  const newer = !!(rv && rv.new_pipeline);
+  const busy = st === 'queued' || st === 'running';
+  const show = newer && status !== 'created' && status !== 'processing' && st !== 'forbidden' && st !== 'not_for_vehicles';
+  b.hidden = !(show || busy);
+  b.classList.toggle('busy', busy);
+  b.classList.toggle('fail', st === 'failed');
+  b.classList.toggle('ok', st === 'done' && !newer);
+  b.disabled = busy;
+  let title = tr('taskv3_tool_rerig');
+  if (st === 'queued') title = tr('taskv3_rerig_queued');
+  else if (st === 'running') title = tr('taskv3_rerig_running');
+  else if (st === 'failed') title = tr('taskv3_rerig_failed');
+  else if (st === 'deferred' || st === 'not_now') title = tr('taskv3_rerig_later');
+  else if (st === 'done' && !newer) title = tr('taskv3_rerig_done');
+  b.title = title;
+  b.setAttribute('aria-label', title);
+  if (rv && rv.current) b.dataset.version = `${rv.task || '-'}/${rv.task_sha || '-'} -> ${rv.current}/${rv.current_sha || '-'}`;
+  if (st === 'done' && rerigPressed && !newer) { rerigPressed = false; b.hidden = false; setTimeout(() => { if (lastState) render(lastState); }, 6000); }
+  return busy;
+}
+async function pressRerig() {
+  const b = els.rerig;
+  if (!b || b.disabled || !UUID.test(taskId)) return;
+  b.disabled = true;
+  b.classList.add('busy');
+  rerigPressed = true;
+  try {
+    const r = await fetch(`/api/task/${encodeURIComponent(taskId)}/rerig`, {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' },
+    });
+    const rv = await r.json().catch(() => null);
+    if (rv && lastState) { lastState.rig_version = rv; render(lastState); }
+  } catch (e) { b.disabled = false; b.classList.remove('busy'); }
+  clearTimeout(timer);
+  timer = setTimeout(poll, 1500);
 }
 
 // The V3 stage comes as keys (stage_key, sub_key, stage_seconds) and is translated here (i18n v3_stage_* /
@@ -483,6 +536,7 @@ function wireTools() {
       setTimeout(() => els.share.classList.remove('ok'), 1600);
     } catch (e) { /* the user closed the share sheet */ }
   });
+  if (els.rerig) els.rerig.addEventListener('click', pressRerig);
   els.full.addEventListener('click', () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else els.stage.requestFullscreen?.().catch(() => {});
