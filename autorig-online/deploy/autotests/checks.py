@@ -2007,6 +2007,12 @@ def hip_blend_check(ctx, frames=12, opts=None):
         return agg(v) if v else 0
     hip_r = (rep_.get("regions") or {}).get("hip") or rep_
     sh_r = (rep_.get("regions") or {}).get("shoulder") or {}
+    nk_r = (rep_.get("regions") or {}).get("neck") or {}
+
+    def neck(x, key):                                    # the neck band's pairs: Head / Neck and Neck / Spine2
+        v = [int(r.get(key) or 0) for r in x.get("worst_pairs") or []
+             if set(r.get("bones", [])) in ({"Head", "Neck"}, {"Neck", "Spine2"})]
+        return max(v) if v else 0
     b_, a_ = hip_r.get("before") or {}, hip_r.get("after") or {}
     sb_, sa_ = sh_r.get("before") or {}, sh_r.get("after") or {}
     return {"seconds": round(wall + wall2, 1), "hip_blend_s": rep_.get("seconds"),
@@ -2014,6 +2020,11 @@ def hip_blend_check(ctx, frames=12, opts=None):
             "shoulder_passes": len(sh_r.get("passes") or []),
             "shoulder_band_over_4x_before": sb_.get("edges_over_4x"), "shoulder_band_over_4x_after": sa_.get("edges_over_4x"),
             "shoulder_band_over_2x_after": sa_.get("edges_over_2x"),
+            "neck_kept_new": int(nk_r.get("kept") == "new"), "neck_passes": len(nk_r.get("passes") or []),
+            "neck_band_over_4x_before": (nk_r.get("before") or {}).get("edges_over_4x"),
+            "neck_band_over_4x_after": (nk_r.get("after") or {}).get("edges_over_4x"),
+            "head_neck_over_4x_max": max([neck(x, "edges_over_4x") for x in c.values()] or [0]),
+            "head_neck_over_2x_max": max([neck(x, "edges") for x in c.values()] or [0]),
             "arm_spine_over_4x_max": max([arm(x, "edges_over_4x", max) for x in c.values()] or [0]),
             "arm_spine_over_4x_sum_max": max([arm(x, "edges_over_4x", sum) for x in c.values()] or [0]),
             "arm_spine_over_2x_sum_max": max([arm(x, "edges", sum) for x in c.values()] or [0]),
