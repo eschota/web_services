@@ -98,6 +98,23 @@ const STEP_OF = {
   retarget: 4, qa: 5, qa_review: 5, publish: 6, complete: 6,
 };
 let statusHide = 0;
+// Tab opens the blueprint from the page as well (owner 2026-10-19: «редактор у нас на Tab, куда он исчез со страницы»): a click on
+// the presentation cards or the status bar moves the focus out of the viewer iframe, and Tab then walks the page's links.
+// Not while typing; the viewer's own handler takes the key when the iframe has the focus.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable)) return;
+  const fr = els.viewer;
+  if (!fr || a === fr) return;
+  let w, doc;
+  try { w = fr.contentWindow; doc = w && w.document; } catch (x) { return; }
+  if (!doc || !w.autorigBlueprint) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  try { const c = doc.getElementById('unity-canvas'); if (c) c.focus(); } catch (x) { /* ignore */ }
+  try { w.dispatchEvent(new KeyboardEvent('keydown', {key: 'Tab', code: 'Tab', bubbles: true, cancelable: true, shiftKey: e.shiftKey})); } catch (x) { /* ignore */ }
+}, true);
+
 let statusLingered = '';   // the finished banner (done / review) shows once per page load, then the viewer owns the screen
 let statusCompact = false;
 try { statusCompact = localStorage.getItem('tv3_status_compact') === '1'; } catch (e) { /* private mode */ }
