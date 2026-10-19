@@ -2257,6 +2257,27 @@
    "what": "the analyser's per-vertex labels on proj/model.glb (SAM + GroundingDINO)",
    "sha256": "37b73a9e1d87c7d153988a8d90e2feeebfa85bbcbb75729f1be6e8bab500e00b",
    "bytes": 272099
+  },
+  "3ed5cb3e.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3ed5cb3e8548d7287441/proj/model.glb",
+   "task": "718a99f3-7594-4464-8f10-8e20a5e3df26",
+   "what": "the Tripo Santa 718a99f3 (163k vertices, faces +x): a long kaftan whose skirt below 34 % H is one surface around each leg (split front and back), the hem between the pelvis and the thighs tore 12-17x in Jump / Waving1",
+   "sha256": "a08302fa46f94293b3789b19c90b5dc3ce0054b19c8e54bb081ef6e715de5db1",
+   "bytes": 18770096
+  },
+  "3ed5cb3e.parts_seg.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3ed5cb3e8548d7287441/analysis/parts_seg.json",
+   "task": "718a99f3-7594-4464-8f10-8e20a5e3df26",
+   "what": "the analyser's part records (cloak / skirt / coat / hand confidences)",
+   "sha256": "04912c816c7790d82c59551d68180d985bd68d34944746d03fcfb43016fcad04",
+   "bytes": 73403
+  },
+  "3ed5cb3e.parts_seg.npz": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3ed5cb3e8548d7287441/analysis/parts_seg.npz",
+   "task": "718a99f3-7594-4464-8f10-8e20a5e3df26",
+   "what": "the analyser's per-vertex labels on proj/model.glb (SAM + GroundingDINO)",
+   "sha256": "098e61553c26a7b1197c4845156decbc3362f325815f5498801bdcee1c47890c",
+   "bytes": 225416
   }
  },
  "profiles": {
@@ -21360,6 +21381,87 @@
       ]
      },
      "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "biped_coat_hem_santa",
+   "task": "718a99f3-7594-4464-8f10-8e20a5e3df26",
+   "cost": 3,
+   "owner": "Hem · biped",
+   "defect": "Hem · biped (lead brief docs/santa-coat-hem-brief-20261019.md, 718a99f3 run 3ed5cb3e8548d7287441, skin v11): the kaftan between the pelvis and the thighs tore in Jump / Waving1: Hips/RightUpLeg 2742 + Hips/LeftUpLeg 2627 edges over 2x (31 + 38 over 4x, worst 17x, y 28-50 % H), Waving1 Hips/LeftUpLeg 1691 (28 over 4x). Cause: below 34 % H the coat skirt is one surface around each leg (split front and back), so it is the thighs' own skin, and the skin solve left the Hips / UpLeg transition ~4.5 % H wide on 0.3 % H edges; the analyser's `skirt` entity was the belt band (34.8-58.4 % H, crotch 39.8) and `cloak` the coat's top (61-89 % H): their chains are rightly rejected by the gate (11->253, 404->692 edges over 4x). Fix: mt/hip_blend.py (the secondary rig's first step) re-solves the band's weights by least squares over the clips (each edge pulled to the edge turned by its bones' blended rotation, weight 1 / L^2).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "3ed5cb3e.model.glb",
+     "params": {
+      "words": "Santa Claus",
+      "body": "biped",
+      "forward_axis": "+x",
+      "analysis": {
+       "parts_seg.json": "3ed5cb3e.parts_seg.json",
+       "parts_seg.npz": "3ed5cb3e.parts_seg.npz"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "tier": "base"
+    },
+    {
+     "id": "hip_blend",
+     "kind": "hip_blend",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "owner": "Hem · biped",
+     "tier": "base",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "kept_new": [
+       "==",
+       1
+      ],
+      "hips_upleg_over_4x_max": [
+       "<=",
+       10
+      ],
+      "hips_upleg_over_2x_max": [
+       "<=",
+       1900
+      ],
+      "band_over_4x_after": [
+       "<=",
+       5
+      ],
+      "edges_over_4x_sum": [
+       "<=",
+       1160
+      ],
+      "band_over_2x_after": [
+       "<=",
+       700
+      ]
+     },
+     "note": "Hem · biped 2026-10-19, gate 20261019T155012Z on the candidate tree: hips_upleg_over_2x_max 1521, over_4x 0, band 2979 / 25 -> 537 / 0 edges over 2x / 4x, edges_over_4x_sum 1010 (12 frames a clip), hip_blend 20.5 s; before the fix the prod skin had Jump Hips/UpLeg 5369 / 69 (stand, 24 frames)"
     }
    ]
   }
