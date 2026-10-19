@@ -2106,6 +2106,19 @@ def proportion_guard(ctx, rig_json, moves_json, glb=None, analysis=None):
             "why": dropped}
 
 
+def arm_guide_check(ctx):
+    """Joints · biped (owner 2026-10-19, the Santa 9e7c06e8: «руки до ладоней не дошли … пайплайн не видит
+    собственного анализатора?»): the rig's arms against the analyser's parts (mt.arm_guide.measure): Arm under the
+    arm lobe's top, Neck - Arm, Hand -> wrist anchor / palm (% H), the guide's status."""
+    from mt import arm_guide as AG
+    m = AG.measure(ctx["run"])
+    out = {k: m.get(k) for k in ("arm_guide", "fit_source", "hand_to_wrist_max", "hand_to_palm_max",
+                                 "arm_under_top_min", "arm_under_top_max", "neck_minus_arm_min")}
+    out["guide_applied"] = int(m.get("arm_guide") == "applied")
+    out["sides"] = {s_: m.get(s_) for s_ in ("Left", "Right")}
+    return out
+
+
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
     a = check.get("params") or {}
@@ -2122,6 +2135,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         target = run / "rig" / "rigged.glb"
     elif inp:
         target = _input(inp)
+    if k == "arm_guide":                                           # Joints · biped (2026-10-19)
+        return arm_guide_check(ctx)
     if k == "proportion_guard":                                    # Joints · biped (2026-10-18)
         return proportion_guard(ctx, a["rig_json"], a["moves"], a.get("glb"), a.get("analysis"))
     if k == "voxel_legs":                                          # Legless rig · V3 (2026-10-17)
