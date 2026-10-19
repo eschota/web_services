@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261019.2';
+const BUILD = 'tv3-20261020.2';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -38,6 +38,9 @@ const FALLBACK = {
     live_stage_cl_prepare: 'Preparing the model', live_stage_cl_openpose: 'Finding arms, legs and fingers',
     live_stage_cl_pose: 'Straightening the pose', live_stage_cl_rig: 'Rigging', live_stage_cl_retarget: 'Animations',
     live_stage_cl_export: 'Unity package', live_stage_cl_preview: 'Preview video', live_stage_cl_finish: 'Packing the results',
+    viewer_canvas_tab_preview: 'Preview: the animated model · Tab', viewer_canvas_tab_blueprint: 'Blueprint: edit the skeleton · Tab',
+    viewer_canvas_tab_canvas: 'Canvas: the parts in colour, 3D by parts · Tab', viewer_parts_children: 'Parts as 3D models',
+    viewer_parts_of: 'Part «{part}» of', viewer_parts_open: 'Open the original task',
   },
   ru: {
     taskv3_queued: 'В очереди', taskv3_ahead: 'впереди {count}', taskv3_next: 'следующая',
@@ -57,6 +60,9 @@ const FALLBACK = {
     live_stage_cl_prepare: 'Готовлю модель', live_stage_cl_openpose: 'Ищу руки, ноги и пальцы',
     live_stage_cl_pose: 'Выравниваю позу', live_stage_cl_rig: 'Ригаю', live_stage_cl_retarget: 'Анимации',
     live_stage_cl_export: 'Пакет для Unity', live_stage_cl_preview: 'Превью-видео', live_stage_cl_finish: 'Упаковываю результат',
+    viewer_canvas_tab_preview: 'Превью: анимированная модель · Tab', viewer_canvas_tab_blueprint: 'Блюпринт: править скелет · Tab',
+    viewer_canvas_tab_canvas: 'Канвас: части в цвете, 3D по частям · Tab', viewer_parts_children: 'Части как 3D-модели',
+    viewer_parts_of: 'Часть «{part}» модели', viewer_parts_open: 'Открыть исходную задачу',
   },
 };
 
@@ -380,12 +386,178 @@ function render(state) {
   if (hasViewer && topStatus(state, status, finished, hasViewer, stageTitle, progress, waiting)) els.chip.hidden = true;
   else if (!hasViewer && els.status) els.status.hidden = true;
 
+  renderParts(state.parts);
+
   // Re-rig button (owner 2026-10-19): the pipeline on the server is newer than this rig (a version bump, or an
   // install under the same version: the rig-path sha) -> the button; its own request's state while it runs.
   const rerigBusy = syncRerig(state.rig_version, status);
   if (rerigBusy) return 4000;
   if ((finished && rigged) || status === 'error') return 30000;
   return status === 'created' ? 4000 : 2500;
+}
+
+// ---------------------------------------------------------------- the viewer's three modes on the page (owner 2026-10-20)
+// «режим Canvas … доступен только когда есть сегментация и так же на таб переключается и в UX»: the viewer (blueprint.js
+// mode3) owns the state and posts {type: 'autorig.v3.mode', mode, canvas_ok, rigged, modes}; this strip mirrors it in the
+// tool row and switches it with autorigBlueprint.setMode3(). Canvas shows only when the run has its parts.
+const MODE_ICON = {
+  preview: '<circle cx="8" cy="5" r="2.2"/><path d="M8 7.2v6.5M3.5 10.5h9M8 13.7l-3 6.3M8 13.7l3 6.3" opacity=".75"/><path d="M14.5 8.5v10l7.5-5z" fill="currentColor"/>',
+  blueprint: '<circle cx="9" cy="5" r="2.2"/><path d="M9 7.2v7M4 10.5h10M9 14.2l-3 6M9 14.2l3 6"/><path d="M14.5 17.5l5-5 2.2 2.2-5 5-3 .8z"/>',
+  canvas: '<path d="M5 4.5h7.5l-1 5.5H6z" opacity=".9"/><path d="M12.5 4.5H19l-.8 5.5h-6.7z" opacity=".55"/><path d="M6 11.5h5.6l-.6 8H6.8z" opacity=".55"/><path d="M12.4 11.5H18l-.8 8h-4.4z" opacity=".9"/>',
+};
+const modeEls = {};
+let modeState = null;
+function buildModes() {
+  const tools = document.getElementById('tv3-tools');
+  if (!tools || modeEls.box) return;
+  const box = document.createElement('span');
+  box.className = 'tv3-modes';
+  box.hidden = true;
+  box.setAttribute('role', 'tablist');
+  for (const m of ['blueprint', 'preview', 'canvas']) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tv3-tool tv3-mode';
+    b.dataset.mode = m;
+    b.setAttribute('role', 'tab');
+    b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${MODE_ICON[m]}</svg>`;
+    b.addEventListener('click', () => {
+      let bp = null;
+      try { bp = els.viewer.contentWindow && els.viewer.contentWindow.autorigBlueprint; } catch (e) { bp = null; }
+      if (bp && typeof bp.setMode3 === 'function') bp.setMode3(m);
+      try { els.viewer.focus(); } catch (e) { /* ignore */ }
+    });
+    box.appendChild(b);
+    modeEls[m] = b;
+  }
+  const anchor = els.build || null;
+  tools.insertBefore(box, anchor && anchor.parentNode === tools ? anchor : null);
+  modeEls.box = box;
+}
+function paintModes() {
+  buildModes();
+  if (!modeEls.box) return;
+  const d = modeState;
+  modeEls.box.hidden = !(d && d.rigged);
+  const canvasOn = !!(d && d.mode === 'canvas');
+  // the Canvas is the result: a stage replay still playing over it (task-v31-stages.js) is skipped, as its own ⏭ does
+  if (canvasOn && !els.stage.classList.contains('tv3-canvas')) {
+    const scrub = document.querySelector('.v31-scrub');
+    const skip = document.querySelector('.v31-skipbtn');
+    if (scrub && !scrub.hidden && skip) { try { skip.click(); } catch (e) { /* ignore */ } }
+  }
+  els.stage.classList.toggle('tv3-canvas', canvasOn);
+  if (!d) return;
+  for (const m of ['blueprint', 'preview', 'canvas']) {
+    const b = modeEls[m];
+    const on = d.mode === m;
+    b.hidden = m === 'canvas' ? !d.canvas_ok : false;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+    const t = tr(`viewer_canvas_tab_${m}`);
+    b.title = t;
+    b.setAttribute('aria-label', t);
+  }
+}
+addEventListener('message', (e) => {
+  if (e.origin !== location.origin || !e.data || e.data.type !== 'autorig.v3.mode') return;
+  try { if (e.source !== els.viewer.contentWindow) return; } catch (x) { return; }
+  modeState = { mode: e.data.mode, canvas_ok: !!e.data.canvas_ok, rigged: !!e.data.rigged };
+  paintModes();
+});
+els.viewer && els.viewer.addEventListener('load', () => { modeState = null; paintModes(); });
+// the message is sent on every change; this also catches a viewer that changed before the page listened
+setInterval(() => {
+  let bp = null;
+  try { bp = els.viewer.contentWindow && els.viewer.contentWindow.autorigBlueprint; } catch (e) { return; }
+  if (!bp || typeof bp.mode3 !== 'function') return;
+  const d = bp.mode3();
+  const next = { mode: d.mode, canvas_ok: !!d.canvas_ok, rigged: !!d.rigged };
+  if (!modeState || modeState.mode !== next.mode || modeState.canvas_ok !== next.canvas_ok || modeState.rigged !== next.rigged) { modeState = next; paintModes(); }
+}, 1500);
+
+// ---------------------------------------------------------------- parts as tasks (owner 2026-10-20 «каждая модель —
+// полноценный таск со окном навигации к оригиналу»): v3-view.parts {parent, children[]} -> a strip under the viewer:
+// a child task links back to its original and its sibling parts; an original lists its parts' tasks.
+const PART_EN = { hat: 'hat', beard: 'beard', hair: 'hair', coat: 'coat', cloak: 'cloak', skirt: 'skirt', trousers: 'trousers', boots: 'boots', mittens: 'mittens', belt: 'belt', head: 'head' };
+const PROV_ICON = { tripo: '🔺', hunyuan_cloud: '☁️', farm_full: '🏭', farm_fast: '⚡' };
+function partName(id, label) {
+  const k = String(id || '').replace(/^prop:.*/, 'prop');
+  const t = tr(`viewer_parts_label_${k}`);
+  if (t !== `viewer_parts_label_${k}`) return t;
+  return label || PART_EN[k] || String(id || '');
+}
+let partsKey = '';
+// a child task's siblings are its parent's children (GET /api/task/<parent>/v3-view, once per parent)
+const parentKids = {};
+function loadParentKids(ptask) {
+  if (parentKids[ptask]) return;
+  parentKids[ptask] = { kids: [], title: '' };
+  fetch(`/api/task/${encodeURIComponent(ptask)}/v3-view`, { credentials: 'same-origin', cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      if (!d) return;
+      parentKids[ptask] = { kids: (d.parts && Array.isArray(d.parts.children)) ? d.parts.children : [], title: String(d.title || '') };
+      partsKey = '';
+      if (lastState) renderParts(lastState.parts);
+    })
+    .catch(() => {});
+}
+function renderParts(parts) {
+  let strip = document.getElementById('tv3-parts');
+  // v3-view.parts (backend parts_build_routes.parts_view): {parent {parent_task, parent_run, part, label, provider}, children[]}
+  let parent = parts && parts.parent ? (typeof parts.parent === 'string' ? { task: parts.parent } : parts.parent) : null;
+  if (parent && !parent.task && parent.parent_task) parent = { task: parent.parent_task, run: parent.parent_run, part: parent.part, label: parent.label, title: parent.title };
+  if (parent && UUID.test(String(parent.task || ''))) {
+    loadParentKids(parent.task);
+    const pk = parentKids[parent.task];
+    if (pk && pk.title && !parent.title) parent = { ...parent, title: pk.title };
+  }
+  const kids = (parts && Array.isArray(parts.children) ? parts.children : []).filter((c) => c && UUID.test(String(c.task || '')));
+  const sibs = (parts && Array.isArray(parts.siblings) ? parts.siblings
+    : parent && parentKids[parent.task] ? parentKids[parent.task].kids : []).filter((c) => c && UUID.test(String(c.task || '')));
+  const show = !!(parent && UUID.test(String(parent.task || ''))) || kids.length > 0;
+  const key = show ? JSON.stringify([parent, kids, sibs, uiLang()]) : '';
+  if (key === partsKey) return;
+  partsKey = key;
+  if (!show) { if (strip) strip.hidden = true; return; }
+  if (!strip) {
+    strip = document.createElement('nav');
+    strip.id = 'tv3-parts';
+    strip.className = 'tv3-parts';
+    const vp = els.viewer.closest('.tv3-viewport') || els.viewer.parentNode;
+    vp.parentNode.insertBefore(strip, vp.nextSibling);
+  }
+  strip.hidden = false;
+  strip.innerHTML = '';
+  const chip = (task, text, color, cls) => {
+    const a = document.createElement('a');
+    a.className = `tv3-part${cls ? ` ${cls}` : ''}`;
+    a.href = `/task?id=${encodeURIComponent(task)}`;
+    const dot = document.createElement('i');
+    dot.style.background = /^#[0-9a-f]{3,8}$/i.test(String(color || '')) ? color : '#9fd2ff';
+    a.appendChild(dot);
+    a.appendChild(document.createTextNode(text));
+    return a;
+  };
+  if (parent) {
+    const me = parts.part || parent.part || '';
+    if (!parts.part_label && parent.label) parts = { ...parts, part_label: parent.label };
+    const lab = document.createElement('span');
+    lab.className = 'tv3-parts-lab';
+    lab.textContent = tr('viewer_parts_of', { part: partName(me, parts.part_label) });
+    strip.appendChild(lab);
+    const up = chip(parent.task, `↖ ${parent.title || parent.task.slice(0, 8)}`, '#9fd2ff', 'up');
+    up.title = tr('viewer_parts_open');
+    strip.appendChild(up);
+    for (const s of (sibs.length ? sibs : kids)) strip.appendChild(chip(s.task, `${partName(s.part, s.label)}${PROV_ICON[s.provider] ? ` ${PROV_ICON[s.provider]}` : ''}`, s.color, s.task === taskId ? 'me' : ''));
+  } else {
+    const lab = document.createElement('span');
+    lab.className = 'tv3-parts-lab';
+    lab.textContent = tr('viewer_parts_children');
+    strip.appendChild(lab);
+    for (const c of kids) strip.appendChild(chip(c.task, `${partName(c.part, c.label)}${PROV_ICON[c.provider] ? ` ${PROV_ICON[c.provider]}` : ''}`, c.color, ''));
+  }
 }
 
 let rerigPressed = false;
@@ -553,5 +725,5 @@ try {
   if (ready && typeof ready.then === 'function') ready.then(() => { if (lastState) render(lastState); }, () => {});
 } catch (e) { /* the header stays in its server language */ }
 addEventListener('languageChanged', () => { if (lastState) render(lastState); });
-window.autorigTaskPage = { build: BUILD, taskId, poll };
+window.autorigTaskPage = { build: BUILD, taskId, poll, renderParts, modes: () => modeState };
 poll();
