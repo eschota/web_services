@@ -116,8 +116,8 @@ document.addEventListener('keydown', function (e) {
 }, true);
 
 let statusLingered = '';   // the finished banner (done / review) shows once per page load, then the viewer owns the screen
-let statusCompact = false;
-try { statusCompact = localStorage.getItem('tv3_status_compact') === '1'; } catch (e) { /* private mode */ }
+let statusCompact = true;   // the step strip is closed by default (owner 2026-10-19: compact); a click opens it
+try { statusCompact = localStorage.getItem('tv3_status_compact') !== '0'; } catch (e) { /* private mode */ }
 function topStatus(state, status, finished, hasViewer, stageTitle, progress, waiting) {
   const el = els.status;
   if (!el) return false;
