@@ -1026,6 +1026,7 @@
   "v3_sub_detect": "识别图片",
   "v3_sub_waiting_3d_worker": "等待 3D 工作节点",
   "v3_sub_hunyuan": "Hunyuan 3D",
+  "v3_sub_tripo": "Tripo",
   "v3_sub_turntable": "转台展示",
   "v3_sub_ready": "模型就绪",
   "v3_sub_killed_retry": "失败后重试",

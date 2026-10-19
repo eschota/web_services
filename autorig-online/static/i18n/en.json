@@ -1253,6 +1253,7 @@
   "v3_sub_detect": "reading the picture",
   "v3_sub_waiting_3d_worker": "waiting for a 3D worker",
   "v3_sub_hunyuan": "Hunyuan 3D",
+  "v3_sub_tripo": "Tripo",
   "v3_sub_turntable": "turntable",
   "v3_sub_ready": "model ready",
   "v3_sub_killed_retry": "retry after a failure",

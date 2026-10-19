@@ -390,7 +390,7 @@ const V3_EN = {
 const V3_SUB_EN = {
   projections: 'projections', vision: 'Vision analysis', isolate: 'isolating the character', bones_and_weights: 'bones and weights', library_clips: 'animations',
   numeric: 'numeric check', scale: 'scale', detect: 'reading the picture', waiting_3d_worker: 'waiting for a 3D worker',
-  hunyuan: 'Hunyuan 3D', turntable: 'turntable', ready: 'model ready', killed_retry: 'retry after a failure',
+  hunyuan: 'Hunyuan 3D', tripo: 'Tripo', turntable: 'turntable', ready: 'model ready', killed_retry: 'retry after a failure',
 };
 function keyText(prefix, key, en) {
   const k = `${prefix}${key}`;

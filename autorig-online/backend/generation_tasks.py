@@ -327,14 +327,17 @@ async def _start_generation(db, task: Task) -> None:
         isolate_box=iso.get("box") if iso else None,
     )
     _start_detect(task)
-    # the fast tier (owner 2026-10-17: «чтобы 3д модель появлялась через 5 секунд»): Hunyuan3D-2mini beside the job
+    # the fast tier (owner 2026-10-17: «чтобы 3д модель появлялась через 5 секунд»): Hunyuan3D-2mini beside the job.
+    # Not beside a Tripo job (owner 2026-10-19: «мои модели делать Tripo платным, а не бесплатным, почему оно хуньянь
+    # опять запустило?»): AUTORIG_PICTURE_TRIPO_FAST=on brings the preview back for those tasks.
     try:
         import generation_fast
 
+        fast_wanted = provider != "tripo" or os.getenv("AUTORIG_PICTURE_TRIPO_FAST", "off").strip().lower() in ("on", "1", "true", "yes")
         fast_url = image_url
         if token and not cutout_url and not canon_in and picture_isolate.cutout_ready(token):
             fast_url = f"{APP_URL}/u/{token}/cutout.png"            # the cutout landed meanwhile (2026-10-19)
-        if generation_fast.enabled() and fast_url.startswith("https://"):
+        if fast_wanted and generation_fast.enabled() and fast_url.startswith("https://"):
             set_generation_meta(task, fast=await generation_fast.request(task, fast_url))
     except Exception as exc:                                    # noqa: BLE001 - the full job is already running
         print(f"[Generation] fast tier request failed for {task.id}: {type(exc).__name__}: {exc}")
@@ -426,6 +429,9 @@ def _v3_generation_stage(job: Dict[str, Any]) -> tuple:
     import math
 
     stage = str(job.get("stage") or "")
+    if stage == "hunyuan" and job.get("provider") == "tripo":   # the owner's tasks (generation_tripo)
+        started = float(job.get("stage_started_at") or 0) or time.time()
+        return "generation:tripo", .05 + .2 * (1 - math.exp(-(time.time() - started) / 90))
     if stage == "hunyuan":
         worker = str(job.get("hunyuan_worker") or "")
         if worker and job.get("hunyuan_task_id"):
