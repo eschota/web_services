@@ -21454,7 +21454,7 @@
       ],
       "edges_over_4x_sum": [
        "<=",
-       1160
+       300
       ],
       "band_over_2x_after": [
        "<=",
@@ -21462,6 +21462,87 @@
       ]
      },
      "note": "Hem · biped 2026-10-19, gate 20261019T155012Z on the candidate tree: hips_upleg_over_2x_max 1521, over_4x 0, band 2979 / 25 -> 537 / 0 edges over 2x / 4x, edges_over_4x_sum 1010 (12 frames a clip), hip_blend 20.5 s; before the fix the prod skin had Jump Hips/UpLeg 5369 / 69 (stand, 24 frames)"
+    }
+   ]
+  },
+  {
+   "id": "biped_shoulder_seam_santa",
+   "task": "718a99f3-7594-4464-8f10-8e20a5e3df26",
+   "cost": 3,
+   "owner": "Hem · biped",
+   "defect": "Hem · biped (lead brief docs/santa-shoulder-seam-brief-20261019.md, 718a99f3 run 3ed5cb3e8548d7287441, skin v12): the kaftan's back of the shoulder and armpit tore when an arm is raised: Waving1 Arm/Spine1,2 edges over 4x 82 / 84 / 91 / 59 per pair (316 together, worst 17-41x), Jump 242, Punching 206, at y 71-80 % H, ~7 % H behind and 5.5 % H below the Arm head, 0.9 % H from the release cut's lids. Causes: (1) mt/hip_blend.py welded vertex copies by position only, so the release cut's two rims (sleeve | coat, same position, other weights) became one vertex and the solve made the band worse (695 -> 2740 band edges over 4x); now it welds like the stand (position and weights). (2) The Spine2 / Spine1 / Arm band was never re-solved. Fix: the shoulder band of mt/hip_blend.py (the same least-squares solve over the clips as the hip band, Spine2 root, Arm / Shoulder free on their side, Spine1 / Neck where they had weight, up to 6 passes each seeded by the previous one, the release lids following their rims). The viewer is three.js linear blend skinning, so the stand's LBS is what the client sees.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "3ed5cb3e.model.glb",
+     "params": {
+      "words": "Santa Claus",
+      "body": "biped",
+      "forward_axis": "+x",
+      "analysis": {
+       "parts_seg.json": "3ed5cb3e.parts_seg.json",
+       "parts_seg.npz": "3ed5cb3e.parts_seg.npz"
+      }
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "tier": "base"
+    },
+    {
+     "id": "shoulder_blend",
+     "kind": "hip_blend",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "owner": "Hem · biped",
+     "tier": "base",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "shoulder_kept_new": [
+       "==",
+       1
+      ],
+      "arm_spine_over_4x_max": [
+       "<=",
+       30
+      ],
+      "arm_spine_over_4x_sum_max": [
+       "<=",
+       50
+      ],
+      "shoulder_band_over_4x_after": [
+       "<=",
+       50
+      ],
+      "volume_dev_max_pct": [
+       "<=",
+       6.5
+      ],
+      "hips_upleg_over_4x_max": [
+       "<=",
+       10
+      ]
+     },
+     "note": "Hem · biped 2026-10-19, gate 20261019T182256Z on the candidate tree (12 frames a clip): shoulder band 280 -> 34 edges over 4x in 6 passes, Arm/Spine1,2 over 4x: the largest pair 18, the four pairs together 33 (max over the clips), volume (capped, the stand rule since this change) 5.45 %, hip band unchanged (1521 / 0), edges_over_4x_sum 1010 -> 194; hip_blend 84 s (hip 19 s + shoulder 6 passes). Before (prod skin v12, stand 24 frames): Waving1 Arm/Spine1,2 over 4x 82 / 84 / 91 / 59 (316), Jump 242, Punching 206"
     }
    ]
   }

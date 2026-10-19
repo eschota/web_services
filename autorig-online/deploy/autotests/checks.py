@@ -1971,18 +1971,21 @@ def rig_contract_check(ctx, frames=12):
             "twist_joints": len((rig.get("twist") or {}).get("joints") or [])}
 
 
-def hip_blend_check(ctx, frames=12):
-    """Hem · biped (2026-10-19, Santa 718a99f3, docs/categories/biped/handoff.md «Hip blend band»): mt/hip_blend.py
-    (the secondary rig's first step) on the case's rig and its clips, then the rig contract on the result: the
-    Hips / UpLeg pairs per clip (edges over 2x / 4x at the clip's worst frame, both thighs summed, the max over the
-    clips), the totals, the volume; plus the band's own numbers before / after on the solve's frames."""
+def hip_blend_check(ctx, frames=12, opts=None):
+    """Hem · biped (2026-10-19, Santa 718a99f3, docs/categories/biped/handoff.md «Hip blend band» / «Shoulder blend
+    band»): mt/hip_blend.py (the secondary rig's first step: the hip band, then the shoulder band) on the case's rig
+    and its clips, then the rig contract on the result: the Hips / UpLeg pairs per clip (edges over 2x / 4x at the
+    clip's worst frame, both thighs summed, the max over the clips), the Arm / Spine1,2 pairs (the largest single pair
+    and the four pairs summed, the max over the clips), the totals, the volume; plus each band's own numbers before /
+    after on the solve's frames. opts: {name: value} passed as --opt to mt.hip_blend."""
     import importlib.util as _ilu
     if _ilu.find_spec("mt.hip_blend") is None:
         return {"pending": True, "why": "mt/hip_blend.py is not in the tree under test"}
     run = ctx["run"]
     work = pathlib.Path(ctx["work"])
     glb = work / "hip_blend.glb"
-    p_, wall = _child([PY, "-P", "-m", "mt.hip_blend", str(run / "rig" / "rigged.glb"), "--out", str(glb)], timeout=400)
+    p_, wall = _child([PY, "-P", "-m", "mt.hip_blend", str(run / "rig" / "rigged.glb"), "--out", str(glb)]
+                      + [x for k, v in (opts or {}).items() for x in ("--opt", f"{k}={v}")], timeout=600)
     if p_.returncode != 0 or not glb.is_file():
         raise RuntimeError(f"hip_blend exit {p_.returncode}: {(p_.stderr or p_.stdout)[-600:]}")
     rep_ = json.loads(p_.stdout[p_.stdout.index("{"):])
@@ -1997,8 +2000,23 @@ def hip_blend_check(ctx, frames=12):
     def hu(x, key):
         return sum(int(r.get(key) or 0) for r in x.get("worst_pairs") or []
                    if "Hips" in r.get("bones", []) and any(b in ("LeftUpLeg", "RightUpLeg") for b in r.get("bones", [])))
-    b_, a_ = rep_.get("before") or {}, rep_.get("after") or {}
-    return {"seconds": round(wall + wall2, 1), "hip_blend_s": rep_.get("seconds"), "kept_new": int(rep_.get("kept") == "new"),
+    def arm(x, key, agg):
+        v = [int(r.get(key) or 0) for r in x.get("worst_pairs") or []
+             if any(b in ("LeftArm", "RightArm", "LeftArmHalf", "RightArmHalf") for b in r.get("bones", []))
+             and any(b in ("Spine1", "Spine2") for b in r.get("bones", []))]
+        return agg(v) if v else 0
+    hip_r = (rep_.get("regions") or {}).get("hip") or rep_
+    sh_r = (rep_.get("regions") or {}).get("shoulder") or {}
+    b_, a_ = hip_r.get("before") or {}, hip_r.get("after") or {}
+    sb_, sa_ = sh_r.get("before") or {}, sh_r.get("after") or {}
+    return {"seconds": round(wall + wall2, 1), "hip_blend_s": rep_.get("seconds"),
+            "kept_new": int(hip_r.get("kept") == "new"), "shoulder_kept_new": int(sh_r.get("kept") == "new"),
+            "shoulder_passes": len(sh_r.get("passes") or []),
+            "shoulder_band_over_4x_before": sb_.get("edges_over_4x"), "shoulder_band_over_4x_after": sa_.get("edges_over_4x"),
+            "shoulder_band_over_2x_after": sa_.get("edges_over_2x"),
+            "arm_spine_over_4x_max": max([arm(x, "edges_over_4x", max) for x in c.values()] or [0]),
+            "arm_spine_over_4x_sum_max": max([arm(x, "edges_over_4x", sum) for x in c.values()] or [0]),
+            "arm_spine_over_2x_sum_max": max([arm(x, "edges", sum) for x in c.values()] or [0]),
             "band_vertices": (rep_.get("band") or {}).get("free_vertices"),
             "band_over_2x_before": b_.get("edges_over_2x"), "band_over_2x_after": a_.get("edges_over_2x"),
             "band_over_4x_before": b_.get("edges_over_4x"), "band_over_4x_after": a_.get("edges_over_4x"),
@@ -2008,6 +2026,7 @@ def hip_blend_check(ctx, frames=12):
             "edges_over_2x_sum": sum(int(x.get("edges_over_2x") or 0) for x in c.values()),
             "edges_over_4x_sum": sum(int(x.get("edges_over_4x") or 0) for x in c.values()),
             "volume_dev_max_pct": max([abs(float(x.get("volume_dev_pct") or 0)) for x in c.values()] or [0]),
+            "volume_rule": (json.loads(out.read_text()).get("surface") or {}).get("volume_rule"),
             "clips": len(c)}
 
 
@@ -2301,7 +2320,7 @@ def run_check(check: dict, ctx: dict) -> dict:
     if k == "rig_contract":                               # Rig contract V3.1 (2026-10-17)
         return rig_contract_check(ctx, int(a.get("frames", 12)))
     if k == "hip_blend":                                  # Hem · biped (2026-10-19)
-        return hip_blend_check(ctx, int(a.get("frames", 12)))
+        return hip_blend_check(ctx, int(a.get("frames", 12)), a.get("opts"))
     if k == "detach":                                     # Rig fixes · V3 (2026-10-14): mt/detach_check.py on
         from mt import detach_check as _dc                 # the rig: weld-split holes / torn pieces in the clips
         _r = _dc.check(pathlib.Path(target).read_bytes(), frames=int(a.get("frames", 12)))
