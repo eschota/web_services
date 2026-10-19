@@ -1277,6 +1277,15 @@ obot_\HumanoidRobotsPack`, HR-01 first,
 * **Heavy background work runs on the farm boxes, not on the VPS.** That
   covers the census, the extended autotests, gallery clips, autotex, bulk
   Vision and backfill.
+* **An agent's own runs on the VPS go one at a time, memory-capped, at low
+  load** (lead rule after the incident of 2026-10-19 15:32–15:45 UTC: two
+  parallel «secondary rig + stand» runs on 165k / 229k-vertex meshes beside
+  the autopost ffmpeg, the joint judge and rerig-open drove the load to 405,
+  the site answered 000 for 13 minutes and the kernel OOM-killed at random):
+  `sudo systemd-run --scope -p MemoryMax=5G -p CPUWeight=20 --uid=autorig
+  --gid=autorig nice -n 19 …`, never two builds or stands in parallel, start
+  only while the 1-minute load is under 24, and a release gate (`mt-deploy`,
+  ~30 min, load 80–140 by itself) is never run beside such a run.
 * On the VPS such work runs only while the load is low, at nice 19, and it
   stops at once when customer tasks wait.
 * **The incident behind this rule (2026-10-11 02:34 UTC).**
