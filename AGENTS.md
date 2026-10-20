@@ -437,15 +437,18 @@ Owner rule, 2026-10-10:
   `--tier extended` everything; the nightly timer still runs extended. A new
   category gets its one smoke case in the same change that adds the category.
 
-* **One full gate per three hours** (owner, 2026-10-20: «делай гейт тесты не чаще
-  раза в 3 часа»). A full `mt-deploy` / `gate` run takes about 41 minutes on the
-  VPS and, beside customer MT runs, has twice taken the box to load 300+ with
-  the swap full (2026-10-20 10:44 and 11:20 UTC). So:
+* **Gates are serialised; the three-hour interval is lifted** (owner, 2026-10-20
+  14:10 UTC: «делай гейт тесты не чаще раза в 3 часа»; owner, 2026-10-20 18:05 UTC:
+  «гейт раз в 3 часа был временной мерой. сейчас ничего не мешает, доводи пайплайн
+  до стабильной версии и делай гейт»). A full `mt-deploy` / `gate` run takes about
+  41 minutes on the VPS and, beside customer MT runs, has twice taken the box to
+  load 300+ with the swap full (2026-10-20 10:44 and 11:20 UTC). So:
   * every gate is launched only through
     `sudo /srv/autorig/autotests/gate_queue.sh <agent> -- <mt-deploy …>`
     (Git: `deploy/autotests/gate_queue.sh`): one flock, the 1-minute load under
-    12, no other runner, and at least 3 hours after the previous launch
-    (`GATE_MIN_INTERVAL`); it logs to `/var/log/autorig-gate-queue.log`;
+    12, no other runner; `GATE_MIN_INTERVAL` is 0 by default since 18:05 UTC
+    (set it to bring the interval back); it logs to
+    `/var/log/autorig-gate-queue.log`;
   * agents batch their changes: one combined `mt-deploy` with every agent's
     `--mt-file` / `--mt-patch` per slot, staged by the lead; between slots a
     change is verified by hand on a staged tree (`checks.py --case`, the

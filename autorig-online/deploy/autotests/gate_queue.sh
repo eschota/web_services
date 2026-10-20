@@ -8,7 +8,7 @@
 set -u
 NAME=${1:-anon}; shift; [ "${1:-}" = "--" ] && shift
 MAXLOAD=${GATE_MAX_LOAD:-12}
-MININT=${GATE_MIN_INTERVAL:-10800}   # owner 2026-10-20 «делай гейт тесты не чаще раза в 3 часа»: one full gate per 3 h, batch the changes
+MININT=${GATE_MIN_INTERVAL:-0}   # owner 2026-10-20 18:05 UTC: the «one gate per 3 h» interval was a temporary measure and is lifted; set GATE_MIN_INTERVAL to bring it back
 QLOG=/var/log/autorig-gate-queue.log
 LOCK=/run/lock/autorig-gate-queue.lock   # NOT autotests.py's own /run/lock/autorig-gate.lock: sudo drops the env, so the runner still takes its own lock
 RUNNER='python3 (-P )?/srv/autorig/autotests/autotests.py (mt-deploy|gate)'
