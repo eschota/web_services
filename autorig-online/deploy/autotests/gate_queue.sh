@@ -8,7 +8,7 @@
 set -u
 NAME=${1:-anon}; shift; [ "${1:-}" = "--" ] && shift
 MAXLOAD=${GATE_MAX_LOAD:-12}
-LOCK=/run/lock/autorig-gate.lock
+LOCK=/run/lock/autorig-gate-queue.lock   # NOT autotests.py's own /run/lock/autorig-gate.lock: sudo drops the env, so the runner still takes its own lock
 RUNNER='python3 (-P )?/srv/autorig/autotests/autotests.py (mt-deploy|gate)'
 exec 9>"$LOCK"
 echo "$(date -u +%FT%TZ) $NAME: waiting for the gate lock" >&2
