@@ -6202,7 +6202,9 @@
      }
     }
    ],
-   "note": "sides LL: the two gloves are the same mesh turned 180 degrees about y (congruence 'rotation'), both read as left hands from the thumb against the palm (fingers lean and the thumb lies on the palm side). Flip the rule only after the owner's verdict."
+   "note": "sides LL: the two gloves are the same mesh turned 180 degrees about y (congruence 'rotation'), both read as left hands from the thumb against the palm (fingers lean and the thumb lies on the palm side). Flip the rule only after the owner's verdict.",
+   "smoke": true,
+   "smoke_category": "hands"
   },
   {
    "id": "hands_synthetic_left",
@@ -7597,7 +7599,9 @@
       "status": "failed"
      }
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "heavy"
   },
   {
    "id": "chibi_control",
@@ -7706,7 +7710,9 @@
       "status": "failed"
      }
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "chibi"
   },
   {
    "id": "untextured_obj",
@@ -8349,7 +8355,9 @@
       "status": "failed"
      }
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "serpent"
   },
   {
    "id": "serpent_worm_noword",
@@ -9971,7 +9979,9 @@
       "status": "failed"
      }
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "bird"
   },
   {
    "id": "cyborg_one_arm",
@@ -12573,7 +12583,9 @@
      }
     }
    ],
-   "note": "control first (checks share one run dir). Local 2026-10-13 (p6 tree): 35 bones, numeric QA 5/8 (Idle, Walking, Waving1, Hip Hop, Punching pass; Running / Jump / Look Around 'extent' on the head|spine seam: the Head joint of a crouched trunk), limb_collision high (the hands beside the knees). Known gaps: the right arm fused with its knee in the voxel solid (fastrig's fit stands); the Head / Neck joints of a tilted trunk; a monster gait of its own (the crouch rides the Mixamo clips bind-relative)."
+   "note": "control first (checks share one run dir). Local 2026-10-13 (p6 tree): 35 bones, numeric QA 5/8 (Idle, Walking, Waving1, Hip Hop, Punching pass; Running / Jump / Look Around 'extent' on the head|spine seam: the Head joint of a crouched trunk), limb_collision high (the hands beside the knees). Known gaps: the right arm fused with its knee in the voxel solid (fastrig's fit stands); the Head / Neck joints of a tilted trunk; a monster gait of its own (the crouch rides the Mixamo clips bind-relative).",
+   "smoke": true,
+   "smoke_category": "monster"
   },
   {
    "id": "ram_hind_mirror",
@@ -14311,7 +14323,9 @@
      }
     }
    ],
-   "note": "prod 2026-10-13: 10/10 (Rear 117 edges, passing)"
+   "note": "prod 2026-10-13: 10/10 (Rear 117 edges, passing)",
+   "smoke": true,
+   "smoke_category": "equine"
   },
   {
    "id": "equine_sitting_horse",
@@ -15555,7 +15569,9 @@
      },
      "owner": "Anim stand · V3"
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "infra"
   },
   {
    "id": "joint_reweld_holes",
@@ -17226,7 +17242,9 @@
       }
      }
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "anthro"
   },
   {
    "id": "anthro_rabbit_ears",
@@ -17511,7 +17529,9 @@
       "clip": "Running"
      }
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "winged"
   },
   {
    "id": "winged_blocky_figure",
@@ -18424,7 +18444,9 @@
      "note": "Vision's words say biped: the voxels' strong trail still dispatches to the legless rig (37 MB model, extended tier)"
     }
    ],
-   "owner": "Legless rig · V3"
+   "owner": "Legless rig · V3",
+   "smoke": true,
+   "smoke_category": "legless"
   },
   {
    "id": "backend_task_privacy",
@@ -19117,7 +19139,9 @@
      },
      "note": "the conveyor's arm clearance after the retarget (what the customer gets): before high/high (Jump, the lower pair 10.4 / 14.3 % H deep) -> none/none, abduction 13 / 12 deg. limb_collision reads one arm chain per side (the last matching: {Side}Arm2); the primaries are not measured on a four-armed rig (open, owner Limb collision · V3)"
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "multilimb"
   },
   {
    "id": "anthro_fox_no_table",
@@ -20220,7 +20244,9 @@
      },
      "owner": "Multileg · V3"
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "multileg"
   },
   {
    "id": "multileg_spider_stylized",
@@ -20979,7 +21005,9 @@
      "owner": "Vehicles · V3",
      "note": "rigid parts: the body and each wheel one bone, no edge stretches"
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "vehicle"
   },
   {
    "id": "vehicle_ferrari_scene",
@@ -21571,7 +21599,9 @@
      },
      "note": "Hem · biped 2026-10-19, gate 20261019T155012Z on the candidate tree: hips_upleg_over_2x_max 1521, over_4x 0, band 2979 / 25 -> 537 / 0 edges over 2x / 4x, edges_over_4x_sum 1010 (12 frames a clip), hip_blend 20.5 s; before the fix the prod skin had Jump Hips/UpLeg 5369 / 69 (stand, 24 frames)"
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "biped"
   },
   {
    "id": "biped_shoulder_seam_santa",
@@ -22108,7 +22138,9 @@
       }
      }
     }
-   ]
+   ],
+   "smoke": true,
+   "smoke_category": "quadruped"
   },
   {
    "id": "quadruped_walk_dog_video",
@@ -22815,5 +22847,6 @@
     }
    ]
   }
- ]
+ ],
+ "smoke_doc": "tier smoke (owner 2026-10-20): the cases flagged smoke are the one model per rig category a release gate runs; the rest run nightly (extended) and on demand by --case"
 }
