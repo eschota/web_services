@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261020.2';
+const BUILD = 'tv3-20261020.3';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -407,6 +407,27 @@ const MODE_ICON = {
 };
 const modeEls = {};
 let modeState = null;
+let pageAnims = [];
+let pageAnimTimer = 0;
+function pageAnimHold(on) {
+  if (!on) {
+    clearInterval(pageAnimTimer); pageAnimTimer = 0;
+    for (const a of pageAnims) { try { a.play(); } catch (e) { /* ignore */ } }
+    pageAnims = [];
+    return;
+  }
+  const hold = () => {
+    try {
+      for (const a of document.getAnimations()) {
+        try {
+          if (a.playState === 'running' && a.effect && a.effect.getTiming().iterations === Infinity) { a.pause(); pageAnims.push(a); }
+        } catch (e) { /* ignore */ }
+      }
+    } catch (e) { /* ignore */ }
+  };
+  hold();
+  if (!pageAnimTimer) pageAnimTimer = setInterval(hold, 1000);
+}
 function buildModes() {
   const tools = document.getElementById('tv3-tools');
   if (!tools || modeEls.box) return;
@@ -447,6 +468,7 @@ function paintModes() {
     if (scrub && !scrub.hidden && skip) { try { skip.click(); } catch (e) { /* ignore */ } }
   }
   els.stage.classList.toggle('tv3-canvas', canvasOn);
+  pageAnimHold(canvasOn);
   if (!d) return;
   for (const m of ['blueprint', 'preview', 'canvas']) {
     const b = modeEls[m];
