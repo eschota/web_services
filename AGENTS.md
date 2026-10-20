@@ -414,6 +414,17 @@ Owner rule, 2026-10-10:
   An agent that finds a new defect adds its model to the corpus in the same
   change.
 
+* **A gate runs one model per category, not the corpus** (owner, 2026-10-20:
+  «выбери в каждой категории по 1 объекту, не надо каждый гейт делать все 111
+  тестовых моделей!!!!!!!!»). `autotests.py mt-deploy` defaults to
+  `--tier smoke`: the cases flagged `smoke` in `corpus.json` (one per rig
+  category: biped Santa, quadruped, equine, bird, multileg, legless, serpent,
+  monster, vehicle, hands, multilimb, anthro, winged, chibi, heavy, stand
+  smoke: 16 cases, 51 checks) plus the change's own cases given as
+  `--case <id>` (repeatable). `--tier base` is every base check (538) and
+  `--tier extended` everything; the nightly timer still runs extended. A new
+  category gets its one smoke case in the same change that adds the category.
+
 * **One full gate per three hours** (owner, 2026-10-20: «делай гейт тесты не чаще
   раза в 3 часа»). A full `mt-deploy` / `gate` run takes about 41 minutes on the
   VPS and, beside customer MT runs, has twice taken the box to load 300+ with
