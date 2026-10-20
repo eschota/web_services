@@ -921,6 +921,36 @@ def biped_tail(ctx, clips=("Idle", "Walking", "Running")):
                       for c, r in (m.get("clips") or {}).items()}, "metrics_why": m.get("why")}
 
 
+def gait_qa_check(ctx, clips=(("Walk", "walk"), ("Trot", "trot"))):
+    """Quadruped-Walk · V3 (owner 2026-10-20, task fcd100cd «кривая Walk у всех животных этого типа»): the rig's own
+    Walk / Trot (as rig_first baked them into rigged.glb) pass mt.gait_qa: lateral-sequence walk, diagonal trot, every
+    foot on one belt (slip % H per cycle), no sole under the ground, every foot lifts; plus the rig.json gait_qa record
+    (which source won, the seconds)."""
+    try:
+        from mt import gait_qa as _GQ
+        from mt import animpick as _AP
+    except ImportError:
+        return {"pending": True, "why": "mt/gait_qa.py is not in the tree under test"}
+    run = ctx["run"]
+    rig = _AP.Rig(run)
+    out = {"recorded": 1 if (rig.doc.get("gait_qa") or {}).get("Walk") else 0,
+           "stage_seconds": (rig.doc.get("gait_qa") or {}).get("seconds")}
+    for name, gait in clips:
+        c = _GQ.glb_clip(rig, name)
+        if c is None:
+            out[f"{gait}_present"] = 0
+            continue
+        q = _GQ.clip_qa(rig, c, gait)
+        out.update({f"{gait}_present": 1, f"{gait}_pass": 1 if q.get("pass") else 0,
+                    f"{gait}_sequence": q.get("sequence"), f"{gait}_lateral": 1 if q.get("sequence") == "lateral" else 0,
+                    f"{gait}_pair_sync": q.get("pair_sync"), f"{gait}_slip_max_pct_H": q.get("slip_max_pct_H"),
+                    f"{gait}_penetration_max_pct_H": q.get("penetration_max_pct_H"),
+                    f"{gait}_clearance_min_pct_H": q.get("clearance_min_pct_H"),
+                    f"{gait}_stride_ratio": q.get("stride_ratio"), f"{gait}_fails": q.get("fails"),
+                    f"{gait}_source": ((rig.doc.get("gait_qa") or {}).get(name) or {}).get("source")})
+    return out
+
+
 def anthro_words(cases):
     """Anthro rig · V3: the words rule on a list of Vision `what` strings: {what: expected} -> mismatches (0 = all right)."""
     try:
@@ -1650,6 +1680,41 @@ def _wing_arm_metrics(run):
         return {"arm_joints_on_wing": None, "wing_arm_error": f"{type(exc).__name__}: {exc}"[:120]}
 
 
+def bird_flap(ctx):
+    """Bird wings · V3 (owner 2026-10-20, 736fa70b «птицы должны махать крыльями»): the bird engine's record of this run
+    (rig.json bird, mt/bird.py): the wings found and their chains, the flight clips the rig carries, the wingbeat's own
+    QA (Fly, else the ground bird's Flap burst: wing stretch p99.9 / edges over 4x, wing in body, left-right symmetry,
+    frame step) and the amplitude the stretch fit kept (a timid flap fails here, not only a torn one)."""
+    if not (MT_TREE / "mt" / "bird.py").is_file():     # the bird engine is not in the tree under test
+        return {"pending": True, "why": "mt/bird.py is not in the tree under test"}
+    rig = json.loads((ctx["run"] / "rig" / "rig.json").read_text())
+    b = rig.get("bird") or {}
+    cr = rig.get("creature") or {}
+    wings = [x for x in cr.get("limbs") or [] if x.get("kind") == "wing"]
+    clips = set(rig.get("clips") or [])
+    flight = [n for n in ("Fly", "Flap", "Glide", "Takeoff", "Land") if n in clips]
+    q = (b.get("qa") or {})
+    main = q.get("Fly") or q.get("Flap") or {}
+    reg = (main.get("regions") or {}).get("wing") or {}
+    fit = b.get("fit") or {}
+    out = {"body_plan": rig.get("body_plan"), "bird_engine": int(bool(b.get("schema"))), "mode": b.get("mode"),
+           "wings": len(wings), "wing_bones_min": min([len(x.get("bones") or []) for x in wings] or [0]),
+           "flight_clips": len(flight), "fly_clip": int("Fly" in clips), "flap_clip": int("Flap" in clips),
+           "walk_clip": int("Walk" in clips), "peck_clip": int("Peck" in clips),
+           "wing_scale": float(fit.get("wing_scale") or 0.0),
+           "elevation_range_deg": round(float(fit.get("up_deg") or 0) + float(fit.get("down_deg") or 0), 1)
+           if b.get("mode") != "folded" else round(float(fit.get("folded_deg") or 0), 1),
+           "wing_p999": float(reg.get("p999") or 0.0), "wing_over4": int(reg.get("edges_over_4x") or 0),
+           "wing_over_limit": int(reg.get("edges_over_2x") or 0),
+           "wing_in_body_pct": float(main.get("wing_in_body_pct") or 0.0),
+           "symmetry_pct_H": float(main.get("symmetry_pct_H") or 0.0), "step_max_deg": float(main.get("step_max_deg") or 0.0),
+           "beat_hz": float(main.get("beat_hz") or 0.0), "main_clip_pass": int(main.get("verdict") == "pass"),
+           "clips_failing": sorted(k for k, v in q.items() if v.get("verdict") != "pass"),
+           "bird_seconds": float((rig.get("timings_s") or {}).get("bird") or 0.0),
+           "mirror_iou": b.get("mirror_iou"), "wing_vertices": b.get("wing_vertices")}
+    return out
+
+
 def rig_upright(ctx):
     """Rig path V3 (owner bug f7e2a3f1, a pre-rigged bear lying face down): the rig stands up. Head above the hips,
     the feet below them (by at least 20 % of the height for a biped), and the rig's height is the drawn model's height
@@ -1674,6 +1739,22 @@ def rig_upright(ctx):
     out["forward_record_match"] = int(fw is None or fw == rig.get("forward_axis"))
     bake = ctx["run"] / "proj" / "skin_bake.json"
     out["skin_baked"] = int(bool(json.loads(bake.read_text()).get("applied"))) if bake.is_file() else 0
+    # Facing judge · V3 (owner 2026-10-20, 06c7b3af «персонаж идет спиной вперед»): the judge's verdict, and the feet
+    # forward: both ToeBase joints ahead of their Foot along the rig's front, and the mesh's own toes (the judge's
+    # area-weighted toe / heel reach) pointing the same way
+    fac = ctx["run"] / "proj" / "facing.json"
+    fd = json.loads(fac.read_text()) if fac.is_file() else {}
+    out["facing_axis"] = fd.get("axis")
+    out["facing_turned"] = int(bool(fd.get("turn")))
+    out["facing_seconds"] = fd.get("seconds")
+    feet_w = (fd.get("witnesses") or {}).get("feet") or {}
+    out["mesh_toes_forward"] = (int(feet_w.get("toward") == rig.get("forward_axis")) if feet_w.get("toward") else -1)
+    fwd_v = {"+x": (1, 0, 0), "-x": (-1, 0, 0), "+z": (0, 0, 1), "-z": (0, 0, -1)}.get(rig.get("forward_axis"))
+    if fwd_v and all(n in heads for n in ("LeftFoot", "LeftToeBase", "RightFoot", "RightToeBase")):
+        reach = [sum((heads[s_ + "ToeBase"][i] - heads[s_ + "Foot"][i]) * fwd_v[i] for i in range(3))
+                 for s_ in ("Left", "Right")]
+        out["toes_forward"] = int(all(r > 0 for r in reach))
+        out["toe_reach_pct_H"] = round(min(reach) / H * 100, 2)
     return out
 
 
@@ -2193,6 +2274,8 @@ def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
     a = check.get("params") or {}
     inp = check.get("input")
+    if k == "pending_detector":                            # measures nothing, so it never needs its step (2026-10-20)
+        return {"pending": True}
     on = check.get("on")                                   # an earlier rig step of this case: its MT run's rig
     target = None
     if on:
@@ -2218,6 +2301,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return mt_fast_analysis(ctx, bool(a.get("apply")))
     if k == "hand_rig":
         return hand_rig(ctx)
+    if k == "bird_flap":                                           # Bird wings · V3 (2026-10-20)
+        return bird_flap(ctx)
     if k == "monster_rig":
         return monster_rig(ctx)
     if k == "anim_stand" and a.get("mode") == "tear" and on:   # stand_tear: the stand's stretch of this rig step
@@ -2310,6 +2395,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return anthro_rig(ctx)
     if k == "biped_tail":                                          # Biped tail · V3.1 (2026-10-18)
         return biped_tail(ctx, tuple(a.get("clips") or ("Idle", "Walking", "Running")))
+    if k == "gait_qa":                                             # Quadruped-Walk · V3 (2026-10-20)
+        return gait_qa_check(ctx)
     if k == "anthro_words":
         return anthro_words(a.get("cases"))
     if k == "rig_joints":

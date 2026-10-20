@@ -2278,6 +2278,83 @@
    "what": "the analyser's per-vertex labels on proj/model.glb (SAM + GroundingDINO)",
    "sha256": "098e61553c26a7b1197c4845156decbc3362f325815f5498801bdcee1c47890c",
    "bytes": 225416
+  },
+  "06c7b3af.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/684122b498659a8cfaa8/proj/model.glb",
+   "task": "06c7b3af-4341-4e73-88ec-9ba81a6bbd29",
+   "what": "chibi with curly black hair and glasses (Meshy); face +z, rigged -z on 2026-10-20",
+   "sha256": "e41552e42c36145d82a4e809e424ac6abd3eae34b6a31cba4886625417964f89",
+   "bytes": 7652452
+  },
+  "67e7ae88.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/e239ac978de0d6eafd65/proj/model.glb",
+   "task": "67e7ae88-827d-422c-9ab5-cd9b5d8fcf67",
+   "what": "miner with a helmet lamp and a red beard; face +z, rigged -z on 2026-10-19",
+   "sha256": "3b025215cdd3b60d2786e2061b1994a64a1520d009aa39690bdd69204cf619aa",
+   "bytes": 5565744
+  },
+  "92b3627c.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/8e43f4d79d565f59980b/proj/model.glb",
+   "task": "92b3627c-b1d1-4cad-80eb-c23a7fc86534",
+   "what": "orange robot with a screen face and a cap; face +z, the orientator said -z (2026-10-19)",
+   "sha256": "c18588c13dd339f2a8ac142640a013e1b993850ca3ff5630713c0efee1c6010e",
+   "bytes": 12690568
+  },
+  "568237cd.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/279fea60666c49695fc7/proj/model.glb",
+   "task": "568237cd-d8a7-4b8f-a2ba-04eb015ae4e9",
+   "what": "anthro fox in a uniform, hand at the glasses; face +z, rigged +x (sideways) on 2026-10-20",
+   "sha256": "f74d1bb83e827f1335534aa9964a7e17db6597ea27e5e56ea8850cb15dd1a11e",
+   "bytes": 21909800
+  },
+  "fcd100cd.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/af9b2d79cb98e66fc341/proj/model.glb",
+   "task": "fcd100cd-dc64-43d4-82b0-95eff84500ac",
+   "what": "Low-poly gazelle (V3 run af9b2d79), the task of the owner's order «кривая Walk» 2026-10-20; Vision BODY: quadruped",
+   "sha256": "747d3d5f15930f88a4a99501d80a59b8950737b53262f693bbdead173c9d08ee",
+   "bytes": 57104
+  },
+  "1af3ff03.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0ee46ac04897459b87ae/proj/model.glb",
+   "task": "1af3ff03-04d9-400e-9ef0-f47e9cb5ed4e",
+   "what": "dog (V3 run 0ee46ac0), one of the 5 neighbours of fcd100cd; its Walk / Trot came from the fox video library",
+   "sha256": "bc79b506cdc70d0daa43d758556b5091eb6c58e743fadf88f178564a5bf7fe81",
+   "bytes": 11846368
+  },
+  "736fa70b.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/476d76b775d9ca1b694b/proj/model.glb",
+   "task": "736fa70b-54b4-40f8-aa4e-08475c4aba41",
+   "what": "low-poly gray parrot, flying pose (rigged as a 45-bone biped on 2026-10-20)",
+   "sha256": "8c8cc52fe5b27be8ad5aab950ef24d8d526cd37b2401039a772ab8637bf706f4",
+   "bytes": 193764
+  },
+  "c929c9ab.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ea17763eaa4c9d4dcd3b/proj/model.glb",
+   "task": "c929c9ab",
+   "what": "eagle, arched spread wings (wing tips read as legs)",
+   "sha256": "de9f7a6dc09870c8a3e42f24664ee6a0ecc33001906f6cce621b1b07cb3f33f7",
+   "bytes": 358944
+  },
+  "08910bd4.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/fc4c65223e0774fb5b73/proj/model.glb",
+   "task": "08910bd4",
+   "what": "seagull, spread wings, 1.2 MB",
+   "sha256": "65eb63a50605507e5ef83eee98a29b80ba20bdca22880baa97931a9ecb980937",
+   "bytes": 1173764
+  },
+  "368ce396.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/1b361561a6614ba5c8fd/proj/model.glb",
+   "task": "368ce396",
+   "what": "rooster, folded wings on the flank",
+   "sha256": "831659ddd3f0d54cc12edf9194ab841dff771c723830529184d73980034ecad8",
+   "bytes": 4144228
+  },
+  "281482e6.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5a9ca4f4e6886d89e5a6/proj/model.glb",
+   "task": "281482e6-7c8a-4445-85eb-a5c7cb89aaff",
+   "what": "low-poly chick, no wing geometry",
+   "sha256": "6f03943a741c850c2427ecd9ed3ebc6a2c35a5a61083b529fd2cb5377d8349cf",
+   "bytes": 19620
   }
  },
  "profiles": {
@@ -3209,6 +3286,14 @@
        "<=",
        0
       ]
+     },
+     "xfail": {
+      "reason": "exposed by the correct front (facing.py): latent skin seam, prod passed only on a backwards rig: palm_on_torso 3: hands at the hips touch the skirt / torso (the backwards rig had RightHand at 97.7 % H in the cat ear)",
+      "owner": "Hands · biped"
+     },
+     "measured_2026_10_20_right_front": {
+      "palm_on_torso": 3,
+      "hand_weighted_vertices": 6093
      }
     },
     {
@@ -9335,6 +9420,14 @@
       "tear": true,
       "clip": "Running",
       "status": "failed"
+     },
+     "xfail": {
+      "reason": "exposed by the correct front (facing.py): latent skin seam, prod passed only on a backwards rig: stand_tear 31 edges over 4x, worst 28x at the LeftArm|LeftShoulder armpit, weight jump 0.26",
+      "owner": "Seams · biped (shoulder_blend)"
+     },
+     "measured_2026_10_20_right_front": {
+      "edges_over_4x": 31,
+      "worst_edge_ratio": 28.03
      }
     }
    ]
@@ -13975,6 +14068,13 @@
        "<=",
        40
       ]
+     },
+     "xfail": {
+      "reason": "exposed by the correct front (facing.py): latent skin seam, prod passed only on a backwards rig: mt_stretch sum_edges_over_4x 51: cross-side ForeArm-Twist bleed at the knuckles on the floor",
+      "owner": "Seams · biped (cross-side bleed)"
+     },
+     "measured_2026_10_20_right_front": {
+      "sum_edges_over_4x": 51
      }
     },
     {
@@ -14015,6 +14115,14 @@
       "tear": false,
       "clip": "Running",
       "status": "failed"
+     },
+     "xfail": {
+      "reason": "exposed by the correct front (facing.py): latent skin seam, prod passed only on a backwards rig: stand_tear 161 edges over 4x: cross-side ForeArm-Twist bleed at the knuckles on the floor (y 0.8-1.1 % H)",
+      "owner": "Seams · biped (cross-side bleed)"
+     },
+     "measured_2026_10_20_right_front": {
+      "edges_over_4x": 161,
+      "worst_edge_ratio": 26.73
      }
     }
    ]
@@ -21624,6 +21732,1086 @@
       ]
      },
      "note": "Hem · biped 2026-10-19, gate 20261019T203426Z on the candidate tree (12 frames a clip): neck band 26 -> 0 edges over 4x in 3 passes, Head/Neck and Neck/Spine2 over 4x 0 (over 2x at most 5), edges_over_4x_sum 194 -> 139, volume (capped) 5.45 -> 5.42 %, hip / shoulder bands unchanged; hip_blend 73-88 s (three bands). Before (prod skin v13, stand 24 frames): Jump Head/Neck 753 / 43, Look Around 701 / 29, Punching 156 / 6"
+    }
+   ]
+  },
+  {
+   "id": "biped_facing_chibi_glasses",
+   "task": "06c7b3af-4341-4e73-88ec-9ba81a6bbd29",
+   "cost": 1,
+   "owner": "Orient-Face · biped",
+   "defect": "Facing judge · V3 (owner 2026-10-20 on 06c7b3af: «каким образом здесь не определилось лицо и ступни, персонаж идет спиной вперед?!?»). mt.orient.estimate's feet vote (sole 0-3 % H against the vertex MEDIAN of the 5-9 % H band, which a dense toe cap pulls forward) said the heel reaches further than the toe (-0.051 / -0.049 H), outvoted its own right face vote (+0.019 / +0.017, half weight), and the gain 20 made it «sure» (0.83); a mesh upload has no picture; the align gate let that 0.83 beat Vision's right tile (0.5). Fix: mt/facing.py judges the facing before the fit (GroundingDINO face / eyes / nose / mouth on head close-ups of four sides, the area-weighted toe / heel reach from the shin column, the hair on the back, the orientator's head bulge; CLIP on close calls) and turns the forward axis (the root), never the mesh; mt/front_gate.py takes its verdict instead of the raw orientator sign.",
+   "tier": "base",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "06c7b3af.model.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       300
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "base",
+     "xfail": {
+      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
+      "owner": "Orient-Face · biped"
+     }
+    },
+    {
+     "id": "mt_facing",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "forward_axis": [
+       "==",
+       "+z"
+      ],
+      "facing_axis": [
+       "==",
+       "+z"
+      ],
+      "forward_record_match": [
+       "==",
+       1
+      ]
+     },
+     "note": "chibi 06c7b3af (run 684122b4): the rig faces +z (the face) and the judge says so",
+     "xfail": {
+      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
+      "owner": "Orient-Face · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_facing_miner_beard",
+   "task": "67e7ae88-827d-422c-9ab5-cd9b5d8fcf67",
+   "cost": 1,
+   "owner": "Orient-Face · biped",
+   "defect": "Facing judge · V3 (owner 2026-10-20 on 06c7b3af: «каким образом здесь не определилось лицо и ступни, персонаж идет спиной вперед?!?»). mt.orient.estimate's feet vote (sole 0-3 % H against the vertex MEDIAN of the 5-9 % H band, which a dense toe cap pulls forward) said the heel reaches further than the toe (-0.051 / -0.049 H), outvoted its own right face vote (+0.019 / +0.017, half weight), and the gain 20 made it «sure» (0.83); a mesh upload has no picture; the align gate let that 0.83 beat Vision's right tile (0.5). Fix: mt/facing.py judges the facing before the fit (GroundingDINO face / eyes / nose / mouth on head close-ups of four sides, the area-weighted toe / heel reach from the shin column, the hair on the back, the orientator's head bulge; CLIP on close calls) and turns the forward axis (the root), never the mesh; mt/front_gate.py takes its verdict instead of the raw orientator sign.",
+   "tier": "base",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "67e7ae88.model.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       300
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "base",
+     "xfail": {
+      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
+      "owner": "Orient-Face · biped"
+     }
+    },
+    {
+     "id": "mt_facing",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "forward_axis": [
+       "==",
+       "+z"
+      ],
+      "facing_axis": [
+       "==",
+       "+z"
+      ],
+      "forward_record_match": [
+       "==",
+       1
+      ]
+     },
+     "note": "miner 67e7ae88 (run e239ac97): the rig faces +z (the face) and the judge says so",
+     "xfail": {
+      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
+      "owner": "Orient-Face · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_facing_robot_screen",
+   "task": "92b3627c-b1d1-4cad-80eb-c23a7fc86534",
+   "cost": 1,
+   "owner": "Orient-Face · biped",
+   "defect": "Facing judge · V3 (owner 2026-10-20 on 06c7b3af: «каким образом здесь не определилось лицо и ступни, персонаж идет спиной вперед?!?»). mt.orient.estimate's feet vote (sole 0-3 % H against the vertex MEDIAN of the 5-9 % H band, which a dense toe cap pulls forward) said the heel reaches further than the toe (-0.051 / -0.049 H), outvoted its own right face vote (+0.019 / +0.017, half weight), and the gain 20 made it «sure» (0.83); a mesh upload has no picture; the align gate let that 0.83 beat Vision's right tile (0.5). Fix: mt/facing.py judges the facing before the fit (GroundingDINO face / eyes / nose / mouth on head close-ups of four sides, the area-weighted toe / heel reach from the shin column, the hair on the back, the orientator's head bulge; CLIP on close calls) and turns the forward axis (the root), never the mesh; mt/front_gate.py takes its verdict instead of the raw orientator sign.",
+   "tier": "base",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "92b3627c.model.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       300
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "base",
+     "xfail": {
+      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
+      "owner": "Orient-Face · biped"
+     }
+    },
+    {
+     "id": "mt_facing",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "forward_axis": [
+       "==",
+       "+z"
+      ],
+      "facing_axis": [
+       "==",
+       "+z"
+      ],
+      "forward_record_match": [
+       "==",
+       1
+      ]
+     },
+     "note": "robot 92b3627c (run 8e43f4d7: a screen face, no toes; the orientator's head bulge pointed back): the rig faces +z (the face) and the judge says so",
+     "xfail": {
+      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
+      "owner": "Orient-Face · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_facing_anthro_side",
+   "task": "568237cd-d8a7-4b8f-a2ba-04eb015ae4e9",
+   "cost": 1,
+   "owner": "Orient-Face · biped",
+   "defect": "Facing judge · V3 (owner 2026-10-20 on 06c7b3af: «каким образом здесь не определилось лицо и ступни, персонаж идет спиной вперед?!?»). mt.orient.estimate's feet vote (sole 0-3 % H against the vertex MEDIAN of the 5-9 % H band, which a dense toe cap pulls forward) said the heel reaches further than the toe (-0.051 / -0.049 H), outvoted its own right face vote (+0.019 / +0.017, half weight), and the gain 20 made it «sure» (0.83); a mesh upload has no picture; the align gate let that 0.83 beat Vision's right tile (0.5). Fix: mt/facing.py judges the facing before the fit (GroundingDINO face / eyes / nose / mouth on head close-ups of four sides, the area-weighted toe / heel reach from the shin column, the hair on the back, the orientator's head bulge; CLIP on close calls) and turns the forward axis (the root), never the mesh; mt/front_gate.py takes its verdict instead of the raw orientator sign. The anthro fox (568237cd) was rigged sideways (+x): a quarter turn needs the face vote >= 0.5 and a margin >= 0.8 (side_face_min, side_margin).",
+   "tier": "extended",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "568237cd.model.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       300
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended",
+     "xfail": {
+      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
+      "owner": "Orient-Face · biped"
+     }
+    },
+    {
+     "id": "mt_facing",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "forward_axis": [
+       "==",
+       "+z"
+      ],
+      "facing_axis": [
+       "==",
+       "+z"
+      ],
+      "forward_record_match": [
+       "==",
+       1
+      ]
+     },
+     "note": "anthro fox 568237cd (run 279fea60: a quarter turn, the lateral line itself was wrong): the rig faces +z (the face) and the judge says so",
+     "xfail": {
+      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
+      "owner": "Orient-Face · biped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "quadruped_walk_gazelle",
+   "task": "fcd100cd-dc64-43d4-82b0-95eff84500ac",
+   "cost": 1,
+   "defect": "Quadruped-Walk · V3 (owner 2026-10-20, the gazelle fcd100cd and its 5 neighbours): the procedural Walk (planted pendulum) kept the hind hooves on and 2.8 % H through the ground for the whole cycle (stance share 1.0, they dragged instead of stepping), the front hooves lifted 1.3 % H, front and hind swept 0.67 of each other's stride and slid 79 % H per cycle against the belt; no footfall sequence. Fix (mt/animpick.py legs=ik, GAIT_SPEC; mt/gait_qa.py): hoof trajectories on one treadmill, lateral-sequence walk LH>LF>RH>RF, diagonal trot, the swing lifted over the mesh's own sole, thigh+shin by IK on the rest bend side, the heel lifts only at break-over, the body dips (capped) else the stride shrinks.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "fcd100cd.model.glb",
+     "params": {
+      "words": "Low-poly gazelle",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "seconds": [
+       "<=",
+       120
+      ]
+     }
+    },
+    {
+     "id": "gait",
+     "kind": "gait_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {},
+     "thresholds": {
+      "walk_present": [
+       "==",
+       1
+      ],
+      "walk_pass": [
+       "==",
+       1
+      ],
+      "walk_lateral": [
+       "==",
+       1
+      ],
+      "walk_slip_max_pct_H": [
+       "<=",
+       5.0
+      ],
+      "walk_penetration_max_pct_H": [
+       "<=",
+       1.0
+      ],
+      "walk_clearance_min_pct_H": [
+       ">=",
+       1.5
+      ],
+      "trot_present": [
+       "==",
+       1
+      ],
+      "trot_pass": [
+       "==",
+       1
+      ],
+      "trot_pair_sync": [
+       "<=",
+       0.12
+      ],
+      "recorded": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Quadruped-Walk · V3",
+     "note": "owner 2026-10-20 (task fcd100cd): «все животные этого типа имеют Walk анимацию кривую»; mt.gait_qa on the rig's own baked clips",
+     "measured_2026_10_20": {
+      "before": {
+       "walk_slip_max_pct_H": 79.33,
+       "walk_penetration_max_pct_H": 2.8,
+       "walk_clearance_min_pct_H": 0.0,
+       "walk_sequence": "other"
+      },
+      "after": {
+       "walk_slip_max_pct_H": 3.55,
+       "walk_penetration_max_pct_H": 0.01,
+       "walk_clearance_min_pct_H": 4.52,
+       "walk_sequence": "lateral"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "quadruped_walk_dog_video",
+   "task": "1af3ff03-04d9-400e-9ef0-f47e9cb5ed4e",
+   "cost": 1,
+   "defect": "Quadruped-Walk · V3 (2026-10-20): the dog 1af3ff03 got the fox video-library Walk / Trot (animal_motion_lib/fox): hind feet never lifted, soles 11.9 % H under the ground, slip 77 % H per cycle, front/hind stride 0.47. The gait gate (animpick.gait_gate) keeps a video clip only when mt.gait_qa passes it, else the procedural IK gait of the same name replaces it (rig.json gait_qa records which and why).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "1af3ff03.model.glb",
+     "params": {
+      "words": "dog",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "seconds": [
+       "<=",
+       120
+      ]
+     }
+    },
+    {
+     "id": "gait",
+     "kind": "gait_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {},
+     "thresholds": {
+      "walk_present": [
+       "==",
+       1
+      ],
+      "walk_pass": [
+       "==",
+       1
+      ],
+      "walk_lateral": [
+       "==",
+       1
+      ],
+      "walk_slip_max_pct_H": [
+       "<=",
+       5.0
+      ],
+      "walk_penetration_max_pct_H": [
+       "<=",
+       1.0
+      ],
+      "walk_clearance_min_pct_H": [
+       ">=",
+       1.5
+      ],
+      "trot_present": [
+       "==",
+       1
+      ],
+      "trot_pass": [
+       "==",
+       1
+      ],
+      "trot_pair_sync": [
+       "<=",
+       0.12
+      ],
+      "recorded": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Quadruped-Walk · V3",
+     "note": "owner 2026-10-20 (task fcd100cd): «все животные этого типа имеют Walk анимацию кривую»; mt.gait_qa on the rig's own baked clips",
+     "measured_2026_10_20": {
+      "before": {
+       "walk_slip_max_pct_H": 77.29,
+       "walk_penetration_max_pct_H": 11.92,
+       "walk_clearance_min_pct_H": 0.0,
+       "walk_source": "video:fox"
+      },
+      "after": {
+       "walk_slip_max_pct_H": 1.44,
+       "walk_penetration_max_pct_H": 0.07,
+       "walk_clearance_min_pct_H": 5.99,
+       "walk_source": "procedural"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "bird_chick_no_wing_geometry",
+   "task": "281482e6-7c8a-4445-85eb-a5c7cb89aaff",
+   "cost": 1,
+   "owner": "Bird wings · V3",
+   "defect": "owner 2026-10-20 («птицы должны махать крыльями, а сейчас для крыльев вообще нет паттерна анимации … пока я не приму все через /dev», notice of 736fa70b): birds had no wingbeat: multilimb made the parrot a winged biped, arched wings were read as folded and their tips as legs, folded wings got no Flap, the old Flap was one rotation. mt/bird.py: wings by lateral reach, mirrored wing-skeleton chains, span weights + stretch relaxation, the wingbeat (downstroke share, upstroke fold, pronation, tip lag, body bob / level, legs tucked), per-clip QA; the low-poly chick has no wing geometry (a 50-vertex body): no flight clips, the ground set Walk / Peck / Hop / Idle / Look",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "281482e6.model.glb",
+     "params": {
+      "words": "chick",
+      "body": "bird"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     },
+     "installed_kind": "mt_rig_first",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    },
+    {
+     "id": "bird_flap",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "flight_clips": [
+       "==",
+       0
+      ],
+      "walk_clip": [
+       "==",
+       1
+      ],
+      "peck_clip": [
+       "==",
+       1
+      ]
+     },
+     "installed_kind": "bird_flap",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bird_flap_eagle_arched",
+   "task": "c929c9ab",
+   "cost": 1,
+   "owner": "Bird wings · V3",
+   "defect": "owner 2026-10-20 («птицы должны махать крыльями, а сейчас для крыльев вообще нет паттерна анимации … пока я не приму все через /dev», notice of 736fa70b): birds had no wingbeat: multilimb made the parrot a winged biped, arched wings were read as folded and their tips as legs, folded wings got no Flap, the old Flap was one rotation. mt/bird.py: wings by lateral reach, mirrored wing-skeleton chains, span weights + stretch relaxation, the wingbeat (downstroke share, upstroke fold, pronation, tip lag, body bob / level, legs tucked), per-clip QA",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "c929c9ab.model.glb",
+     "params": {
+      "words": "eagle",
+      "body": "bird"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "bones": [
+       ">=",
+       15
+      ],
+      "clips": [
+       ">=",
+       7
+      ]
+     },
+     "note": "the eagle flies with its legs tucked out of sight: 17 bones, no leg chains, 7 clips (no Walk / Hop / Peck)",
+     "installed_kind": "mt_rig_first",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    },
+    {
+     "id": "bird_flap",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "wings": [
+       "==",
+       2
+      ],
+      "wing_bones_min": [
+       ">=",
+       3
+      ],
+      "fly_clip": [
+       "==",
+       1
+      ],
+      "flap_clip": [
+       "==",
+       1
+      ],
+      "wing_scale": [
+       ">=",
+       0.7
+      ],
+      "elevation_range_deg": [
+       ">=",
+       60
+      ],
+      "wing_p999": [
+       "<=",
+       2.0
+      ],
+      "wing_over4": [
+       "<=",
+       0
+      ],
+      "wing_in_body_pct": [
+       "<=",
+       1.0
+      ],
+      "symmetry_pct_H": [
+       "<=",
+       1.0
+      ],
+      "step_max_deg": [
+       "<=",
+       45
+      ],
+      "main_clip_pass": [
+       "==",
+       1
+      ]
+     },
+     "installed_kind": "bird_flap",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "owner": "Bird wings · V3",
+     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20)",
+     "thresholds": {
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       8
+      ]
+     },
+     "installed_kind": "anim_stand",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bird_flap_parrot",
+   "task": "736fa70b-54b4-40f8-aa4e-08475c4aba41",
+   "cost": 1,
+   "owner": "Bird wings · V3",
+   "defect": "owner 2026-10-20 («птицы должны махать крыльями, а сейчас для крыльев вообще нет паттерна анимации … пока я не приму все через /dev», notice of 736fa70b): birds had no wingbeat: multilimb made the parrot a winged biped, arched wings were read as folded and their tips as legs, folded wings got no Flap, the old Flap was one rotation. mt/bird.py: wings by lateral reach, mirrored wing-skeleton chains, span weights + stretch relaxation, the wingbeat (downstroke share, upstroke fold, pronation, tip lag, body bob / level, legs tucked), per-clip QA",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "736fa70b.model.glb",
+     "params": {
+      "words": "low-poly gray parrot Bird",
+      "body": "bird"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "installed_kind": "mt_rig_first",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    },
+    {
+     "id": "bird_flap",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "wings": [
+       "==",
+       2
+      ],
+      "wing_bones_min": [
+       ">=",
+       3
+      ],
+      "fly_clip": [
+       "==",
+       1
+      ],
+      "flap_clip": [
+       "==",
+       1
+      ],
+      "wing_scale": [
+       ">=",
+       0.7
+      ],
+      "elevation_range_deg": [
+       ">=",
+       60
+      ],
+      "wing_p999": [
+       "<=",
+       2.0
+      ],
+      "wing_over4": [
+       "<=",
+       0
+      ],
+      "wing_in_body_pct": [
+       "<=",
+       1.0
+      ],
+      "symmetry_pct_H": [
+       "<=",
+       1.0
+      ],
+      "step_max_deg": [
+       "<=",
+       45
+      ],
+      "main_clip_pass": [
+       "==",
+       1
+      ]
+     },
+     "installed_kind": "bird_flap",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "owner": "Bird wings · V3",
+     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20)",
+     "thresholds": {
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       8
+      ]
+     },
+     "installed_kind": "anim_stand",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bird_flap_rooster_folded",
+   "task": "368ce396",
+   "cost": 1,
+   "owner": "Bird wings · V3",
+   "defect": "owner 2026-10-20 («птицы должны махать крыльями, а сейчас для крыльев вообще нет паттерна анимации … пока я не приму все через /dev», notice of 736fa70b): birds had no wingbeat: multilimb made the parrot a winged biped, arched wings were read as folded and their tips as legs, folded wings got no Flap, the old Flap was one rotation. mt/bird.py: wings by lateral reach, mirrored wing-skeleton chains, span weights + stretch relaxation, the wingbeat (downstroke share, upstroke fold, pronation, tip lag, body bob / level, legs tucked), per-clip QA; ground bird with folded wings: the Flap burst opens them about the top edge, the amplitude fitted to the stretch limit",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "368ce396.model.glb",
+     "params": {
+      "words": "rooster",
+      "body": "bird"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       6
+      ]
+     },
+     "installed_kind": "mt_rig_first",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    },
+    {
+     "id": "bird_flap",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "mode": [
+       "==",
+       "folded"
+      ],
+      "wings": [
+       "==",
+       2
+      ],
+      "flap_clip": [
+       "==",
+       1
+      ],
+      "walk_clip": [
+       "==",
+       1
+      ],
+      "peck_clip": [
+       "==",
+       1
+      ],
+      "wing_scale": [
+       ">=",
+       0.4
+      ],
+      "elevation_range_deg": [
+       ">=",
+       25
+      ],
+      "wing_p999": [
+       "<=",
+       2.0
+      ],
+      "wing_over4": [
+       "<=",
+       0
+      ],
+      "symmetry_pct_H": [
+       "<=",
+       1.0
+      ],
+      "main_clip_pass": [
+       "==",
+       1
+      ]
+     },
+     "installed_kind": "bird_flap",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bird_flap_seagull",
+   "task": "08910bd4",
+   "cost": 1,
+   "owner": "Bird wings · V3",
+   "defect": "owner 2026-10-20 («птицы должны махать крыльями, а сейчас для крыльев вообще нет паттерна анимации … пока я не приму все через /dev», notice of 736fa70b): birds had no wingbeat: multilimb made the parrot a winged biped, arched wings were read as folded and their tips as legs, folded wings got no Flap, the old Flap was one rotation. mt/bird.py: wings by lateral reach, mirrored wing-skeleton chains, span weights + stretch relaxation, the wingbeat (downstroke share, upstroke fold, pronation, tip lag, body bob / level, legs tucked), per-clip QA",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "08910bd4.model.glb",
+     "params": {
+      "words": "seagull",
+      "body": "bird"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "installed_kind": "mt_rig_first",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    },
+    {
+     "id": "bird_flap",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "wings": [
+       "==",
+       2
+      ],
+      "wing_bones_min": [
+       ">=",
+       3
+      ],
+      "fly_clip": [
+       "==",
+       1
+      ],
+      "flap_clip": [
+       "==",
+       1
+      ],
+      "wing_scale": [
+       ">=",
+       0.7
+      ],
+      "elevation_range_deg": [
+       ">=",
+       60
+      ],
+      "wing_p999": [
+       "<=",
+       2.0
+      ],
+      "wing_over4": [
+       "<=",
+       0
+      ],
+      "wing_in_body_pct": [
+       "<=",
+       1.0
+      ],
+      "symmetry_pct_H": [
+       "<=",
+       1.0
+      ],
+      "step_max_deg": [
+       "<=",
+       45
+      ],
+      "main_clip_pass": [
+       "==",
+       1
+      ]
+     },
+     "installed_kind": "bird_flap",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "owner": "Bird wings · V3",
+     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20)",
+     "thresholds": {
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       8
+      ]
+     },
+     "installed_kind": "anim_stand",
+     "pending": {
+      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
+      "owner": "Bird wings · V3"
+     }
     }
    ]
   }
