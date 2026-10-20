@@ -169,6 +169,44 @@ class PartsBuildRoutesTests(unittest.TestCase):
     def test_private_task_parts_are_hidden_from_strangers(self):
         self.assertEqual(self.client.get(f"/api/task/{PRIVATE}/parts").status_code, 404)
 
+    def test_untitled_parent_takes_the_run_words(self):
+        r = self.post(self.body(part="beard", label="beard", parent_title="low-poly Santa"), task=PRIVATE)
+        self.assertEqual(r.status_code, 200, r.text)
+        child = self.load(r.json()["task"])
+        self.assertEqual(child.poster_llm_title, "Low-poly Santa · beard")
+        self.assertFalse(child.is_public)                  # the parent's privacy
+
+    def test_one_child_per_part_replaced_in_place_and_superseded(self):
+        first = self.post(self.body(part="coat", label="coat", variant="v31game"))
+        self.assertEqual(first.status_code, 200, first.text)
+        tid = first.json()["task"]
+        other = "fedcba9876543210fedc"
+        (routes.MT_ROOT / "runs" / other).mkdir(parents=True, exist_ok=True)
+        (routes.MT_ROOT / "runs" / other / "run.json").write_text("{}", encoding="utf-8")
+        again = self.post(self.body(part="coat", label="coat", variant="v31hd", child_run=other)).json()
+        self.assertEqual((again["task"], again["existing"], again["replaced"]), (tid, True, True))
+        child = self.load(tid)
+        vs = json.loads(child.viewer_settings)
+        self.assertEqual(vs["v3"]["session"]["mt_run_id"], other)
+        self.assertEqual(vs["parts"]["variant"], "v31hd")
+        self.assertEqual(vs["parts"]["history"][-1]["variant"], "v31game")
+        coats = [c for c in routes.parts_view(self.load(PARENT))["children"] if c["part"] == "coat"]
+        self.assertEqual([(c["task"], c["variant"], c["run"]) for c in coats], [(tid, "v31hd", other)])
+        # supersede: off the strip, private, the row stays
+        r = self.client.post(f"/api/task/{PARENT}/parts/supersede", json={"tasks": [tid]},
+                             headers={"Authorization": f"Bearer {TOKEN}"})
+        self.assertEqual(r.json()["superseded"], [tid])
+        self.assertNotIn("coat", [c["part"] for c in routes.parts_view(self.load(PARENT))["children"]])
+        gone = self.load(tid)
+        self.assertFalse(gone.is_public)
+        self.assertTrue(json.loads(gone.viewer_settings)["parts"]["superseded_was_public"])
+        self.assertEqual(self.client.post(f"/api/task/{PARENT}/parts/supersede", json={"tasks": [tid]}).status_code,
+                         401)
+        # the next coat is a new task again
+        new = self.post(self.body(part="coat", label="coat", variant="v31std")).json()
+        self.assertFalse(new["existing"])
+        self.assertNotEqual(new["task"], tid)
+
     def test_task_without_parts_has_no_block(self):
         self.assertIsNone(routes.parts_view(self.load(PRIVATE)))
 
