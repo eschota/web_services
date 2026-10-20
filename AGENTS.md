@@ -414,6 +414,18 @@ Owner rule, 2026-10-10:
   An agent that finds a new defect adds its model to the corpus in the same
   change.
 
+* **Stable, few agents in parallel, customer tasks first** (owner, 2026-10-20:
+  «делай стабильно, так много параллельно не надо, приоритет все равно должен
+  отдаваться авториг задачам»). Every heavy agent run on the VPS (a re-rig
+  queued by hand, a stand, an assembly, a corpus measure) goes through
+  `sudo /srv/autorig/autotests/agent_run.sh <agent> -- <command>` (Git:
+  `deploy/autotests/agent_run.sh`): one agent run on the box at a time
+  (flock), launched only when no customer task waits (fleet `created = 0`),
+  the 1-minute load is under 10 and no gate runs, as user autorig at nice 19
+  in a 5G scope; log `/var/log/autorig-agent-queue.log`. The lead keeps at
+  most three working agents at once and stops an agent when its deliverable
+  is installed.
+
 * **A gate runs one model per category, not the corpus** (owner, 2026-10-20:
   «выбери в каждой категории по 1 объекту, не надо каждый гейт делать все 111
   тестовых моделей!!!!!!!!»). `autotests.py mt-deploy` defaults to
