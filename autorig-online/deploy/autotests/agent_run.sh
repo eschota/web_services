@@ -7,7 +7,8 @@
 # rechecked 20 s later. Runs as user autorig at nice 19 in a systemd scope capped at AGENT_MEM [5G], CPUWeight 20.
 set -u
 NAME=${1:-anon}; shift; [ "${1:-}" = "--" ] && shift
-MAXLOAD=${AGENT_MAX_LOAD:-10}; MAXPROC=${AGENT_MAX_PROCESSING:-20}   # processing is ~12 in steady state; created = 0 is the real «no customer waits»; MEM=${AGENT_MEM:-5G}
+MAXLOAD=${AGENT_MAX_LOAD:-10}; MAXPROC=${AGENT_MAX_PROCESSING:-20}   # processing is ~12 in steady state; created = 0 is the real «no customer waits»
+MEM=${AGENT_MEM:-5G}
 LOG=/var/log/autorig-agent-queue.log
 exec 9>/run/lock/autorig-agent.lock
 echo "$(date -u +%FT%TZ) $NAME: waiting for the agent lock" >&2
