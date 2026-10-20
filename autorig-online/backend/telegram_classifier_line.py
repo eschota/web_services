@@ -2,12 +2,15 @@
 «сверху тут сначала пиши Классификатор как определил объект, потому что сейчас непонятно не ошибся ли он»).
 
 ``line(run_id, lang)`` -> one HTML line, e.g.
-  «🧭 <b>Классификатор:</b> bird · yellow chick · конечности biped · уверенность 1.0 · голоса согласны
-   (воксели 2 ноги · Vision 2 ноги · соседи bird 4/7)»
+  «🧭 <b>Классификатор:</b> humanoid · Santa Claus · тело biped · руки: 2 · уверенность 1.0 · голоса согласны
+   (воксели 2 ноги · Vision 2 ноги · соседи humanoid 3/5)»
 read from the V3 run's ``analysis/class.json`` (category, variant, confidence, agree, needs_review, the three voters
-voxels / Vision / neighbours, limbs.verdict) and ``analysis/category.json`` (the final category, body, what).
+voxels / Vision / neighbours, the limbs voters' arm counts) and ``analysis/category.json`` (the final category, body, what).
 ⚠️ in front when the voters disagree, the run needs review, the confidence is under ``LOW_CONFIDENCE`` (0.7), fewer
 than two voters voted (the others abstained), or the classifier's own category is unknown / differs from the final one.
+Arms (lead decision 2026-10-20): only on biped-like categories (``ARMS_CATEGORIES`` or body «biped»), as «руки: 2»
+from the limbs voters (voxels / analyser / Vision, abstentions skipped); ⚠️ with each voter's count when they differ.
+Quadrupeds, birds, serpents, multileg, vehicles… get no arms field.
 No class.json (or no run): «🧭 Классификатор: нет данных». Never raw JSON; every value is HTML-escaped.
 Languages: ru (the operators' broadcast chats) and en (fallback for every other customer language).
 """
@@ -23,15 +26,17 @@ from pathlib import Path
 RUNS_DIR = Path(os.getenv("AUTORIG_MT_RUNS_DIR", "/srv/autorig/data/motion_transfer/runs"))
 LOW_CONFIDENCE = float(os.getenv("AUTORIG_TG_CLASS_LOW_CONFIDENCE", "0.7"))
 _RUN = re.compile(r"^[0-9a-f]{20}$")
+ARMS_CATEGORIES = frozenset(x.strip() for x in os.getenv(
+    "AUTORIG_TG_CLASS_ARMS_CATEGORIES", "humanoid,biped,primate,legless,monster,multilimb,hands").split(",") if x.strip())
 
 TEXT = {
     "ru": {"title": "Классификатор", "none": "нет данных", "conf": "уверенность", "agree": "голоса согласны",
-           "disagree": "голоса расходятся", "review": "на проверку", "limbs": "конечности", "body": "тело",
+           "disagree": "голоса расходятся", "review": "на проверку", "arms": "руки", "analyser": "анализатор", "body": "тело",
            "class": "классификатор", "voxels": "воксели", "vision": "Vision", "neigh": "соседи", "abstain": "нет голоса",
            "legs": {"none": "без ног", "zero": "без ног", "one": "1 нога", "two": "2 ноги", "three": "3 ноги",
                     "four": "4 ноги", "six": "6 ног", "eight": "8 ног", "many": "много ног"}},
     "en": {"title": "Classifier", "none": "no data", "conf": "confidence", "agree": "voters agree",
-           "disagree": "voters disagree", "review": "needs review", "limbs": "limbs", "body": "body",
+           "disagree": "voters disagree", "review": "needs review", "arms": "arms", "analyser": "analyser", "body": "body",
            "class": "classifier", "voxels": "voxels", "vision": "Vision", "neigh": "neighbours", "abstain": "abstain",
            "legs": {"none": "no legs", "zero": "no legs", "one": "1 leg", "two": "2 legs", "three": "3 legs",
                     "four": "4 legs", "six": "6 legs", "eight": "8 legs", "many": "many legs"}},
@@ -97,6 +102,29 @@ def _neighbours(voter, t) -> str:
     return _word(voter.get("vote") or "-", 16)
 
 
+def _arms(cls, t):
+    """-> (text, disagree) for the arms field, or (None, False) when no voter counted arms."""
+    voters = ((cls.get("limbs") or {}).get("voters") or {}) if isinstance(cls.get("limbs"), dict) else {}
+    counts = []
+    for key, label in (("voxels", t["voxels"]), ("analyser", t["analyser"]), ("vision", t["vision"])):
+        v = voters.get(key)
+        if _abstained(v) or not isinstance(v.get("arms"), (int, float)):
+            continue
+        counts.append((label, int(v["arms"])))
+    if not counts:                                                 # the older top-level record
+        top = cls.get("arms") if isinstance(cls.get("arms"), dict) else {}
+        for key, label in (("voxel_hands", t["voxels"]), ("vision_arms", t["vision"])):
+            if isinstance(top.get(key), (int, float)):
+                counts.append((label, int(top[key])))
+    if not counts:
+        return None, False
+    (n, k), = Counter(c for _l, c in counts).most_common(1)
+    n = n if k * 2 > len(counts) else "?"                            # no majority: the voters' counts decide nothing
+    if len({c for _l, c in counts}) == 1:
+        return f"{t['arms']}: {n}", False
+    return f"⚠️ {t['arms']}: {n} (" + " · ".join(f"{lb} {c}" for lb, c in counts) + ")", True
+
+
 def render(cls, cat, lang: str = "ru") -> str:
     """The line from the two dicts (either may be None)."""
     t = TEXT[lang_of(lang)]
@@ -116,9 +144,11 @@ def render(cls, cat, lang: str = "ru") -> str:
     body = str(cat.get("body") or "").strip()
     if body and body != final:
         parts.append(f"{t['body']} {_word(body, 20)}")
-    limbs = (cls.get("limbs") or {}).get("verdict") if isinstance(cls.get("limbs"), dict) else None
-    if limbs:
-        parts.append(f"{t['limbs']} {_word(limbs, 20)}")
+    arms_bad = False
+    if final in ARMS_CATEGORIES or cls_cat in ARMS_CATEGORIES or body == "biped":
+        arms, arms_bad = _arms(cls, t)
+        if arms:
+            parts.append(arms)
     conf = _conf(cls.get("confidence"))
     if conf is not None:
         parts.append(f"{t['conf']} {conf}")
@@ -133,7 +163,7 @@ def render(cls, cat, lang: str = "ru") -> str:
         low = True
     voters = cls.get("voters") if isinstance(cls.get("voters"), dict) else {}
     voted = sum(1 for k in ("voxels", "vision", "neighbours") if not _abstained(voters.get(k)))
-    warn = (agree is not True or needs_review or low or voted < 2
+    warn = (agree is not True or needs_review or low or voted < 2 or arms_bad
             or cls_cat.lower() in ("", "unknown") or (bool(final) and cls_cat != final))
     votes = (f"{t['voxels']} {_legs(voters.get('voxels'), t)} · {t['vision']} {_legs(voters.get('vision'), t)} · "
              f"{t['neigh']} {_neighbours(voters.get('neighbours'), t)}")

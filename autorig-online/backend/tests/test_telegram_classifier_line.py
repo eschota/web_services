@@ -25,7 +25,7 @@ FIXTURES = {
          "needs_review": False, "voters": {"voxels": {"vote": "legs", "legs": "two"},
                                            "vision": {"vote": "legs", "legs": "two"},
                                            "neighbours": {"vote": "legs", "neighbours": NEIGH}},
-         "limbs": {"verdict": "biped"}},
+         "limbs": {"verdict": "biped", "voters": {"voxels": {"vote": "two", "arms": 2}}}},
         {"category": "bird", "body": "bird", "what": "yellow <chick>", "source": "vision"}),
     SPLIT_RUN: (
         {"schema": "autorig.mt.class/1", "category": "legless", "variant": "tail", "confidence": 0.55, "agree": False,
@@ -54,8 +54,10 @@ class Line(unittest.TestCase):
 
     def test_agree(self):
         s = C.line(AGREE_RUN, "ru", self.root)
-        self.assertTrue(s.startswith("🧭 <b>Классификатор:</b> bird · yellow &lt;chick&gt; · конечности biped"), s)
+        self.assertTrue(s.startswith("🧭 <b>Классификатор:</b> bird · yellow &lt;chick&gt; · уверенность 1.0"), s)
         self.assertIn("уверенность 1.0 · голоса согласны", s)
+        self.assertNotIn("руки", s)                                # no arms field on a non-biped category
+        self.assertNotIn("biped", s)
         self.assertIn("(воксели 2 ноги · Vision 2 ноги · соседи bird 4/7)", s)
         self.assertNotIn("⚠️", s)
         self.assertNotIn("{", s)                                   # never raw JSON
@@ -78,7 +80,35 @@ class Line(unittest.TestCase):
                             "neighbours": {"vote": "abstain"}})
         s = C.render(lone, {"category": "humanoid", "body": "biped", "what": "cartoonish 3D character"}, "ru")
         self.assertTrue(s.startswith("⚠️ 🧭 <b>Классификатор:</b> humanoid · классификатор unknown"), s)
+        self.assertIn("руки: 2", s)                                # top-level arms record (voxel hands)
         self.assertIn("(воксели 2 ноги · Vision нет голоса · соседи нет голоса)", s)
+
+    def test_arms_on_bipeds_only(self):
+        santa = {"category": "humanoid", "confidence": 1.0, "agree": True, "needs_review": False,
+                 "voters": {"voxels": {"vote": "legs", "legs": "two"}, "vision": {"vote": "legs", "legs": "two"},
+                            "neighbours": {"vote": "legs", "neighbours": []}},
+                 "arms": {"voxel_hands": 2, "vision_arms": 2, "ok": True},
+                 "limbs": {"verdict": "biped", "voters": {"voxels": {"vote": "abstain", "arms": 0},
+                                                          "analyser": {"vote": "two", "arms": 2},
+                                                          "vision": {"vote": "two", "arms": 2}}}}
+        cat = {"category": "humanoid", "body": "biped", "what": "Santa Claus"}
+        s = C.render(santa, cat, "ru")
+        self.assertTrue(s.startswith("🧭 <b>Классификатор:</b> humanoid · Santa Claus · тело biped · руки: 2 · "), s)
+        self.assertIn("arms: 2 · confidence", C.render(santa, cat, "en"))
+        split = dict(santa, limbs={"verdict": "biped", "voters": {"voxels": {"vote": "two", "arms": 2},
+                                                                   "analyser": {"vote": "two", "arms": 0},
+                                                                   "vision": {"vote": "two", "arms": 2}}})
+        s = C.render(split, cat, "ru")
+        self.assertTrue(s.startswith("⚠️ 🧭"), s)
+        self.assertIn("⚠️ руки: 2 (воксели 2 · анализатор 0 · Vision 2)", s)
+        three = dict(santa, limbs={"verdict": "biped", "voters": {"voxels": {"vote": "two", "arms": 6},
+                                                                   "analyser": {"vote": "two", "arms": 1},
+                                                                   "vision": {"vote": "two", "arms": 2}}})
+        self.assertIn("⚠️ руки: ? (воксели 6 · анализатор 1 · Vision 2)", C.render(three, cat, "ru"))
+        gazelle = dict(santa, category="quadruped", arms={"voxel_hands": 0, "vision_arms": 0})
+        s = C.render(gazelle, {"category": "quadruped", "body": "quadruped", "what": "gazelle"}, "ru")
+        self.assertNotIn("руки", s)
+        self.assertNotIn("biped", s)
 
     def test_missing(self):
         for run in (NONE_RUN, "1234567890abcdef1234", None, "../etc"):
