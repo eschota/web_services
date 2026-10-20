@@ -22,6 +22,7 @@ while :; do
 done
 echo "$(date -u +%FT%TZ) $NAME: launching (load $load): $*" >&2
 echo "$(date -u +%FT%TZ) $NAME: $*" >> /var/log/autorig-gate-queue.log
+export AUTORIG_GATE_PARALLEL=1   # the queue lock serialises; the inner autotests.py would deadlock on the same lock file
 nice -n 19 "$@"; rc=$?
 echo "$(date -u +%FT%TZ) $NAME: done rc=$rc" | tee -a /var/log/autorig-gate-queue.log >&2
 exit $rc
