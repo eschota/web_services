@@ -75,6 +75,14 @@ class RerigButton(unittest.TestCase):
         (self.root / "runs" / self.run / "rig" / "rig.json").write_text(json.dumps(doc), encoding="utf-8")
         RO._task_cache.clear()
 
+    def test_a_script_user_agent_is_a_bot_and_never_triggers(self):
+        for ua in ("fable-verifier/1.0", "python-requests/2.32", "curl/8.5", ""):
+            self.assertTrue(RO.is_bot(types.SimpleNamespace(headers={"user-agent": ua})), ua)
+        for ua in ("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/130 Safari/537.36",
+                   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/604.1"):
+            self.assertFalse(RO.is_bot(types.SimpleNamespace(headers={"user-agent": ua})), ua)
+        self.assertTrue(RO.is_bot(types.SimpleNamespace(headers={"user-agent": "Mozilla/5.0 (compatible; Googlebot/2.1)"})))
+
     def test_up_to_date_rig_shows_no_button(self):
         self._rig()
         t = _Task("11111111-1111-4111-8111-111111111111", run=self.run)

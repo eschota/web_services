@@ -226,7 +226,9 @@ def is_bot(request: Any) -> bool:
             return True
     except Exception:                                    # noqa: BLE001 - an older release without it
         pass
-    return not ua or bool(_BOT.search(ua))
+    # 2026-10-20: a user agent without "Mozilla" is a script, not a browser (every browser since Netscape says
+    # Mozilla/5.0; the verifier's «fable-verifier» UA queued three re-rigs through v3-view on 2026-10-20).
+    return not ua or "mozilla" not in ua.lower() or bool(_BOT.search(ua))
 
 
 def _client(request: Any) -> str:
