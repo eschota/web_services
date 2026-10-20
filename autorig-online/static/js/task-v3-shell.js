@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261020.3';
+const BUILD = 'tv3-20261020.5';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -205,6 +205,7 @@ function viewerUrl(viewer) {
   // (a classic task gets a lightweight one) and greets in the page's language.
   url.searchParams.set('agent_task', taskId);
   url.searchParams.set('agent_lang', agentLang());
+  url.searchParams.set('ui_lang', agentLang());
   return url;
 }
 
@@ -212,8 +213,13 @@ function agentLang() {
   // the viewer's UI language = the language this page is rendered in (owner 2026-10-16: «у пользователя по дефолту
   // должен быть английский язык, а не русский»): the server's <html lang> first, then the i18n module, then the
   // browser; never a Russian default
+  const pathLang = (/^\/(ru|fa|zh|hi)(?:\/|$)/.exec(location.pathname) || [])[1] || '';
+  // then the language the i18n module renders this page in (on /task a Russian browser gets a Russian page while the
+  // server's <html lang> still says "en": verifier round 4); detectLanguage() is synchronous, so it holds before init()
+  let i18nLang = '';
+  try { i18nLang = (window.I18n && (window.I18n.currentLang || (window.I18n.detectLanguage && window.I18n.detectLanguage().lang))) || ''; } catch (e) { i18nLang = ''; }
   const htmlLang = String(document.documentElement.lang || '').slice(0, 2).toLowerCase();
-  const lang = (/^[a-z]{2}$/.test(htmlLang) && htmlLang) || (window.I18n && window.I18n.currentLang) || uiLang();
+  const lang = pathLang || i18nLang || (/^[a-z]{2}$/.test(htmlLang) && htmlLang) || uiLang();
   return String(lang || 'en').slice(0, 2).toLowerCase();
 }
 
@@ -525,6 +531,16 @@ function loadParentKids(ptask) {
     })
     .catch(() => {});
 }
+function partSuperseded(c) { return !!(c && (c.superseded || c.superseded_by || c.active === false || c.status === 'superseded')); }
+function variantName(v) {
+  if (!v) return '';
+  const k = `viewer_parts_v_${v}`;
+  const t = tr(k);
+  return t !== k ? t : String(v);
+}
+function chipText(c) {
+  return `${partName(c.part, c.label)}${c.variant ? ` · ${variantName(c.variant)}` : ''}${PROV_ICON[c.provider] ? ` ${PROV_ICON[c.provider]}` : ''}`;
+}
 function renderParts(parts) {
   let strip = document.getElementById('tv3-parts');
   // v3-view.parts (backend parts_build_routes.parts_view): {parent {parent_task, parent_run, part, label, provider}, children[]}
@@ -535,9 +551,9 @@ function renderParts(parts) {
     const pk = parentKids[parent.task];
     if (pk && pk.title && !parent.title) parent = { ...parent, title: pk.title };
   }
-  const kids = (parts && Array.isArray(parts.children) ? parts.children : []).filter((c) => c && UUID.test(String(c.task || '')));
+  const kids = (parts && Array.isArray(parts.children) ? parts.children : []).filter((c) => c && UUID.test(String(c.task || '')) && !partSuperseded(c));
   const sibs = (parts && Array.isArray(parts.siblings) ? parts.siblings
-    : parent && parentKids[parent.task] ? parentKids[parent.task].kids : []).filter((c) => c && UUID.test(String(c.task || '')));
+    : parent && parentKids[parent.task] ? parentKids[parent.task].kids : []).filter((c) => c && UUID.test(String(c.task || '')) && !partSuperseded(c));
   const show = !!(parent && UUID.test(String(parent.task || ''))) || kids.length > 0;
   const key = show ? JSON.stringify([parent, kids, sibs, uiLang()]) : '';
   if (key === partsKey) return;
@@ -572,13 +588,13 @@ function renderParts(parts) {
     const up = chip(parent.task, `↖ ${parent.title || parent.task.slice(0, 8)}`, '#9fd2ff', 'up');
     up.title = tr('viewer_parts_open');
     strip.appendChild(up);
-    for (const s of (sibs.length ? sibs : kids)) strip.appendChild(chip(s.task, `${partName(s.part, s.label)}${PROV_ICON[s.provider] ? ` ${PROV_ICON[s.provider]}` : ''}`, s.color, s.task === taskId ? 'me' : ''));
+    for (const s of (sibs.length ? sibs : kids)) strip.appendChild(chip(s.task, chipText(s), s.color, s.task === taskId ? 'me' : ''));
   } else {
     const lab = document.createElement('span');
     lab.className = 'tv3-parts-lab';
     lab.textContent = tr('viewer_parts_children');
     strip.appendChild(lab);
-    for (const c of kids) strip.appendChild(chip(c.task, `${partName(c.part, c.label)}${PROV_ICON[c.provider] ? ` ${PROV_ICON[c.provider]}` : ''}`, c.color, ''));
+    for (const c of kids) strip.appendChild(chip(c.task, chipText(c), c.color, ''));
   }
 }
 
