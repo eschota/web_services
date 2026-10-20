@@ -9,6 +9,7 @@ from sqlalchemy import select
 from database import AsyncSessionLocal, Task
 import telegram_bot as _api
 import telegram_defects as _defects
+import telegram_classifier_line as _cls
 GALLERY_POSTER_SCRIPT = os.getenv("AUTORIG_GALLERY_POSTER_SCRIPT", "/srv/autorig/gallery-poster/gallery_poster.py")
 V3_PREVIEW_VIDEO_DIR = os.getenv("AUTORIG_V3_PREVIEW_VIDEO_DIR", "/srv/autorig/data/static/previews-v3")
 V3_POSTER_DIR_TG = os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/posters-v3")
@@ -222,6 +223,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
     collection_index = None
     collection_size = None
     task_run_id = None
+    owner_lang = 'en'                  # the customer's private chat: the task owner's language (ru, else en)
     resolved_progress = progress_page
     try:
         async with AsyncSessionLocal() as db:
@@ -230,6 +232,11 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
             if task:
                 task_state = getattr(task, 'status', None)
                 task_run_id = _defects.run_id_of_task(task)
+                try:
+                    import user_language as _ul
+                    owner_lang = _cls.lang_of((await _ul.task_language(db, task)).code)
+                except Exception as exc:
+                    print(f'[Telegram] owner language for {task_id} unavailable: {type(exc).__name__}')
                 if task.owner_type == 'user':
                     owner_email = task.owner_id
                 cr = getattr(task, 'content_rating', None)
@@ -303,8 +310,11 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
     # Defect buttons on every task notice (owner 2026-10-14): the top-5 similar models by embedding below the notice,
     # in the operators' broadcast chats only (a customer's private chat never lists other people's tasks).
     similar_lines = await _defects.similar_html(task_run_id)
-    owner_text = _defects.with_lines(text, similar_lines)
-    text_for = lambda cid: owner_text if cid in broadcast_ids else text
+    # The classifier's verdict is the FIRST line of every notice (owner 2026-10-20, register §15: «сверху тут сначала
+    # пиши Классификатор как определил объект»): Russian in the operators' chats, the owner's language in a private one.
+    owner_text = _defects.with_lines(_cls.prepend(text, _cls.line(task_run_id, 'ru')), similar_lines)
+    private_text = _cls.prepend(text, _cls.line(task_run_id, owner_lang))
+    text_for = lambda cid: owner_text if cid in broadcast_ids else private_text
     print(f'[Telegram] Sending done notification to {len(chat_ids)} chat(s), video={video_path is not None} video_wait_seconds={video_wait_seconds} video_path={video_path} last_video_status={last_video_status}')
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     generate_markup = _defects.markup(task_id)
