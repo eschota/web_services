@@ -2355,6 +2355,13 @@
    "what": "low-poly chick, no wing geometry",
    "sha256": "6f03943a741c850c2427ecd9ed3ebc6a2c35a5a61083b529fd2cb5377d8349cf",
    "bytes": 19620
+  },
+  "bf61cf57.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c410a639d80481ed348f/proj/model.glb",
+   "task": "bf61cf57-74a8-401b-b1e7-9dfa4e91023d",
+   "what": "Neon Street Chef (Meshy, 327k vertices, faces +z): a bare biped whose arms hang (elevation -80 / -75 deg); the hanging-arm trace turned it to A and the final stand doubled",
+   "sha256": "d021fba282c9cd397bddb4e8c49d2c2193880b75949e5d13a03ea6131bf41f3c",
+   "bytes": 26147684
   }
  },
  "profiles": {
@@ -22753,6 +22760,90 @@
        4
       ]
      }
+    }
+   ]
+  },
+  {
+   "id": "biped_hanging_arms_327k",
+   "task": "bf61cf57-74a8-401b-b1e7-9dfa4e91023d",
+   "tier": "extended",
+   "cost": 5,
+   "owner": "Joints · biped",
+   "defect": "Joints · biped (lead spec docs/trace-acceptance-spec-20261021.md, bf61cf57 run c410a639d80481ed348f, 327k vertices, hanging arms): rig_first traced and turned the arms only when the VPS was loaded (the extra-build budget divided the wall clock by a load factor up to 2.5; fastrig 39-45 s); the turn passed its draft check (rig_check 4x 356 -> 362) but after the open pose the rig was A with 4 contacts and the 9-clip stand doubled (3 849 -> 7 867 edges over 4x). Fix (rig_first 2026-10-21): the budget is this rig's thread CPU time (load-free), and a kept turn is accepted by the final stand against the untouched rig built and opened beside it (limb_stabilize trace_accept*, record stabilize_trace_stand). Trace forced (RIG_FIRST_EXTRA_BUDGET_S=600) and off give byte-identical rigs: T, contact 0, stand 3 849 raw / 2 046 after the secondary bands (diag_glb, 24 frames).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "bf61cf57.model.glb",
+     "tier": "extended",
+     "params": {
+      "words": "Neon Street Chef",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "rig_contract",
+     "kind": "rig_contract",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "contact_after": [
+       "==",
+       0
+      ],
+      "pose_reached": [
+       "==",
+       "opened"
+      ],
+      "pose_standard": [
+       "==",
+       "T"
+      ]
+     }
+    },
+    {
+     "id": "bands",
+     "kind": "hip_blend",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "owner": "Joints · biped",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "edges_over_4x_sum": [
+       "<=",
+       2500
+      ]
+     },
+     "note": "the spec metric is the 24-frame diag_glb stand after the secondary bands (2 046 on the candidate tree); hip_blend + rig_contract at 12 frames is the gate's nearest kind: measure it once on the candidate and set the threshold from that number if it differs"
     }
    ]
   }
