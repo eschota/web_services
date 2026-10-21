@@ -1193,10 +1193,33 @@ def voxel_legs(input_name):
             "taper_ratio": e.get("taper_ratio"), "floor_contact": e.get("floor_contact"), "upright": e.get("upright")}
 
 
-def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, body="", analysis=None):
+def _unpack_bundle(name, run):
+    """Joints · biped 2026-10-22: a corpus inputs bundle (a read-only .tgz of a run's re-rig inputs, the set
+    mt.backfill.rerig_candidate copies: proj/*.json, card/card.json, analysis/*.json|npz, v3/analysis.json...) unpacked
+    into the case's run dir. Regular files under relative paths only; never proj/model.glb (that is the case input).
+    -> the files written."""
+    import tarfile
+    out = []
+    with tarfile.open(_input(name), "r:gz") as tf:
+        for m in tf.getmembers():
+            rel = pathlib.PurePosixPath(m.name)
+            if not m.isfile() or rel.is_absolute() or ".." in rel.parts or str(rel) in ("proj/model.glb",):
+                continue
+            dst = run.joinpath(*rel.parts)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            with tf.extractfile(m) as fh:
+                dst.write_bytes(fh.read())
+            out.append(str(rel))
+    return sorted(out)
+
+
+def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, body="", analysis=None,
+                 inputs_bundle=None):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
     mt/classic_mirror.py does at upload time. forward_axis: the front the conveyor's projections / Vision know
-    (proj/forward.json), for a model whose symmetry alone cannot tell it (the potato 583622f3: guess 0.32)."""
+    (proj/forward.json), for a model whose symmetry alone cannot tell it (the potato 583622f3: guess 0.32).
+    inputs_bundle: a corpus .tgz of the run's own re-rig inputs, unpacked over the run dir after the params above
+    (the run's real files win), so the case rigs what the conveyor's re-rig of that run rigs."""
     run = pathlib.Path(ctx["work"]) / "run"
     shutil.rmtree(run, ignore_errors=True)
     run.mkdir(parents=True)
@@ -1212,6 +1235,7 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, bod
     if v3_bound:                                         # Multi-limb rig · V3: like a hash-bound V3 source, the up
         (run / "v3").mkdir(parents=True, exist_ok=True)     # stage of rig_first leaves the model as uploaded
         (run / "v3" / "source.json").write_text(json.dumps({"schema": "autorig.v3.session-source/1", "source": "autotests"}))
+    bundled = _unpack_bundle(inputs_bundle, run) if inputs_bundle else []
     p, wall = _child([PY, "-P", "-m", "mt.rig_first", "--dir", str(run), "--glb", str(_input(input_name)),
                       "--words", words], timeout=300)
     if p.returncode != 0:
@@ -1224,6 +1248,7 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, bod
     rig = json.loads((run / "rig" / "rig.json").read_text())
     return {"seconds": wall, "rig_total_s": out["timings_s"].get("total"), "timings_s": out["timings_s"],
             "bones": out.get("bones"), "body_plan": out.get("body_plan"), "clips": len(out.get("clips") or []),
+            **({"inputs_bundle": inputs_bundle, "bundled_files": len(bundled)} if inputs_bundle else {}),
             "props": len(props), "props_in_hand": sum(1 for x in props if re.search(r"Hand$", str(x.get("attached_bone") or ""))),
             "prop_bones": [x.get("attached_bone") for x in props],
             "prop_rig_bones": [f'{b["name"]}<{b.get("parent")}' for b in rig.get("bones", [])
@@ -1250,6 +1275,35 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, bod
                                 ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items()
                                 if str(k).startswith("t=") and isinstance(v, dict)),
             **quad_leg_frame(run, rig), **multileg_legs(run, rig), **vehicle_rig(run, rig)}   # Quad legs · V3 (2026-10-14); Multileg · V3; Vehicles V3 (2026-10-18)
+
+
+def joint_gate_check(ctx, apply=True):
+    """Joints · biped 2026-10-22: the V3 joints gate (mt.joint_gate.evaluate, as the conveyor's QA runs it) on this
+    case's rig: the fast analysis first, as the conveyor runs it (--apply: the fast fix may rebuild the rig, so this
+    check goes after the checks that judge the rig_first rig), then the gate's verdict and its outside count."""
+    run = ctx["run"]
+    fa = mt_fast_analysis(ctx, apply)
+    code = ("import json,sys; from mt import joint_gate as JG; g=JG.evaluate(sys.argv[1]); "
+            "print(json.dumps({'gate': g, 'brief': JG.brief(g)}, default=str))")
+    p, wall = _child([PY, "-P", "-c", code, str(run)], timeout=600)
+    if p.returncode != 0:
+        raise RuntimeError(f"joint_gate exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    g = json.loads(p.stdout.strip().splitlines()[-1])["gate"]
+    c = g.get("checks") or {}
+    out = c.get("outside") or {}
+    tests = out.get("tests") or {}
+    return {"seconds": round(wall + float(fa.get("seconds") or 0), 3), "verdict": g.get("verdict"),
+            "reasons": g.get("reasons"), "outside_verdict": out.get("verdict"), "outside_counted": out.get("counted"),
+            "outside_counted_gap": out.get("counted_gap"), "outside_limit": out.get("limit"),
+            "outside_samples": out.get("samples"), "bones_outside": (out.get("bones_outside") or [])[:12],
+            "inside_test": tests.get("test"), "inside_mesh": tests.get("mesh"),
+            "boundary_edges": tests.get("boundary_edges"), "tests_disagree": tests.get("disagree"),
+            "mirror_verdict": (c.get("mirror") or {}).get("verdict"),
+            "mirror_worst_pct_H": (c.get("mirror") or {}).get("worst_pct_H"),
+            "proportion_verdict": (c.get("proportion") or {}).get("verdict"),
+            "out_of_range": (c.get("proportion") or {}).get("out_of_range"),
+            "fast_fix_applied": fa.get("applied"), "fast_outside_before": fa.get("outside_before"),
+            "fast_outside_after": fa.get("outside_after"), "op_errors": fa.get("op_errors")}
 
 
 def hand_rig(ctx):
@@ -2296,7 +2350,9 @@ def run_check(check: dict, ctx: dict) -> dict:
         return voxel_legs(inp)
     if k == "mt_rig_first":
         return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False),
-                            a.get("body", ""), a.get("analysis"))
+                            a.get("body", ""), a.get("analysis"), a.get("inputs_bundle"))
+    if k == "joint_gate":                                          # Joints · biped (2026-10-22)
+        return joint_gate_check(ctx, bool(a.get("apply", True)))
     if k == "mt_fast_analysis":
         return mt_fast_analysis(ctx, bool(a.get("apply")))
     if k == "hand_rig":

@@ -2369,6 +2369,13 @@
    "what": "Aera-7 white female android (5.5 MB GLB, faces +z): the hands are fused to the thighs in the source mesh; the draft skin gives each arm a hip-side patch under the hand",
    "sha256": "b6a885b515acb44e638f26307638a494e489e7c00df3291243c095d825ee4c59",
    "bytes": 5512204
+  },
+  "robot_hand_hip_patch.inputs.tgz": {
+   "source": "/srv/autorig/data/autotests/bundles/robot_hand_hip_patch.inputs.tgz",
+   "task": "f23ee09f-419c-487c-a9ca-efdb172ddf75",
+   "what": "the robot run 2f9b3829fccd262cd2a9's re-rig inputs that change its rig_first result: analysis/parts_seg.json + parts_seg.npz (the analyser's part labels on proj/model.glb, json sha bfe918ba, npz c3f27553). Measured one at a time on production files 2026-10-22 (Joints · biped): proj/*.json, card, phases.json, run.json, category, constitution and v3/analysis.json each leave the bare build (kept_draft, contact 527, 899 edges over 4x, joints counted 6); parts_seg alone gives the conveyor's rig (A opened, contact 0, 0 edges over 4x, joints pass), the same as all of them together",
+   "sha256": "9e3654e720e783d8d6bd9307f70d7cf1cedab4a81ae44b9ef8b76c4d204d528d",
+   "bytes": 94413
   }
  },
  "profiles": {
@@ -22869,7 +22876,8 @@
      "params": {
       "words": "white female android",
       "body": "biped",
-      "forward_axis": "+z"
+      "forward_axis": "+z",
+      "inputs_bundle": "robot_hand_hip_patch.inputs.tgz"
      },
      "thresholds": {
       "body_plan": [
@@ -22884,7 +22892,8 @@
        ">=",
        8
       ]
-     }
+     },
+     "note": "inputs_bundle (2026-10-22): the run's own parts_seg labels, unpacked into the case's run dir before rig_first, as mt.backfill.rerig_candidate copies them: without them rig_first builds a different robot (kept_draft, contact 527, 899 edges over 4x)"
     },
     {
      "id": "rig_contract",
@@ -22909,10 +22918,6 @@
        "==",
        "A"
       ]
-     },
-     "xfail": {
-      "reason": "the case builds the robot from proj/model.glb alone (mt_rig_first), without the run's re-rig inputs (proj/*.json, card, v3/analysis.json, analysis/category.json, constitution, parts_seg): source angle 2.3 instead of 13.9 deg, pose_skeleton dropped, contact before 549, opening 102.7 deg, 36 lids, lid protrusion 55 % H (2026-10-21, report 20261021T133924Z-mt-base on production files); the conveyor's own re-rig of the run gives contact 0 / stand 0 (DEV #8499). Open: the bare build's 55 % H lids are a defect class of their own; the case needs the run's inputs before it can gate a release",
-      "owner": "Seams · biped"
      }
     },
     {
@@ -22944,11 +22949,29 @@
        1
       ]
      },
-     "note": "the candidate's 24-frame diag_glb stand after the secondary bands is 0 on all 9 clips; the stand kind at mode tear measures the rig_first rig before the bands, 50 is the margin",
-     "xfail": {
-      "reason": "the case builds the robot from proj/model.glb alone (mt_rig_first), without the run's re-rig inputs (proj/*.json, card, v3/analysis.json, analysis/category.json, constitution, parts_seg): source angle 2.3 instead of 13.9 deg, pose_skeleton dropped, contact before 549, opening 102.7 deg, 36 lids, lid protrusion 55 % H (2026-10-21, report 20261021T133924Z-mt-base on production files); the conveyor's own re-rig of the run gives contact 0 / stand 0 (DEV #8499). Open: the bare build's 55 % H lids are a defect class of their own; the case needs the run's inputs before it can gate a release",
-      "owner": "Seams · biped"
-     }
+     "note": "the candidate's 24-frame diag_glb stand after the secondary bands is 0 on all 9 clips; the stand kind at mode tear measures the rig_first rig before the bands, 50 is the margin"
+    },
+    {
+     "id": "joints",
+     "kind": "joint_gate",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "apply": true
+     },
+     "thresholds": {
+      "verdict": [
+       "==",
+       "pass"
+      ],
+      "outside_counted": [
+       "<=",
+       4
+      ]
+     },
+     "note": "the V3 joints gate (mt.joint_gate.evaluate) after the fast analysis with --apply, as the conveyor's QA runs it; last in the case because the fast fix may rebuild the rig (Joints · biped 2026-10-22: the robot skeleton fix of 2026-10-21, MT 474a703)"
     }
    ]
   }
