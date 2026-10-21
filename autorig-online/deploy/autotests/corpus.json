@@ -2362,6 +2362,13 @@
    "what": "Neon Street Chef (Meshy, 327k vertices, faces +z): a bare biped whose arms hang (elevation -80 / -75 deg); the hanging-arm trace turned it to A and the final stand doubled",
    "sha256": "d021fba282c9cd397bddb4e8c49d2c2193880b75949e5d13a03ea6131bf41f3c",
    "bytes": 26147684
+  },
+  "f23ee09f.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/2f9b3829fccd262cd2a9/proj/model.glb",
+   "task": "f23ee09f-419c-487c-a9ca-efdb172ddf75",
+   "what": "Aera-7 white female android (5.5 MB GLB, faces +z): the hands are fused to the thighs in the source mesh; the draft skin gives each arm a hip-side patch under the hand",
+   "sha256": "b6a885b515acb44e638f26307638a494e489e7c00df3291243c095d825ee4c59",
+   "bytes": 5512204
   }
  },
  "profiles": {
@@ -22844,6 +22851,98 @@
       ]
      },
      "note": "the spec metric is the 24-frame diag_glb stand after the secondary bands (2 046 on the candidate tree); hip_blend + rig_contract at 12 frames is the gate's nearest kind: measure it once on the candidate and set the threshold from that number if it differs"
+    }
+   ]
+  },
+  {
+   "id": "robot_hand_hip_patch",
+   "task": "f23ee09f-419c-487c-a9ca-efdb172ddf75",
+   "cost": 1,
+   "owner": "Seams · biped",
+   "defect": "Seams (2026-10-21, lead spec docs/release-failure-spec-20261021.md, robot f23ee09f run 2f9b3829fccd262cd2a9): the source fuses the hands to the thighs; the draft skin (fastrig and the fit's hard labels) gives each arm a second face component, 18 % H of the hip's side surface under the hand. The open pose rejected its release (62 hole copies, slit 35 % H) and kept the draft: contact 312, five Hips-to-Hand edges stretched 217-250x in the stand (3 728 edges over 4x after the bands). With the holes lidded (release_walk undirected) the raised hand carried the hip patch plus its lid as a wing (lid protrusion 6.6 % H). Fix (open_pose 59795664): release_islands=arms rejoins such a component to the bordering group before the opening (weights from the receiving ring, hard labels and UV copies follow), and every synthetic piece's protrusion outside its bone's hull is recorded (release.lid_protrusion_max_pct_H, anim stand metrics.lid_protrusion). After: A opened at 64 deg, contact 0, 0 lids, protrusion 0, stand 0 edges over 4x on every clip.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "f23ee09f.model.glb",
+     "params": {
+      "words": "white female android",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "rig_contract",
+     "kind": "rig_contract",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "contact_after": [
+       "==",
+       0
+      ],
+      "pose_reached": [
+       "==",
+       "opened"
+      ],
+      "pose_standard": [
+       "==",
+       "A"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       50
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "note": "the candidate's 24-frame diag_glb stand after the secondary bands is 0 on all 9 clips; the stand kind at mode tear measures the rig_first rig before the bands, 50 is the margin"
     }
    ]
   }
