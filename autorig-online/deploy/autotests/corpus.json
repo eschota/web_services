@@ -18952,15 +18952,13 @@
       },
       "reason": "the primary tail is a static chain: in Running the left foot kicks back through it (29 vertex-frames, 2.1 % H); a limb passing through the tail is the secondary tail layer's collision, which the corpus rig does not run",
       "owner": "Biped tail · V3.1"
+     },
+     "xfail": {
+      "reason": "the trace acceptance by the final stand (2026-10-21, rig_first._judge_turn) keeps the untouched rig (A, opened, contact 0, 0 hole copies, stand 62) over the turned one (kept_draft, contact 56, 47 hole copies, slit 58 % H, stand 604); on the untouched rig the tail strikes the limbs (tail_pen_limb_strike 519 > 60; the turned rig had 16): a tail-rig / tail-clip defect of the untouched rig",
+      "owner": "Biped tail · V3.1"
      }
     }
-   ],
-   "xfail": {
-    "tail": {
-     "reason": "the trace acceptance by the final stand (2026-10-21, rig_first._judge_turn) keeps the untouched rig (A, opened, contact 0, 0 hole copies, stand 62) over the turned one (kept_draft, contact 56, 47 hole copies, slit 58 % H, stand 604); on the untouched rig the tail strikes the limbs (tail_pen_limb_strike 519 > 60; the turned rig had 16): a tail-rig / tail-clip defect of the untouched rig",
-     "owner": "Biped tail · V3.1"
-    }
-   }
+   ]
   },
   {
    "id": "anthro_four_arms_tail",
@@ -22911,6 +22909,10 @@
        "==",
        "A"
       ]
+     },
+     "xfail": {
+      "reason": "the case builds the robot from proj/model.glb alone (mt_rig_first), without the run's re-rig inputs (proj/*.json, card, v3/analysis.json, analysis/category.json, constitution, parts_seg): source angle 2.3 instead of 13.9 deg, pose_skeleton dropped, contact before 549, opening 102.7 deg, 36 lids, lid protrusion 55 % H (2026-10-21, report 20261021T133924Z-mt-base on production files); the conveyor's own re-rig of the run gives contact 0 / stand 0 (DEV #8499). Open: the bare build's 55 % H lids are a defect class of their own; the case needs the run's inputs before it can gate a release",
+      "owner": "Seams · biped"
      }
     },
     {
@@ -22942,19 +22944,13 @@
        1
       ]
      },
-     "note": "the candidate's 24-frame diag_glb stand after the secondary bands is 0 on all 9 clips; the stand kind at mode tear measures the rig_first rig before the bands, 50 is the margin"
+     "note": "the candidate's 24-frame diag_glb stand after the secondary bands is 0 on all 9 clips; the stand kind at mode tear measures the rig_first rig before the bands, 50 is the margin",
+     "xfail": {
+      "reason": "the case builds the robot from proj/model.glb alone (mt_rig_first), without the run's re-rig inputs (proj/*.json, card, v3/analysis.json, analysis/category.json, constitution, parts_seg): source angle 2.3 instead of 13.9 deg, pose_skeleton dropped, contact before 549, opening 102.7 deg, 36 lids, lid protrusion 55 % H (2026-10-21, report 20261021T133924Z-mt-base on production files); the conveyor's own re-rig of the run gives contact 0 / stand 0 (DEV #8499). Open: the bare build's 55 % H lids are a defect class of their own; the case needs the run's inputs before it can gate a release",
+      "owner": "Seams · biped"
+     }
     }
-   ],
-   "xfail": {
-    "rig_contract": {
-     "reason": "the case builds the robot from proj/model.glb alone (mt_rig_first), without the run's re-rig inputs (proj/*.json, card, v3/analysis.json, analysis/category.json, constitution, parts_seg): source angle 2.3 instead of 13.9 deg, pose_skeleton dropped, contact before 549, opening 102.7 deg, 36 lids, lid protrusion 55 % H (2026-10-21, report 20261021T133924Z-mt-base on production files); the conveyor's own re-rig of the run gives contact 0 / stand 0 (DEV #8499). Open: the bare build's 55 % H lids are a defect class of their own; the case needs the run's inputs before it can gate a release",
-     "owner": "Seams · biped"
-    },
-    "stand_tear": {
-     "reason": "the case builds the robot from proj/model.glb alone (mt_rig_first), without the run's re-rig inputs (proj/*.json, card, v3/analysis.json, analysis/category.json, constitution, parts_seg): source angle 2.3 instead of 13.9 deg, pose_skeleton dropped, contact before 549, opening 102.7 deg, 36 lids, lid protrusion 55 % H (2026-10-21, report 20261021T133924Z-mt-base on production files); the conveyor's own re-rig of the run gives contact 0 / stand 0 (DEV #8499). Open: the bare build's 55 % H lids are a defect class of their own; the case needs the run's inputs before it can gate a release",
-     "owner": "Seams · biped"
-    }
-   }
+   ]
   }
  ],
  "smoke_doc": "tier smoke (owner 2026-10-20): the cases flagged smoke are the one model per rig category a release gate runs; the rest run nightly (extended) and on demand by --case"
