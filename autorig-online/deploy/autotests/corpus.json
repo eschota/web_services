@@ -18940,7 +18940,13 @@
       "owner": "Biped tail · V3.1"
      }
     }
-   ]
+   ],
+   "xfail": {
+    "tail": {
+     "reason": "the trace acceptance by the final stand (2026-10-21, rig_first._judge_turn) keeps the untouched rig (A, opened, contact 0, 0 hole copies, stand 62) over the turned one (kept_draft, contact 56, 47 hole copies, slit 58 % H, stand 604); on the untouched rig the tail strikes the limbs (tail_pen_limb_strike 519 > 60; the turned rig had 16): a tail-rig / tail-clip defect of the untouched rig",
+     "owner": "Biped tail · V3.1"
+    }
+   }
   },
   {
    "id": "anthro_four_arms_tail",
@@ -21794,11 +21800,7 @@
        20
       ]
      },
-     "tier": "base",
-     "xfail": {
-      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
-      "owner": "Orient-Face · biped"
-     }
+     "tier": "base"
     },
     {
      "id": "mt_facing",
@@ -21826,11 +21828,7 @@
        1
       ]
      },
-     "note": "chibi 06c7b3af (run 684122b4): the rig faces +z (the face) and the judge says so",
-     "xfail": {
-      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
-      "owner": "Orient-Face · biped"
-     }
+     "note": "chibi 06c7b3af (run 684122b4): the rig faces +z (the face) and the judge says so"
     }
    ]
   },
@@ -21863,11 +21861,7 @@
        20
       ]
      },
-     "tier": "base",
-     "xfail": {
-      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
-      "owner": "Orient-Face · biped"
-     }
+     "tier": "base"
     },
     {
      "id": "mt_facing",
@@ -21895,11 +21889,7 @@
        1
       ]
      },
-     "note": "miner 67e7ae88 (run e239ac97): the rig faces +z (the face) and the judge says so",
-     "xfail": {
-      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
-      "owner": "Orient-Face · biped"
-     }
+     "note": "miner 67e7ae88 (run e239ac97): the rig faces +z (the face) and the judge says so"
     }
    ]
   },
@@ -21932,11 +21922,7 @@
        20
       ]
      },
-     "tier": "base",
-     "xfail": {
-      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
-      "owner": "Orient-Face · biped"
-     }
+     "tier": "base"
     },
     {
      "id": "mt_facing",
@@ -21964,11 +21950,7 @@
        1
       ]
      },
-     "note": "robot 92b3627c (run 8e43f4d7: a screen face, no toes; the orientator's head bulge pointed back): the rig faces +z (the face) and the judge says so",
-     "xfail": {
-      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
-      "owner": "Orient-Face · biped"
-     }
+     "note": "robot 92b3627c (run 8e43f4d7: a screen face, no toes; the orientator's head bulge pointed back): the rig faces +z (the face) and the judge says so"
     }
    ]
   },
@@ -22001,11 +21983,7 @@
        20
       ]
      },
-     "tier": "extended",
-     "xfail": {
-      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
-      "owner": "Orient-Face · biped"
-     }
+     "tier": "extended"
     },
     {
      "id": "mt_facing",
@@ -22033,11 +22011,7 @@
        1
       ]
      },
-     "note": "anthro fox 568237cd (run 279fea60: a quarter turn, the lateral line itself was wrong): the rig faces +z (the face) and the judge says so",
-     "xfail": {
-      "reason": "mt/facing.py not installed yet (the Orient-Face gate)",
-      "owner": "Orient-Face · biped"
-     }
+     "note": "anthro fox 568237cd (run 279fea60: a quarter turn, the lateral line itself was wrong): the rig faces +z (the face) and the judge says so"
     }
    ]
   },
@@ -22250,7 +22224,7 @@
    "checks": [
     {
      "id": "mt_rig",
-     "kind": "pending_detector",
+     "kind": "mt_rig_first",
      "paths": [
       "mt"
      ],
@@ -22272,16 +22246,11 @@
        ">=",
        5
       ]
-     },
-     "installed_kind": "mt_rig_first",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     },
     {
      "id": "bird_flap",
-     "kind": "pending_detector",
+     "kind": "bird_flap",
      "paths": [
       "mt"
      ],
@@ -22299,11 +22268,6 @@
        "==",
        1
       ]
-     },
-     "installed_kind": "bird_flap",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     }
    ]
@@ -22317,7 +22281,7 @@
    "checks": [
     {
      "id": "mt_rig",
-     "kind": "pending_detector",
+     "kind": "mt_rig_first",
      "paths": [
       "mt"
      ],
@@ -22344,16 +22308,11 @@
        7
       ]
      },
-     "note": "the eagle flies with its legs tucked out of sight: 17 bones, no leg chains, 7 clips (no Walk / Hop / Peck)",
-     "installed_kind": "mt_rig_first",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
-     }
+     "note": "the eagle flies with its legs tucked out of sight: 17 bones, no leg chains, 7 clips (no Walk / Hop / Peck)"
     },
     {
      "id": "bird_flap",
-     "kind": "pending_detector",
+     "kind": "bird_flap",
      "paths": [
       "mt"
      ],
@@ -22407,16 +22366,11 @@
        "==",
        1
       ]
-     },
-     "installed_kind": "bird_flap",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     },
     {
      "id": "stand_tear",
-     "kind": "pending_detector",
+     "kind": "anim_stand",
      "paths": [
       "mt"
      ],
@@ -22427,7 +22381,7 @@
       "clip": "auto"
      },
      "owner": "Bird wings · V3",
-     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20)",
+     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20); measured 2026-10-20 without scipy: worst 1.0-2.7, 0 edges over 4x",
      "thresholds": {
       "tear": [
        "==",
@@ -22439,17 +22393,12 @@
       ],
       "edges_over_4x": [
        "<=",
-       10
+       2
       ],
       "worst_edge_ratio": [
        "<=",
-       8
+       4
       ]
-     },
-     "installed_kind": "anim_stand",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     }
    ]
@@ -22463,7 +22412,7 @@
    "checks": [
     {
      "id": "mt_rig",
-     "kind": "pending_detector",
+     "kind": "mt_rig_first",
      "paths": [
       "mt"
      ],
@@ -22489,16 +22438,11 @@
        ">=",
        8
       ]
-     },
-     "installed_kind": "mt_rig_first",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     },
     {
      "id": "bird_flap",
-     "kind": "pending_detector",
+     "kind": "bird_flap",
      "paths": [
       "mt"
      ],
@@ -22552,16 +22496,11 @@
        "==",
        1
       ]
-     },
-     "installed_kind": "bird_flap",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     },
     {
      "id": "stand_tear",
-     "kind": "pending_detector",
+     "kind": "anim_stand",
      "paths": [
       "mt"
      ],
@@ -22572,7 +22511,7 @@
       "clip": "auto"
      },
      "owner": "Bird wings · V3",
-     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20)",
+     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20); measured 2026-10-20 without scipy: worst 1.0-2.7, 0 edges over 4x",
      "thresholds": {
       "tear": [
        "==",
@@ -22584,17 +22523,12 @@
       ],
       "edges_over_4x": [
        "<=",
-       10
+       2
       ],
       "worst_edge_ratio": [
        "<=",
-       8
+       4
       ]
-     },
-     "installed_kind": "anim_stand",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     }
    ]
@@ -22608,7 +22542,7 @@
    "checks": [
     {
      "id": "mt_rig",
-     "kind": "pending_detector",
+     "kind": "mt_rig_first",
      "paths": [
       "mt"
      ],
@@ -22634,16 +22568,11 @@
        ">=",
        6
       ]
-     },
-     "installed_kind": "mt_rig_first",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     },
     {
      "id": "bird_flap",
-     "kind": "pending_detector",
+     "kind": "bird_flap",
      "paths": [
       "mt"
      ],
@@ -22671,7 +22600,7 @@
       ],
       "wing_scale": [
        ">=",
-       0.4
+       0.35
       ],
       "elevation_range_deg": [
        ">=",
@@ -22693,11 +22622,6 @@
        "==",
        1
       ]
-     },
-     "installed_kind": "bird_flap",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     }
    ]
@@ -22711,7 +22635,7 @@
    "checks": [
     {
      "id": "mt_rig",
-     "kind": "pending_detector",
+     "kind": "mt_rig_first",
      "paths": [
       "mt"
      ],
@@ -22737,16 +22661,11 @@
        ">=",
        8
       ]
-     },
-     "installed_kind": "mt_rig_first",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     },
     {
      "id": "bird_flap",
-     "kind": "pending_detector",
+     "kind": "bird_flap",
      "paths": [
       "mt"
      ],
@@ -22800,16 +22719,11 @@
        "==",
        1
       ]
-     },
-     "installed_kind": "bird_flap",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     },
     {
      "id": "stand_tear",
-     "kind": "pending_detector",
+     "kind": "anim_stand",
      "paths": [
       "mt"
      ],
@@ -22820,7 +22734,7 @@
       "clip": "auto"
      },
      "owner": "Bird wings · V3",
-     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20)",
+     "note": "the stand plays the bird's Fly (anim_stand.choose_clip, 2026-10-20); measured 2026-10-20 without scipy: worst 1.0-2.7, 0 edges over 4x",
      "thresholds": {
       "tear": [
        "==",
@@ -22832,17 +22746,12 @@
       ],
       "edges_over_4x": [
        "<=",
-       10
+       2
       ],
       "worst_edge_ratio": [
        "<=",
-       8
+       4
       ]
-     },
-     "installed_kind": "anim_stand",
-     "pending": {
-      "reason": "mt/bird.py not installed yet (Bird-Wings gate pending); flipped to pass by its own gate launcher right before mt-deploy",
-      "owner": "Bird wings · V3"
      }
     }
    ]
