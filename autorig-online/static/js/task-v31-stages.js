@@ -678,6 +678,31 @@ function start(viewerEl) {
   // нормальную верстку»): the right column holds the viewer's right toolbar and, beside it, the panel (≤ 260 px, scrolls
   // inside, never over the call window); the bottom centre holds the clip bar and above it the scrub (12 px gap, the
   // same width rule, moved left of the call window when they would meet); the card stays inside what is left.
+  // the viewer's mode switch shows through the presentation (owner 2026-10-22: «это меню всегда должно быть во
+  // вьювере, а сейчас на старте его нет»): holes in the backdrop and the splat canvas over the boxes the viewer lists
+  // (viewer-fit.js autorigFit.holes: the switch and its tooltip), so it is seen and clicked during the replay as well
+  function holePass() {
+    let hole = '';
+    try {
+      const d = viewerEl.contentDocument, f = d && d.defaultView && d.defaultView.autorigFit;
+      const list = f && (f.holes || (f.boxes && f.boxes.bpMode ? [f.boxes.bpMode] : []));
+      if (list && list.length) {
+        const r = root.getBoundingClientRect(), vr = viewerEl.getBoundingClientRect();
+        const ox = vr.left - r.left, oy = vr.top - r.top, q = 3, R = (v) => Math.round(v);
+        hole = `path(evenodd, "M0 0H${R(r.width)}V${R(r.height)}H0Z`;
+        for (const bm of list) {
+          const l = R(ox + bm.l - q), t = R(oy + bm.t - q), rr = R(ox + bm.r + q), bb = R(oy + bm.b + q), k = Math.max(0, Math.min(bm.k == null ? 20 : bm.k, R((bb - t) / 2), R((rr - l) / 2)));
+          hole += ` M${l + k} ${t}H${rr - k}A${k} ${k} 0 0 1 ${rr} ${t + k}V${bb - k}A${k} ${k} 0 0 1 ${rr - k} ${bb}H${l + k}A${k} ${k} 0 0 1 ${l} ${bb - k}V${t + k}A${k} ${k} 0 0 1 ${l + k} ${t}Z`;
+        }
+        hole += '")';
+      }
+    } catch (e) { hole = ''; }
+    const back = $('.v31-back');
+    if (back && back._hole !== hole) { back._hole = hole; back.style.clipPath = hole; }   // the browser rewrites the string
+    const cvHole = docked ? '' : hole;
+    if (cv._hole !== cvHole) { cv._hole = cvHole; cv.style.clipPath = cvHole; }
+  }
+  setInterval(holePass, 200);
   var lay = null;   // var: layout() is hoisted and ran before this line (ReferenceError at :684, verifier 2026-10-20)
   function layout() {
     const r = root.getBoundingClientRect();
@@ -704,6 +729,18 @@ function start(viewerEl) {
       const sp = d.getElementById('scp');
       if (sp && box(sp)) [...sp.querySelectorAll('*')].forEach((el) => { const q = el.children.length ? null : box(el); if (q && q.h < 120) scpB = scpB ? { l: Math.min(scpB.l, q.l), r: Math.max(scpB.r, q.r), b: Math.max(scpB.b, q.b) } : q; });
     }
+    // the viewer's free room (viewer-fit.js, owner 2026-10-22 «весь интерфейс связанный со вьювером должен быть внутри
+    // него»): the room its bars leave in the middle; the scrub bar and the cards stay inside it, off the left column,
+    // the 1–0 bar, the clip bar, the right column and the agent card. An older viewer has none: the rules below alone.
+    let freeB = null;
+    try {
+      const f = d && d.defaultView && d.defaultView.autorigFit && d.defaultView.autorigFit.free;
+      if (f && f.r - f.l >= 160 && f.b - f.t >= 60) {
+        const ox = vr.left - r.left, oy = vr.top - r.top;
+        freeB = { l: ox + f.l, t: oy + f.t, r: ox + f.r, b: oy + f.b };
+      }
+    } catch (e) { freeB = null; }
+    holePass();
     root.classList.toggle('phone', phone);
     // the bottom centre
     let floor = vh - 12;
@@ -722,6 +759,12 @@ function start(viewerEl) {
         bandTop = floor - 12 - sh;
       }
     }
+    if (freeB) {
+      floor = Math.min(floor, freeB.b + 12);
+      bandTop = floor - 12 - sh;
+      sw = Math.min(sw, freeB.r - freeB.l);
+      cx = Math.max(freeB.l + sw / 2, Math.min(cx, freeB.r - sw / 2));
+    }
     scrub.style.left = `${Math.round(cx)}px`;
     scrub.style.width = `${Math.round(sw)}px`;
     scrub.style.bottom = `${Math.round(vh - floor + 12)}px`;
@@ -730,13 +773,18 @@ function start(viewerEl) {
     // the right column
     let pRight = fxB ? vw - fxB.l + 8 : 16;
     const pw0 = Math.min(260, panel.offsetWidth || 236);
-    const top = Math.round(phone ? 56 : (scpB && scpB.r > vw - pRight - pw0 - 260 && scpB.l < vw - pRight ? Math.max(64, scpB.b + 8) : 64));
+    let top = Math.round(phone ? 56 : (scpB && scpB.r > vw - pRight - pw0 - 260 && scpB.l < vw - pRight ? Math.max(64, scpB.b + 8) : 64));
+    if (freeB) top = Math.max(top, Math.round(freeB.t));
     let pBottom = barsTop - 12;
     const pw = Math.min(260, panel.offsetWidth || 236);
     if (callB && callB.t < pBottom && callB.l < vw - pRight && callB.r > vw - pRight - pw) {
       if (callB.t - 12 - top >= 160) pBottom = callB.t - 12;   // above the call window when there is room
       else pRight = vw - callB.l + 8;                           // else beside it
     }
+    if (freeB) {
+      pRight = Math.max(pRight, vw - freeB.r);
+      panel.style.maxWidth = `${Math.round(Math.max(120, freeB.r - freeB.l))}px`;
+    } else panel.style.maxWidth = '';
     panel.style.right = `${Math.round(pRight)}px`;
     panel.style.top = `${top}px`;
     panel.style.maxHeight = `${Math.round(Math.max(phone ? 40 : 96, pBottom - top))}px`;

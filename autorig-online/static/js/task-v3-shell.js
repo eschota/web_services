@@ -206,6 +206,10 @@ function viewerUrl(viewer) {
   url.searchParams.set('agent_task', taskId);
   url.searchParams.set('agent_lang', agentLang());
   url.searchParams.set('ui_lang', agentLang());
+  // a staged viewer build for review (Viewer UX 2026-10-22): /task?id=…&viewer_build=v3-20261022-sym2 loads
+  // /api/mt/unity/<that dir>/index.html instead of unity/test; only a v3-* directory name, nothing else
+  const vb = String(params.get('viewer_build') || '');
+  if (/^v3-[0-9a-z][0-9a-z-]{2,60}$/.test(vb)) url.pathname = `/api/mt/unity/${vb}/index.html`;
   return url;
 }
 
@@ -402,10 +406,12 @@ function render(state) {
   return status === 'created' ? 4000 : 2500;
 }
 
-// ---------------------------------------------------------------- the viewer's three modes on the page (owner 2026-10-20)
+// ---------------------------------------------------------------- the viewer's three modes (owner 2026-10-20, 2026-10-22)
 // «режим Canvas … доступен только когда есть сегментация и так же на таб переключается и в UX»: the viewer (blueprint.js
-// mode3) owns the state and posts {type: 'autorig.v3.mode', mode, canvas_ok, rigged, modes}; this strip mirrors it in the
-// tool row and switches it with autorigBlueprint.setMode3(). Canvas shows only when the run has its parts.
+// mode3) owns the state and posts {type: 'autorig.v3.mode', mode, canvas_ok, rigged, modes}. The switch itself lives only
+// inside the viewer (#bpMode, from its first frame; owner 2026-10-22: «это меню всегда должно быть во вьювере … весь
+// интерфейс связанный со вьювером должен быть внутри него»): the page keeps no copy in its tool row, it only follows the
+// mode (the Canvas class, the paused page animations, the replay skipped). Tab / Shift+Tab are forwarded above.
 const MODE_ICON = {
   preview: '<circle cx="8" cy="5" r="2.2"/><path d="M8 7.2v6.5M3.5 10.5h9M8 13.7l-3 6.3M8 13.7l3 6.3" opacity=".75"/><path d="M14.5 8.5v10l7.5-5z" fill="currentColor"/>',
   blueprint: '<circle cx="9" cy="5" r="2.2"/><path d="M9 7.2v7M4 10.5h10M9 14.2l-3 6M9 14.2l3 6"/><path d="M14.5 17.5l5-5 2.2 2.2-5 5-3 .8z"/>',
@@ -434,9 +440,10 @@ function pageAnimHold(on) {
   hold();
   if (!pageAnimTimer) pageAnimTimer = setInterval(hold, 1000);
 }
+const PAGE_MODE_STRIP = false;   // 2026-10-22: the strip in the page's tool row is gone; the viewer has the switch
 function buildModes() {
   const tools = document.getElementById('tv3-tools');
-  if (!tools || modeEls.box) return;
+  if (!PAGE_MODE_STRIP || !tools || modeEls.box) return;
   const box = document.createElement('span');
   box.className = 'tv3-modes';
   box.hidden = true;
@@ -463,9 +470,8 @@ function buildModes() {
 }
 function paintModes() {
   buildModes();
-  if (!modeEls.box) return;
   const d = modeState;
-  modeEls.box.hidden = !(d && d.rigged);
+  if (modeEls.box) modeEls.box.hidden = !(d && d.rigged);
   const canvasOn = !!(d && d.mode === 'canvas');
   // the Canvas is the result: a stage replay still playing over it (task-v31-stages.js) is skipped, as its own ⏭ does
   if (canvasOn && !els.stage.classList.contains('tv3-canvas')) {
@@ -475,7 +481,7 @@ function paintModes() {
   }
   els.stage.classList.toggle('tv3-canvas', canvasOn);
   pageAnimHold(canvasOn);
-  if (!d) return;
+  if (!d || !modeEls.box) return;
   for (const m of ['blueprint', 'preview', 'canvas']) {
     const b = modeEls[m];
     const on = d.mode === m;
