@@ -143,11 +143,79 @@ AI_MODELS: List[Dict[str, object]] = [
         "default": False,
     },
 ]
+# Models that exist in code but are offered only when AI_MODEL_EXTRA names them (2026-11-06, A/B of a smaller
+# vision model for M+ keywording, owner-approved). Until then they are not in /api/ai/models and a request for one
+# is refused as an unknown model, exactly as before.
+OPTIONAL_AI_MODELS: List[Dict[str, object]] = [
+    {
+        "id": "qwen35-4b",
+        # Same family, chat template and projector as the 9B, so it gets the
+        # 9B's prompt-folded instructions; its system role is not canaried.
+        "graph_agent_supported": False,
+        "graph_agent_instruction_role": "prompt",
+        "unlimited_output_supported": True,
+        "title": "Qwen3.5 4B",
+        "description": (
+            "Small vision-language model on the farm's own GPUs (Qwen3.5-4B, Q4_K_M). "
+            "Faster than the 9B; stock Qwen, not uncensored."
+        ),
+        "modes": ["vision", "text"],
+        "context_tokens": 4096,
+        "max_output_tokens": 2048,
+        "hosting": "local-farm",
+        "uncensored": False,
+        "reasons_first": False,
+        "default_output_tokens": 1024,
+        "default": False,
+    },
+]
+
 # Owner 2026-10-07: «зачем вообще нам разные модели, давай оставим одну uncensored». With AI_MODEL_SINGLE set, every
 # request - whatever model it names, or none - is served by that one model, so the farm nodes keep one model resident
 # and never swap 7 GB of weights between tasks. Unset keeps the two-model behaviour.
 SINGLE_MODEL_ID = os.getenv("AI_MODEL_SINGLE", "").strip().lower()
 DEFAULT_MODEL_ID = SINGLE_MODEL_ID or "bonsai2-27b"
+
+
+def _parse_model_list(raw: str) -> List[str]:
+    out: List[str] = []
+    for part in str(raw or "").replace(";", ",").split(","):
+        name = part.strip().lower()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+# AI_MODEL_EXTRA (2026-11-06): models served *only when a request names them*, next to AI_MODEL_SINGLE - the A/B arm
+# of a second model. A request that names nothing or anything else still gets the single model, so M+ and every
+# other caller keep today's behaviour until they ask for the extra model by id. Routing needs no other change:
+# _pick_worker only sends a model to nodes whose catalogue lists it (an ai_node configured with that model).
+# Empty (the default) = exactly the old behaviour.
+EXTRA_MODEL_IDS: List[str] = _parse_model_list(os.getenv("AI_MODEL_EXTRA", ""))
+
+
+def _enabled_catalogue(base: List[Dict[str, object]], optional: List[Dict[str, object]],
+                       extra: List[str]) -> List[Dict[str, object]]:
+    """The public catalogue: the built-in models plus the optional ones AI_MODEL_EXTRA names."""
+    known = {str(entry["id"]).lower() for entry in base}
+    added = [entry for entry in optional
+             if str(entry["id"]).lower() in extra and str(entry["id"]).lower() not in known]
+    return list(base) + added
+
+
+AI_MODELS = _enabled_catalogue(AI_MODELS, OPTIONAL_AI_MODELS, EXTRA_MODEL_IDS)
+
+
+def _resolve_model_id(model_id: Optional[str], single: str, extra: List[str], default: str) -> str:
+    """Which model serves a request that names `model_id`.
+
+    single set: that model, unless the request names one of `extra` explicitly.
+    single unset: the named model, or the default.
+    """
+    named = str(model_id or "").strip().lower()
+    if named and named in extra:
+        return named
+    return single or named or default
 
 MAX_PROMPT_CHARS = 8000
 MAX_INLINE_IMAGE_BYTES = 12 * 1024 * 1024
@@ -269,7 +337,7 @@ class TextRequest(BaseModel):
 
 
 def _model_entry(model_id: Optional[str]) -> Dict[str, object]:
-    wanted = SINGLE_MODEL_ID or str(model_id or DEFAULT_MODEL_ID).strip().lower()
+    wanted = _resolve_model_id(model_id, SINGLE_MODEL_ID, EXTRA_MODEL_IDS, DEFAULT_MODEL_ID)
     for entry in AI_MODELS:
         if str(entry["id"]).lower() == wanted:
             return entry
