@@ -8,7 +8,7 @@
 #    two files must already be there (e.g. copied over the LAN from a box that has them).
 # 2. Checks the sizes against the Hugging Face listing of 2026-11-06.
 # 3. Backs up config.json (*.bak-4b-<time>) and adds a "models" entry for qwen35-4b with its own llama-server
-#    flags (validated against llama.cpp b10709 on f13). The 9B stays the primary model and keeps its flags.
+#    flags (validated against llama.cpp b10709 on f13; no -np 2: parallel vision crashed b10709 on f2, see README). The 9B stays the primary model and keeps its flags.
 #    Needs an ai_node.py with the "models" key (ai-node-20261106-models or later): pass it with -NewCode.
 # 4. Restarts the node's scheduled task once it has no AI task (apply-node-tuning.ps1 does the same wait).
 # Rollback: copy the backup over config.json (and ai_node.py.bak-4b-*) and restart the task.
@@ -18,7 +18,7 @@ param(
     [string]$ModelsDir = '',
     [string]$NewCode = '',
     [switch]$Download,
-    [string[]]$LlamaArgs = @('-np', '2', '-kvu', '-b', '2048', '-ub', '1024', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0',
+    [string[]]$LlamaArgs = @('-b', '2048', '-ub', '1024', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0',
                              '--image-min-tokens', '64', '--image-max-tokens', '1024'),
     [int]$VramNeedMb = 5600
 )

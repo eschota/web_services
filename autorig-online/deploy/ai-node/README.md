@@ -374,6 +374,13 @@ long request still gets the whole window and VRAM stays as with one slot). Loads
 and the node never stops llama-server under another task that is still generating. Decode on these cards is
 memory-bound, so two answers at once give more files per minute; one answer alone gets a little slower.
 
+**Do not turn it on yet (2026-11-06).** On f2 (GTX 1080 Ti, llama.cpp b10709, qwen35-9b-uncensored + BF16 mmproj)
+two direct vision requests sent next to the node's own running task made llama-server abort
+(exit 0xC0000409) after ~12 s; the node's task failed with `model_unreachable` and the node reloaded the model
+(36 s). The cause (CUDA OOM with three ~2000-token image prompts, or a multi-sequence bug of this build with
+Qwen3.5's hybrid attention) was not caught: `llama_log_file` is rewritten on every start. Reproduce on a box out
+of rotation, with the log copied away, before any node runs `parallel_tasks` > 1 or `-np` > 1 with images.
+
 Tests: `python -m unittest test_models_config` (config, routing, swap; no GPU) and `python selftest_parallel.py`
 (4 slow fake tasks: parallel 2 finishes in ~9 s instead of ~15 s, one llama-server start), plus `selftest.py`.
 
@@ -392,7 +399,7 @@ Tests: `python -m unittest test_models_config` (config, routing, swap; no GPU) a
   f11 keeps its 9B in the converter's read-only `ai-vision\models`: add `-ModelsDir C:\ProgramData\AutoRig\ai-node\models`.
 * llama-server flags of the 4B profile, each checked in `llama-server --help` of the b10709 build on f13
   (`version: 0.2.0-dev (build 10709, commit 9a9394a89)`): `-ngl 99` (node `ngl`), `-c 4096` (`context_tokens`),
-  `-np 2 -kvu`, `-b 2048 -ub 1024`, `-fa on`, `-ctk q8_0 -ctv q8_0`, `--image-min-tokens 64 --image-max-tokens 1024`,
+  `-b 2048 -ub 1024`, `-fa on`, `-ctk q8_0 -ctv q8_0`, `--image-min-tokens 64 --image-max-tokens 1024`,
   `--reasoning off` (from `reasoning: off`). `--chat-template-kwargs '{"enable_thinking":false}'` is supported
   too but left out: `--reasoning off` is the same switch, and answers already come back with an empty
   `reasoning_content` (0 characters on f13).
@@ -405,5 +412,6 @@ Tests: `python -m unittest test_models_config` (config, routing, swap; no GPU) a
 
 f2, f13 ran `a1919c78` (ai-node-20261007); f11 an own build. The throughput patch for that build
 (`patches/a1919c78-parallel-tasks.diff`, VERSION `ai-node-20261007-par`) adds only `parallel_tasks`;
-`apply-node-tuning.ps1 -Task <task> -NewCode <patched ai_node.py>` installs it with
-`parallel_tasks 2` and `-fa on -ctk q8_0 -ctv q8_0 -np 2 -kvu`, backups `*.bak-vab-20261106`, `-Rollback` restores.
+`apply-node-tuning.ps1 -Task <task> -NewCode <patched ai_node.py> -Parallel <n> -LlamaArgs <flags>` installs it
+(backups `*.bak-vab-20261106`, idle-gated restart, `-Rollback` restores). Not applied anywhere: f13 went into the
+GPU swap before the change, and the f2 crash above stopped the rollout.

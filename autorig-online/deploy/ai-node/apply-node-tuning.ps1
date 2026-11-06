@@ -3,7 +3,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File apply-node-tuning.ps1 -Task "AutoRig AI Node F13" [-NewCode <path>] [-Rollback]
 #
 # Apply: backs up ai_node.py and config.json (*.bak-vab-20261106, once), optionally installs a new ai_node.py,
-# sets parallel_tasks=2 and the llama-server flags below in config.json, waits until the node has no AI task
+# sets parallel_tasks and extra_llama_args from -Parallel / -LlamaArgs in config.json, waits until the node has no AI task
 # (processing or pending, up to 15 min), then restarts the node's scheduled task (llama-server dies with it via
 # the kill-on-close job) and waits for /healthz. Rollback: restores both backups and restarts the same way.
 # The token is read from the node's token file and never printed.
@@ -11,8 +11,10 @@ param(
     [Parameter(Mandatory = $true)][string]$Task,
     [string]$Dir = 'C:\ProgramData\AutoRig\ai-node',
     [string]$NewCode = '',
-    [string[]]$LlamaArgs = @('-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '-np', '2', '-kvu'),
-    [int]$Parallel = 2,
+    # No defaults that change behaviour: on 2026-11-06 concurrent vision requests crashed llama-server b10709 on f2
+    # (README, «Do not turn it on yet»). Pass e.g. -Parallel 2 -LlamaArgs -fa,on,-np,2,-kvu only on a test box.
+    [string[]]$LlamaArgs = @(),
+    [int]$Parallel = 1,
     [int]$Keepalive = 600,
     [switch]$Rollback
 )
