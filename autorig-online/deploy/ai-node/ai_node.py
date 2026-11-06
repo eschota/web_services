@@ -54,7 +54,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional, Tuple
 
-VERSION = "ai-node-20261011c"
+VERSION = "ai-node-20261106-models"
 API_PREFIX = "/api-converter-glb"
 WORKLOAD_AI_VISION = "ai_vision"
 
@@ -98,7 +98,23 @@ KNOWN_MODELS: Dict[str, Dict[str, object]] = {
         # reasoning and never answered; with it off it answers in seconds.
         "reasoning": "off",
     },
+    # 2026-11-06: the A/B candidate for M+ keywording (owner-approved, installed by the owner):
+    # unsloth/Qwen3.5-4B-GGUF Qwen3.5-4B-Q4_K_M.gguf (2.74 GB) + mmproj-F16.gguf (0.67 GB), kept in their own
+    # folder under models_dir because the projector's file name is generic.
+    "qwen35-4b": {
+        "title": "Qwen3.5 4B",
+        "weights": os.path.join("qwen35-4b", "Qwen3.5-4B-Q4_K_M.gguf"),
+        "mmproj": os.path.join("qwen35-4b", "mmproj-F16.gguf"),
+        "context_tokens": 4096,
+        "uncensored": False,
+        "max_output_tokens": 2048,
+        "reasoning": "off",
+    },
 }
+
+# Keys one model profile may set; everything else in the config is node-wide.
+MODEL_KEYS = ("model_id", "title", "weights", "mmproj", "context_tokens", "max_output_tokens", "reasoning",
+              "uncensored", "system_prompt_supported", "vram_need_mb", "extra_llama_args")
 
 # The converter hardcodes system_prompt_models=["bonsai2-27b"] (bonsai_adapter
 # 60101f4, line 283): only that model passed the system-role canary.
@@ -126,6 +142,12 @@ DEFAULT_CONFIG: Dict[str, object] = {
     "llama_server": "",
     "llama_port": 8092,
     "extra_llama_args": [],
+    # More than one model on one node (2026-11-06, the 4B A/B). Each entry is a model profile: model_id plus any of
+    # MODEL_KEYS (weights, mmproj, context_tokens, reasoning, vram_need_mb, its own extra_llama_args appended after
+    # the node-wide ones, ...); a known model_id fills in the rest. One model is loaded at a time: a task for another
+    # model waits until the running one finishes, then the node swaps the weights (stop + load, ~10-30 s). The
+    # top-level model_id (or, without one, the first entry) is the primary model. Empty = one pinned model, as before.
+    "models": [],
     "llama_log_file": "",
     "cuda_visible_devices": "",
     "nvidia_smi": "nvidia-smi",
@@ -182,6 +204,10 @@ DEFAULT_CONFIG: Dict[str, object] = {
     "max_prompt_chars": MAX_PROMPT_CHARS,
     "keepalive_seconds": 120,
     "max_tasks": 2,
+    # Tasks generating at the same time (2026-11-06, throughput for big M+ batches). llama-server needs as many
+    # slots: e.g. ["-np", "2", "-kvu"] in extra_llama_args (-kvu keeps one shared KV of context_tokens, so one long
+    # request still gets the whole window). Loads and model swaps stay one at a time. 1 = one task at a time.
+    "parallel_tasks": 1,
     "comfy_wait_seconds": 300,
     "start_timeout_seconds": DEFAULT_START_TIMEOUT_SECONDS,
     "request_timeout_seconds": DEFAULT_REQUEST_TIMEOUT_SECONDS,
@@ -213,37 +239,33 @@ class Config:
         self.unknown_keys = unknown
         merged = dict(DEFAULT_CONFIG)
         merged.update({k: v for k, v in raw.items() if k in DEFAULT_CONFIG})
-        model_id = str(merged.get("model_id") or "").strip()
-        if not model_id:
-            raise ValueError("config: model_id is required")
-        known = KNOWN_MODELS.get(model_id.lower(), {})
-        for key, value in known.items():
-            if merged.get(key) in (None, ""):
-                merged[key] = value
         self.base_dir = base_dir
         self.node_name = str(merged["node_name"] or socket.gethostname()).strip()
         self.listen_host = str(merged["listen_host"] or "127.0.0.1")
         self.listen_port = int(merged["listen_port"])
         self.token_file = self._path(merged["token_file"]) if merged["token_file"] else ""
-        self.model_id = model_id
-        self.title = str(merged.get("title") or model_id)
-        models_dir = self._path(merged["models_dir"]) if merged.get("models_dir") else (
+        self.models_dir = self._path(merged["models_dir"]) if merged.get("models_dir") else (
             os.path.join(base_dir, "models"))
-        weights = str(merged.get("weights") or "").strip()
-        if not weights:
-            raise ValueError("config: weights is required for a model the node does not know")
-        self.weights = weights if os.path.isabs(weights) else os.path.join(models_dir, weights)
-        mmproj = str(merged.get("mmproj") or "").strip()
-        self.mmproj = (mmproj if (not mmproj or os.path.isabs(mmproj))
-                       else os.path.join(models_dir, mmproj))
-        self.context_tokens = int(merged.get("context_tokens") or 4096)
-        self.max_output_tokens = int(merged.get("max_output_tokens") or 2048)
-        self.reasoning = str(merged.get("reasoning") or "auto").strip().lower()
-        self.uncensored = bool(merged.get("uncensored"))
-        sp = merged.get("system_prompt_supported")
-        self.system_prompt_supported = (model_id.lower() in SYSTEM_ROLE_VERIFIED_MODELS
-                                        if sp is None else bool(sp))
-        self.vram_need_mb = int(merged["vram_need_mb"]) if merged.get("vram_need_mb") else 0
+        # Node-wide llama-server flags; a profile's own extra_llama_args come after them.
+        self.node_extra_llama_args = [str(a) for a in (merged.get("extra_llama_args") or [])]
+        self.profiles: Dict[str, Dict[str, object]] = {}
+        entries: List[Dict[str, object]] = []
+        if str(merged.get("model_id") or "").strip():
+            entries.append({k: merged.get(k) for k in MODEL_KEYS if k != "extra_llama_args"})
+        extra_models = merged.get("models") or []
+        if not isinstance(extra_models, list) or not all(isinstance(e, dict) for e in extra_models):
+            raise ValueError("config: models must be a list of objects")
+        entries.extend(extra_models)
+        if not entries:
+            raise ValueError("config: model_id is required")
+        for entry in entries:
+            profile = self._resolve_profile(entry)
+            key = str(profile["model_id"]).lower()
+            if key in self.profiles:
+                raise ValueError(f"config: model {profile['model_id']} is listed twice")
+            self.profiles[key] = profile
+        self.primary_model_id = str(next(iter(self.profiles.values()))["model_id"])
+        self.select_model(self.primary_model_id)
         self.vram_overhead_mb = int(merged["vram_overhead_mb"])
         self.vram_margin_mb = int(merged["vram_margin_mb"])
         self.ngl = int(merged["ngl"])
@@ -251,7 +273,6 @@ class Config:
         if not self.llama_server:
             raise ValueError("config: llama_server is required")
         self.llama_port = int(merged["llama_port"])
-        self.extra_llama_args = [str(a) for a in (merged.get("extra_llama_args") or [])]
         self.llama_log_file = (self._path(merged["llama_log_file"])
                                if merged.get("llama_log_file") else "")
         self.cuda_visible_devices = str(merged.get("cuda_visible_devices") or "").strip()
@@ -283,6 +304,7 @@ class Config:
         self.max_prompt_chars = max(1000, int(merged.get("max_prompt_chars") or MAX_PROMPT_CHARS))
         self.keepalive_seconds = int(merged["keepalive_seconds"])
         self.max_tasks = max(1, int(merged["max_tasks"]))
+        self.parallel_tasks = max(1, min(8, int(merged.get("parallel_tasks") or 1)))
         self.comfy_wait_seconds = max(0.0, float(merged["comfy_wait_seconds"]))
         self.start_timeout_seconds = int(merged["start_timeout_seconds"])
         self.request_timeout_seconds = int(merged["request_timeout_seconds"])
@@ -290,6 +312,63 @@ class Config:
         self.allow_private_image_urls = bool(merged["allow_private_image_urls"])
         self.log_file = self._path(merged["log_file"]) if merged.get("log_file") else ""
         self.log_level = str(merged.get("log_level") or "INFO").upper()
+
+    def _resolve_profile(self, entry: Dict[str, object]) -> Dict[str, object]:
+        """One model profile: the entry, then the known model's values for what it leaves out."""
+        unknown = sorted(set(entry) - set(MODEL_KEYS) - {"_comment"})
+        if unknown:
+            raise ValueError(f"config: unknown model keys {unknown}")
+        model_id = str(entry.get("model_id") or "").strip()
+        if not model_id:
+            raise ValueError("config: every model needs a model_id")
+        merged = {k: entry.get(k) for k in MODEL_KEYS}
+        for key, value in KNOWN_MODELS.get(model_id.lower(), {}).items():
+            if merged.get(key) in (None, ""):
+                merged[key] = value
+        weights = str(merged.get("weights") or "").strip()
+        if not weights:
+            raise ValueError(f"config: weights is required for a model the node does not know ({model_id})")
+        mmproj = str(merged.get("mmproj") or "").strip()
+        sp = merged.get("system_prompt_supported")
+        return {
+            "model_id": model_id,
+            "title": str(merged.get("title") or model_id),
+            "weights": weights if os.path.isabs(weights) else os.path.join(self.models_dir, weights),
+            "mmproj": mmproj if (not mmproj or os.path.isabs(mmproj)) else os.path.join(self.models_dir, mmproj),
+            "context_tokens": int(merged.get("context_tokens") or 4096),
+            "max_output_tokens": int(merged.get("max_output_tokens") or 2048),
+            "reasoning": str(merged.get("reasoning") or "auto").strip().lower(),
+            "uncensored": bool(merged.get("uncensored")),
+            "system_prompt_supported": (model_id.lower() in SYSTEM_ROLE_VERIFIED_MODELS
+                                        if sp is None else bool(sp)),
+            "vram_need_mb": int(merged["vram_need_mb"]) if merged.get("vram_need_mb") else 0,
+            "extra_llama_args": [str(a) for a in (merged.get("extra_llama_args") or [])],
+        }
+
+    def select_model(self, model_id: str) -> None:
+        """Make `model_id` the profile the launch line, budgets and catalogue use."""
+        profile = self.profiles[str(model_id).lower()]
+        self.model_id = str(profile["model_id"])
+        self.title = str(profile["title"])
+        self.weights = str(profile["weights"])
+        self.mmproj = str(profile["mmproj"])
+        self.context_tokens = int(profile["context_tokens"])
+        self.max_output_tokens = int(profile["max_output_tokens"])
+        self.reasoning = str(profile["reasoning"])
+        self.uncensored = bool(profile["uncensored"])
+        self.system_prompt_supported = bool(profile["system_prompt_supported"])
+        self.vram_need_mb = int(profile["vram_need_mb"])
+        self.extra_llama_args = list(self.node_extra_llama_args) + list(profile["extra_llama_args"])
+
+    def profile(self, model_id: str) -> Optional[Dict[str, object]]:
+        return self.profiles.get(str(model_id or "").strip().lower())
+
+    def profile_installed(self, model_id: str) -> bool:
+        profile = self.profile(model_id)
+        return bool(profile) and self.binary_installed() and os.path.isfile(str(profile["weights"]))
+
+    def installed_model_ids(self) -> List[str]:
+        return [str(p["model_id"]) for p in self.profiles.values() if self.profile_installed(str(p["model_id"]))]
 
     def _path(self, value: object) -> str:
         text = str(value or "").strip()
@@ -878,6 +957,11 @@ class LlamaServer:
         with self._lock:
             return self._in_use > 0
 
+    def users(self) -> int:
+        """Tasks holding the server right now (parallel_tasks > 1 lets several share it)."""
+        with self._lock:
+            return self._in_use
+
     def idle_seconds(self) -> float:
         with self._lock:
             if not self.running() or self._in_use:
@@ -925,12 +1009,16 @@ class LlamaServer:
     def _is_ours(self, cmdline: str) -> bool:
         """A command line this node would have launched: our weights, port and alias."""
         text = os.path.normcase(cmdline)
-        if os.path.normcase(os.path.abspath(self.cfg.weights)) not in text and \
-                os.path.normcase(self.cfg.weights) not in text:
-            return False
         port = re.search(r'--port\s+"?%d"?(\s|$)' % self.cfg.llama_port, cmdline)
-        alias = re.search(r'--alias\s+"?%s"?(\s|$)' % re.escape(self.cfg.model_id), cmdline)
-        return bool(port and alias)
+        if not port:
+            return False
+        for profile in self.cfg.profiles.values():     # any of our models (a swap may have left the other one)
+            weights = str(profile["weights"])
+            if os.path.normcase(os.path.abspath(weights)) not in text and os.path.normcase(weights) not in text:
+                continue
+            if re.search(r'--alias\s+"?%s"?(\s|$)' % re.escape(str(profile["model_id"])), cmdline):
+                return True
+        return False
 
     def release_stray(self) -> int:
         """Stop a llama-server a previous ai_node run left on our port.
@@ -966,7 +1054,7 @@ class LlamaServer:
         if not cfg.installed():
             raise NodeError("runtime_not_installed")
         with self._lock:
-            if self.running() and self._loaded_model_id and self.answering():
+            if self.running() and self._loaded_model_id == cfg.model_id and self.answering():
                 self.last_used = time.monotonic()
                 return
             self._stop_locked("restart")
@@ -1248,6 +1336,7 @@ class Node:
         self.llama = LlamaServer(cfg)
         self.tasks: Dict[str, AiTask] = {}
         self.lock = threading.RLock()
+        self._model_lock = threading.Lock()     # parallel_tasks: one model check / load / swap at a time
         self.work: "queue.Queue[str]" = queue.Queue()
         self.work_owner: "queue.Queue[str]" = queue.Queue()   # the owner's requests, taken first
         self._comfy_preempted_at = 0.0
@@ -1260,6 +1349,7 @@ class Node:
         self.stopping = threading.Event()
         self.completed = 0
         self.failed = 0
+        self.swaps = 0                          # model swaps on a node with a `models` list
         self._comfy_freed_at = 0.0
         self._gate_wanted = False              # set by _ensure_model: waiting for ComfyUI to drain, or loading
         self._last_use = -1e9
@@ -1471,13 +1561,16 @@ class Node:
         if not isinstance(payload, dict):
             return 400, {"error": "invalid_request", "message": "JSON object required"}
         requested_model = str(payload.get("model") or "").strip()
-        if (requested_model and requested_model.lower() != cfg.model_id.lower()) or \
-                not cfg.installed():
+        # No model named = the primary one. A node with a `models` list serves
+        # each listed model that is installed; one model is loaded at a time.
+        profile = cfg.profile(requested_model or cfg.primary_model_id)
+        if profile is None or not cfg.profile_installed(str(profile["model_id"])):
             # An unknown id and a model this node does not carry are the same
             # thing to a caller: it cannot be served here, so say which can.
             return 503, {"error": "runtime_not_installed",
                          "requested_model": requested_model,
-                         "available_models": [cfg.model_id] if cfg.installed() else []}
+                         "available_models": cfg.installed_model_ids()}
+        task_model = str(profile["model_id"])
         try:
             prompt = validate_prompt(payload.get("prompt"), cfg.max_prompt_chars)
             system_prompt = str(payload.get("system_prompt") or "").strip()
@@ -1485,7 +1578,7 @@ class Node:
                 raise RequestError(
                     f"system_prompt and prompt exceed {cfg.max_prompt_chars} characters")
             max_output_tokens = validate_max_tokens(
-                payload.get("max_output_tokens"), cfg.max_output_tokens)
+                payload.get("max_output_tokens"), int(profile["max_output_tokens"]))
             temperature = validate_temperature(payload.get("temperature"))
             image_url = ""
             if mode == "vision":
@@ -1511,7 +1604,7 @@ class Node:
                              "status": "capacity_wait"}
             task = AiTask(
                 mode=mode, prompt=prompt, system_prompt=system_prompt, image_url=image_url,
-                model=cfg.model_id, requested_model=requested_model,
+                model=task_model, requested_model=requested_model,
                 max_output_tokens=max_output_tokens,
                 queue_class=str(payload.get("queue_class") or "interactive"),
                 backend_task_id=str(payload.get("backend_task_id") or ""),
@@ -1530,7 +1623,7 @@ class Node:
             "status": "Pending",
             "status_url": url_root.rstrip("/") + f"{API_PREFIX}/ai-vision/status/{task.task_id}",
             "mode": mode,
-            "model": cfg.model_id,
+            "model": task_model,
             "queue_class": task.queue_class,
             "workload_class": WORKLOAD_AI_VISION,
             "worker_process_hint": task.task_id,
@@ -1600,9 +1693,13 @@ class Node:
             task.current_stage = "downloading_image"
             image_bytes, media_type = fetch_task_image(
                 task.image_url, allow_private=self.cfg.allow_private_image_urls)
-            if not self.cfg.vision_installed():
+        # One task at a time picks / checks / loads the model; with parallel_tasks > 1
+        # the others wait here and then find it answering. Generation runs outside.
+        with self._model_lock:
+            self._select_task_model(task)
+            if task.mode == "vision" and not self.cfg.vision_installed():
                 raise NodeError("vision_projector_not_installed")
-        self._ensure_model(task)
+            self._ensure_model(task)
         task.current_stage = "generating"
         task.progress = 10
         answer, reasoning, usage = self.llama.run_completion(
@@ -1616,6 +1713,24 @@ class Node:
         task.answer = answer
         task.reasoning = reasoning
         task.model_usage = usage
+
+    def _select_task_model(self, task: AiTask) -> None:
+        """A node with several models: put the task's model in place. Called under _model_lock; with
+        parallel_tasks > 1 it first waits until no other task is generating on the loaded model (every
+        running task holds the server, this one included). Same model = nothing to do."""
+        cfg = self.cfg
+        wanted = str(task.model or cfg.primary_model_id)
+        if wanted.lower() == cfg.model_id.lower():
+            return
+        while self.llama.users() > 1 and self.llama.running():
+            task.current_stage = "waiting_for_model_swap"
+            time.sleep(0.5)
+        if self.llama.running():
+            self.llama.stop(f"swap {cfg.model_id} -> {wanted}")
+        with self.lock:
+            cfg.select_model(wanted)
+        self.swaps += 1
+        logger.info("Model swap for task %s: now %s", task.task_id, cfg.model_id)
 
     def _ensure_model(self, task: AiTask) -> None:
         """Have the model answering, but only while ComfyUI leaves the GPU alone.
@@ -1648,15 +1763,22 @@ class Node:
                     reason = "comfyui_preempted_for_owner"
                 else:
                     # ComfyUI first: even a warm model is put away before the next
-                    # queued task would hold the card next to a running prompt.
-                    if self.llama.running():
+                    # queued task would hold the card next to a running prompt -
+                    # but never under another task still generating (parallel_tasks).
+                    if self.llama.running() and self.llama.users() <= 1:
                         self.llama.stop("comfyui_busy before a queued task")
                     reason = "comfyui_busy"
             else:
                 if self.llama.loaded_model_id():
-                    if self.llama.answering():
+                    others = self.llama.users() > 1
+                    if self.llama.answering(timeout=10.0 if others else 3.0):
                         task.wait_reason = ""
                         return
+                    if others:                 # busy serving another task: wait, do not kill it
+                        task.current_stage = "waiting_for_gpu"
+                        task.wait_reason = "model busy with another task"
+                        time.sleep(1.0)
+                        continue
                     # Alive but silent: free its VRAM before measuring.
                     self.llama.stop("not answering")
                 reason = self.load_blocker()
@@ -1745,16 +1867,19 @@ class Node:
         installed = cfg.installed()
         accepting = blocked is None
         models = []
-        if installed:
+        for model_id in cfg.installed_model_ids():          # one entry per installed profile, primary first
+            profile = cfg.profile(model_id) or {}
+            mmproj = str(profile.get("mmproj") or "")
             models.append({
-                "id": cfg.model_id,
-                "title": cfg.title,
-                "vision": cfg.vision_installed(),
-                "uncensored": cfg.uncensored,
-                "context_tokens": cfg.context_tokens,
-                "system_prompt_supported": cfg.system_prompt_supported,
+                "id": model_id,
+                "title": profile.get("title") or model_id,
+                "vision": bool(mmproj) and os.path.isfile(mmproj),
+                "uncensored": bool(profile.get("uncensored")),
+                "context_tokens": int(profile.get("context_tokens") or 0),
+                "system_prompt_supported": bool(profile.get("system_prompt_supported")),
                 "unlimited_output_supported": True,
             })
+        installed = installed or bool(models)
         return {
             "status": "ok",
             "service": "autorig-ai-node",
@@ -1776,7 +1901,7 @@ class Node:
                 "running": self.llama.running(),
                 "loaded_model": loaded,
                 "system_prompt_supported": True,
-                "system_prompt_models": [cfg.model_id] if cfg.system_prompt_supported else [],
+                "system_prompt_models": [m["id"] for m in models if m["system_prompt_supported"]],
                 "unlimited_output_supported": True,
                 "base_url": cfg.llama_base_url,
                 "keepalive_seconds": int(cfg.keepalive_seconds),
@@ -1807,6 +1932,8 @@ class Node:
                 "loaded_at": self.llama.loaded_at if loaded else None,
                 "idle_seconds": round(self.llama.idle_seconds(), 1),
                 "loads": self.llama.loads,
+                "selected_model": cfg.model_id,
+                "model_swaps": self.swaps,
                 "max_tasks": cfg.max_tasks,
                 "max_prompt_chars": cfg.max_prompt_chars,
                 "context_tokens": cfg.context_tokens,
@@ -1974,6 +2101,16 @@ def run_check(cfg: Config) -> int:
         "llama_port_busy": node.llama._port_open(),
         "launch_argv": node.llama.launch_argv(),
     }
+    if len(cfg.profiles) > 1:
+        primary = cfg.model_id
+        report["models"] = {}
+        for profile in list(cfg.profiles.values()):
+            cfg.select_model(str(profile["model_id"]))
+            report["models"][cfg.model_id] = {
+                "weights": cfg.weights, "weights_exists": os.path.isfile(cfg.weights),
+                "mmproj": cfg.mmproj, "mmproj_exists": cfg.vision_installed(),
+                "vram_need_mb": cfg.need_mb(), "launch_argv": node.llama.launch_argv()}
+        cfg.select_model(primary)
     report["would_accept"] = node.blocker() is None
     report["blocker"] = node.blocker()
     print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -2006,7 +2143,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     except OSError as exc:
         logger.error("Cannot listen on %s:%s: %s", cfg.listen_host, cfg.listen_port, exc)
         return 2
-    threading.Thread(target=node.worker_loop, name="ai-worker", daemon=True).start()
+    for index in range(cfg.parallel_tasks):
+        threading.Thread(target=node.worker_loop, name=f"ai-worker-{index}", daemon=True).start()
     threading.Thread(target=node.monitor_loop, name="ai-monitor", daemon=True).start()
     serve = threading.Thread(target=server.serve_forever, name="http", daemon=True)
     serve.start()

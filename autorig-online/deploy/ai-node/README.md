@@ -355,3 +355,55 @@ route next to it is untouched). `max_tasks` is 8 on f11/f7 and 4 at home: with 2
 * It writes `gpu.lease`. The 9B pool node `C:\ProgramData\AutoRig\ai-node` lists that file in `gpu_lease_yield_files`
   and steps aside.
 * It is not in the backend's AI registry: only the film director (`/srv/autorig/data/red_film`) calls it.
+
+## Several models and parallel tasks (2026-11-06)
+
+`ai-node-20261106-models` adds two config keys; without them a node behaves exactly as before.
+
+**`models`** - a list of model profiles next to the pinned one. Each entry has a `model_id` plus any of
+`title, weights, mmproj, context_tokens, max_output_tokens, reasoning, uncensored, system_prompt_supported,
+vram_need_mb, extra_llama_args` (its own flags come after the node-wide `extra_llama_args`). A known id
+(`bonsai2-27b`, `qwen35-9b-uncensored`, `qwen35-4b`) fills in what is left out. `server-status` lists every
+installed profile in `ai_models.models`; a request names one with `model`, no `model` = the primary (top-level
+`model_id`, or the first entry). One model is loaded at a time: a task for the other one waits until the
+running tasks finish, then the node stops llama-server and loads the other weights (`ai_node.model_swaps`).
+
+**`parallel_tasks`** (1) - tasks generating at the same time. llama-server needs as many slots, so pair it with
+`-np <n> -kvu` in `extra_llama_args` (`-kvu`: one KV buffer of `context_tokens` shared by the slots, so a single
+long request still gets the whole window and VRAM stays as with one slot). Loads and swaps stay one at a time,
+and the node never stops llama-server under another task that is still generating. Decode on these cards is
+memory-bound, so two answers at once give more files per minute; one answer alone gets a little slower.
+
+Tests: `python -m unittest test_models_config` (config, routing, swap; no GPU) and `python selftest_parallel.py`
+(4 slow fake tasks: parallel 2 finishes in ~9 s instead of ~15 s, one llama-server start), plus `selftest.py`.
+
+### Qwen3.5-4B on a node (A/B of 2026-11-06; the owner installs the model)
+
+* Files: `unsloth/Qwen3.5-4B-GGUF` - `Qwen3.5-4B-Q4_K_M.gguf` (2 740 937 888 bytes) and `mmproj-F16.gguf`
+  (672 423 616 bytes), into `<models>\qwen35-4b\` (the projector's name is generic). Public repo, no token
+  needed; `HF_TOKEN` is used if present (render-fleet: set on f5, f15, Raptor, worker-4090 - not on f2/f11/f13).
+  ```powershell
+  huggingface-cli download unsloth/Qwen3.5-4B-GGUF Qwen3.5-4B-Q4_K_M.gguf mmproj-F16.gguf --local-dir C:\ProgramData\AutoRig\ai-node\models\qwen35-4b
+  ```
+* One command on the box (download, size check, config entry, idle-gated restart):
+  ```powershell
+  powershell -NoProfile -ExecutionPolicy Bypass -File add-qwen35-4b.ps1 -Task "AutoRig AI Node F13" -Download -NewCode .\ai_node.py
+  ```
+  f11 keeps its 9B in the converter's read-only `ai-vision\models`: add `-ModelsDir C:\ProgramData\AutoRig\ai-node\models`.
+* llama-server flags of the 4B profile, each checked in `llama-server --help` of the b10709 build on f13
+  (`version: 0.2.0-dev (build 10709, commit 9a9394a89)`): `-ngl 99` (node `ngl`), `-c 4096` (`context_tokens`),
+  `-np 2 -kvu`, `-b 2048 -ub 1024`, `-fa on`, `-ctk q8_0 -ctv q8_0`, `--image-min-tokens 64 --image-max-tokens 1024`,
+  `--reasoning off` (from `reasoning: off`). `--chat-template-kwargs '{"enable_thinking":false}'` is supported
+  too but left out: `--reasoning off` is the same switch, and answers already come back with an empty
+  `reasoning_content` (0 characters on f13).
+* Backend: `AI_MODEL_EXTRA=qwen35-4b` in `/srv/autorig/secrets/storage-host.env` next to `AI_MODEL_SINGLE`,
+  then a restart of autorig-storage (a deploy wipes queues - pick an empty moment). Requests that name
+  `qwen35-4b` go only to nodes listing it; every other request is still served by the single 9B.
+* A/B: `backend/tools/vision_ab/` (`run_ab.py`, `judge.py`, `summarize.py`).
+
+### Live state 2026-11-06 (see R:\autorig\handoff.md)
+
+f2, f13 ran `a1919c78` (ai-node-20261007); f11 an own build. The throughput patch for that build
+(`patches/a1919c78-parallel-tasks.diff`, VERSION `ai-node-20261007-par`) adds only `parallel_tasks`;
+`apply-node-tuning.ps1 -Task <task> -NewCode <patched ai_node.py>` installs it with
+`parallel_tasks 2` and `-fa on -ctk q8_0 -ctv q8_0 -np 2 -kvu`, backups `*.bak-vab-20261106`, `-Rollback` restores.

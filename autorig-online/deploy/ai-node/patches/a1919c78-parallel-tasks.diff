@@ -1,0 +1,102 @@
+--- a/ai_node.py
++++ b/ai_node.py
+@@ -54,7 +54,7 @@
+ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ from typing import Callable, Dict, List, Optional, Tuple
+ 
+-VERSION = "ai-node-20261007"
++VERSION = "ai-node-20261007-par"
+ API_PREFIX = "/api-converter-glb"
+ WORKLOAD_AI_VISION = "ai_vision"
+ 
+@@ -142,6 +142,10 @@
+     "converter_token_file": "",
+     "keepalive_seconds": 120,
+     "max_tasks": 2,
++    # Tasks generating at the same time (2026-11-06, throughput for big M+ batches). llama-server must have as many
++    # slots: put e.g. ["-np", "2", "-kvu"] in extra_llama_args (-kvu keeps one shared KV of context_tokens, so a single
++    # long request still gets the whole window). The model load stays one at a time. 1 = one task at a time, as before.
++    "parallel_tasks": 1,
+     "comfy_wait_seconds": 300,
+     "start_timeout_seconds": DEFAULT_START_TIMEOUT_SECONDS,
+     "request_timeout_seconds": DEFAULT_REQUEST_TIMEOUT_SECONDS,
+@@ -226,6 +230,7 @@
+                                      if merged.get("converter_token_file") else "")
+         self.keepalive_seconds = int(merged["keepalive_seconds"])
+         self.max_tasks = max(1, int(merged["max_tasks"]))
++        self.parallel_tasks = max(1, min(8, int(merged.get("parallel_tasks") or 1)))
+         self.comfy_wait_seconds = max(0.0, float(merged["comfy_wait_seconds"]))
+         self.start_timeout_seconds = int(merged["start_timeout_seconds"])
+         self.request_timeout_seconds = int(merged["request_timeout_seconds"])
+@@ -738,6 +743,11 @@
+         with self._lock:
+             return self._in_use > 0
+ 
++    def users(self) -> int:
++        """Tasks holding the server right now (parallel_tasks > 1 lets several share it)."""
++        with self._lock:
++            return self._in_use
++
+     def idle_seconds(self) -> float:
+         with self._lock:
+             if not self.running() or self._in_use:
+@@ -1102,6 +1112,7 @@
+         self.llama = LlamaServer(cfg)
+         self.tasks: Dict[str, AiTask] = {}
+         self.lock = threading.RLock()
++        self._model_lock = threading.Lock()      # parallel_tasks: one model check/load at a time
+         self.work: "queue.Queue[str]" = queue.Queue()
+         self.running_task_id = ""
+         self.comfy: Dict[str, object] = {"watched": bool(cfg.comfy_url), "online": False,
+@@ -1351,7 +1362,10 @@
+                 task.image_url, allow_private=self.cfg.allow_private_image_urls)
+             if not self.cfg.vision_installed():
+                 raise NodeError("vision_projector_not_installed")
+-        self._ensure_model(task)
++        # One task at a time checks / loads the model; with parallel_tasks > 1 the
++        # others wait here and then find it answering.
++        with self._model_lock:
++            self._ensure_model(task)
+         task.current_stage = "generating"
+         task.progress = 10
+         answer, reasoning, usage = self.llama.run_completion(
+@@ -1373,17 +1387,27 @@
+         """
+         deadline = time.monotonic() + self.cfg.comfy_wait_seconds
+         while True:
++            # parallel_tasks > 1: another task may be generating on this server
++            # (every running task holds it, this one included). Never stop it
++            # under that task; wait until it is ours alone.
++            others = self.llama.users() > 1
+             if self.refresh_comfy().get("busy"):
+                 # ComfyUI first: even a warm model is put away before the next
+                 # queued task would hold the card next to a running prompt.
+-                if self.llama.running():
++                if self.llama.running() and not others:
+                     self.llama.stop("comfyui_busy before a queued task")
+                 reason = "comfyui_busy"
+             else:
+                 if self.llama.loaded_model_id():
+-                    if self.llama.answering():
++                    if self.llama.answering(timeout=10.0 if others else 3.0):
+                         task.wait_reason = ""
+                         return
++                    if others:
++                        reason = "model busy with another task"
++                        task.current_stage = "waiting_for_gpu"
++                        task.wait_reason = reason
++                        time.sleep(1.0)
++                        continue
+                     # Alive but silent: free its VRAM before measuring.
+                     self.llama.stop("not answering")
+                 reason = self.load_blocker()
+@@ -1703,7 +1727,8 @@
+     except OSError as exc:
+         logger.error("Cannot listen on %s:%s: %s", cfg.listen_host, cfg.listen_port, exc)
+         return 2
+-    threading.Thread(target=node.worker_loop, name="ai-worker", daemon=True).start()
++    for index in range(cfg.parallel_tasks):
++        threading.Thread(target=node.worker_loop, name=f"ai-worker-{index}", daemon=True).start()
+     threading.Thread(target=node.monitor_loop, name="ai-monitor", daemon=True).start()
+     serve = threading.Thread(target=server.serve_forever, name="http", daemon=True)
+     serve.start()
