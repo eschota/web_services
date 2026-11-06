@@ -367,6 +367,15 @@ class Config:
         profile = self.profile(model_id)
         return bool(profile) and self.binary_installed() and os.path.isfile(str(profile["weights"]))
 
+    def profile_need_mb(self, model_id: str) -> int:
+        """VRAM a profile takes once loaded: its vram_need_mb, or its files + vram_overhead_mb."""
+        profile = self.profile(model_id) or {}
+        if int(profile.get("vram_need_mb") or 0) > 0:
+            return int(profile["vram_need_mb"])
+        total = sum(os.path.getsize(str(p)) for p in (profile.get("weights"), profile.get("mmproj"))
+                    if p and os.path.isfile(str(p)))
+        return int(total / (1024 * 1024)) + self.vram_overhead_mb
+
     def installed_model_ids(self) -> List[str]:
         return [str(p["model_id"]) for p in self.profiles.values() if self.profile_installed(str(p["model_id"]))]
 
@@ -1493,7 +1502,7 @@ class Node:
         except OSError as exc:
             logger.warning("GPU lease file %s: %s", path, exc)
 
-    def blocker(self) -> Optional[Tuple[str, str]]:
+    def blocker(self, model_id: str = "") -> Optional[Tuple[str, str]]:
         """Why a new submission would be refused right now, from the last probes."""
         cfg = self.cfg
         if not cfg.installed():
@@ -1518,10 +1527,13 @@ class Node:
         if not self.llama.loaded_model_id() and active == 0:
             if not vram.get("ok"):
                 return ("vram_unknown", f"cannot read free VRAM: {vram.get('error')}")
-            need = cfg.min_need_mb() + cfg.vram_margin_mb
+            # A node with several models checks the model the request asked for, not the selected one.
+            model_need = (cfg.profile_need_mb(model_id) if model_id and model_id.lower() != cfg.model_id.lower()
+                          else cfg.min_need_mb())
+            need = model_need + cfg.vram_margin_mb
             if int(vram.get("free_mb") or 0) < need and not self.can_free_comfy(comfy):
                 return ("insufficient_vram",
-                        f"{vram.get('free_mb')} MiB free, model needs {cfg.min_need_mb()} MiB "
+                        f"{vram.get('free_mb')} MiB free, model needs {model_need} MiB "
                         f"+ {cfg.vram_margin_mb} MiB margin")
         return None
 
@@ -1595,7 +1607,7 @@ class Node:
             self.refresh_vram()
         owner = cfg.owner_priority and str(payload.get("priority") or "").strip().lower() == "owner"
         with self.lock:
-            blocked = self.blocker()
+            blocked = self.blocker(task_model)
             if blocked and owner and blocked[0] in ("gpu_busy_comfyui", "gpu_leased", "insufficient_vram"):
                 blocked = None                 # the owner's request takes the card
             if blocked:

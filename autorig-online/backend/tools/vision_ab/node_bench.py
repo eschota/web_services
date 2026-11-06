@@ -133,6 +133,7 @@ def main():
     ap.add_argument("--max-output-tokens", type=int, default=640)
     ap.add_argument("--concurrent", action="store_true",
                     help="submit all N at once (1/s) and report files/min instead of one-at-a-time latency")
+    ap.add_argument("--model", default="", help="model id (default: the config's model_id)")
     ap.add_argument("--label", default="run")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -147,7 +148,7 @@ def main():
     base = "http://127.0.0.1:%d/api-converter-glb" % int(cfg.get("listen_port") or 5480)
     llama_log = cfg.get("llama_log_file") or ""
     llama_log = llama_log if (not llama_log or os.path.isabs(llama_log)) else os.path.join(cfg_dir, llama_log)
-    model = cfg.get("model_id")
+    model = args.model or cfg.get("model_id")
     with open(args.prompt_file, encoding="utf-8") as fh:
         prompt = json.load(fh)["photo"]
 

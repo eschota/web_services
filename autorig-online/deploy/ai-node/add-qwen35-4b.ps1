@@ -31,14 +31,12 @@ $files = @{ 'Qwen3.5-4B-Q4_K_M.gguf' = 2740937888; 'mmproj-F16.gguf' = 672423616
 
 if ($Download) {
     New-Item -ItemType Directory -Force $target | Out-Null
-    $cli = Get-Command huggingface-cli -ErrorAction SilentlyContinue
-    if ($cli) {
-        & $cli.Source download unsloth/Qwen3.5-4B-GGUF Qwen3.5-4B-Q4_K_M.gguf mmproj-F16.gguf --local-dir $target
-    } else {
-        $hf = Get-Command hf -ErrorAction SilentlyContinue
-        if (-not $hf) { throw 'neither huggingface-cli nor hf found: pip install -U "huggingface_hub[cli]"' }
-        & $hf.Source download unsloth/Qwen3.5-4B-GGUF Qwen3.5-4B-Q4_K_M.gguf mmproj-F16.gguf --local-dir $target
-    }
+    # `hf` first: in current huggingface_hub `huggingface-cli download` is deprecated and did nothing on f2 (2026-11-07).
+    $cli = Get-Command hf -ErrorAction SilentlyContinue
+    if (-not $cli) { $cli = Get-Command huggingface-cli -ErrorAction SilentlyContinue }
+    if (-not $cli) { throw 'neither hf nor huggingface-cli found: pip install -U "huggingface_hub[cli]"' }
+    & $cli.Source download unsloth/Qwen3.5-4B-GGUF Qwen3.5-4B-Q4_K_M.gguf mmproj-F16.gguf --local-dir $target
+    if ($LASTEXITCODE -ne 0) { throw "download failed with exit code $LASTEXITCODE" }
 }
 foreach ($name in $files.Keys) {
     $path = Join-Path $target $name

@@ -113,7 +113,7 @@ class NodeTests(Base):
         node = ai_node.Node(cfg)
         node.refresh_comfy = lambda: {"busy": False}
         node.refresh_vram = lambda: {"ok": True, "free_mb": 20000}
-        node.blocker = lambda: None
+        node.blocker = lambda *a: None
         return node
 
     def submit(self, node, model):
@@ -170,6 +170,18 @@ class NodeTests(Base):
                               requested_model="", max_output_tokens=64, queue_class="interactive", backend_task_id="")
         node._select_task_model(back)
         self.assertEqual((cfg.model_id, node.swaps), (NINE, 2))
+
+    def test_vram_check_uses_the_requested_models_need(self):
+        self.install_4b()
+        cfg = self.cfg(vram_margin_mb=1000, vram_need_mb=8800,
+                       models=[{"model_id": FOUR, "vram_need_mb": 5600}])
+        node = ai_node.Node(cfg)
+        node.vram = {"ok": True, "free_mb": 8000}
+        node.comfy = {"busy": False}
+        with mock.patch.object(ai_node, "running_game", return_value=""):
+            self.assertEqual(node.blocker(NINE)[0], "insufficient_vram")   # 8800 + 1000 > 8000
+            self.assertIsNone(node.blocker(FOUR))                          # 5600 + 1000 <= 8000
+            self.assertEqual(node.blocker()[0], "insufficient_vram")       # no model named = the selected one
 
     def test_single_model_node_never_swaps(self):
         node = self.node(self.cfg())
