@@ -66,7 +66,21 @@ async def health(request: Request) -> Dict[str, Any]:
         ),
         "hunyuan_config_error": config_error,
         "active_jobs": len(_chargen(request).active_jobs()),
+        "tiers": _tiers_summary(tasks),
     }
+
+
+def _tiers_summary(tasks) -> Dict[str, Any]:
+    """Tier settings (no secrets) and what each tier has waiting / running."""
+    from . import priority
+
+    counts: Dict[str, Dict[str, int]] = {}
+    for task in tasks:
+        if task.status not in ("Pending", "Rendering"):
+            continue
+        row = counts.setdefault(priority.task_tier(task), {"pending": 0, "rendering": 0})
+        row["pending" if task.status == "Pending" else "rendering"] += 1
+    return {**priority.describe(), "counts": counts}
 
 
 @router.get("/api-render/tasks/{task_id}")
@@ -238,6 +252,62 @@ async def api_render_reset(request: Request, dry_run: int = Query(default=0),
     return await _queue(request).reset_farm(dry_run=bool(dry_run), spare_non_graph=bool(spare_non_graph), **kwargs)
 
 
+@router.get("/api-render/broker-preflight")
+async def api_render_broker_preflight(request: Request) -> Dict[str, Any]:
+    """Would every managed box pass the workload-broker identity check?
+
+    Runs workload_lease.refresh_managed_identity(force=True) on a copy of each
+    managed box, so it changes nothing and works while
+    RENDERFIN_WORKLOAD_BROKER_ENABLED=0 - the check to run before turning the
+    broker on (a box that fails goes offline, or with
+    RENDERFIN_WORKLOAD_BROKER_UNVERIFIED=unmanaged runs without a lease).
+    Localhost only; it reports no tokens.
+    """
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="the broker preflight is not public")
+    import httpx
+
+    from . import config, workload_lease
+
+    rows: List[Dict[str, Any]] = []
+    queue = _queue(request)
+    client = getattr(queue, "_client", None)
+    own = client is None
+    if own:
+        client = httpx.AsyncClient()
+    try:
+        for server in _registry(request).all():
+            if not workload_lease.managed_server(server):
+                continue
+            probe = server.model_copy(deep=True)
+            try:
+                ok = await workload_lease.refresh_managed_identity(client, probe, force=True)
+                error = ""
+            except Exception as exc:  # the preflight reports, it never raises
+                ok, error = False, type(exc).__name__
+            rows.append({
+                "render_server_name": server.render_server_name,
+                "status_string": server.status,
+                "identity_ok_bool": bool(ok),
+                "identity_verified_bool": bool(probe.workload_identity_verified_bool),
+                "physical_resource_id_string": probe.physical_resource_id_string,
+                "reserve_role_string": probe.reserve_role_string,
+                "central_control_ready_bool": bool(probe.managed_comfy_central_control_ready_bool),
+                "artifact_spool_required_bool": bool(probe.managed_comfy_artifact_spool_required_bool),
+                "artifact_spool_ready_bool": bool(probe.managed_comfy_artifact_spool_ready_bool),
+                "error_string": error,
+            })
+    finally:
+        if own:
+            await client.aclose()
+    return {
+        "broker_enabled_bool": workload_lease.enabled(),
+        "unverified_policy_string": config.WORKLOAD_BROKER_UNVERIFIED,
+        "managed_boxes_array": rows,
+        "all_verified_bool": all(r["identity_ok_bool"] for r in rows),
+    }
+
+
 @router.post("/api-render")
 async def api_render_post(request: Request) -> Dict[str, Any]:
     try:
@@ -255,6 +325,10 @@ async def api_render_post(request: Request) -> Dict[str, Any]:
     prompt = RenderPrompt(**{k: v for k, v in body.items() if k in RenderPrompt.model_fields})
     if not (prompt.prompt or "").strip() and not (prompt.image_url or "").strip():
         raise HTTPException(status_code=400, detail="prompt or image_url required")
+    # nginx publishes /renderfin/: a forwarded body may not name itself M+
+    # without the M+ key (the site's own loopback calls are trusted).
+    from . import priority
+    prompt.priority_class = priority.sanitize_priority_class(prompt.priority_class, request.headers)
     task = await _queue(request).enqueue(prompt)
     return {"output_url": task.output_url, "task_id": task.id}
 

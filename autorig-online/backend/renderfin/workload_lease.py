@@ -455,6 +455,8 @@ def server_identity(server: RenderServer) -> tuple[str, str]:
 async def refresh_managed_identity(
     client: httpx.AsyncClient,
     server: RenderServer,
+    *,
+    force: bool = False,
 ) -> bool:
     """Authenticate and bind a Renderfin transport name to one physical GPU.
 
@@ -465,7 +467,9 @@ async def refresh_managed_identity(
     """
     if not managed_server(server):
         return True
-    if not enabled():
+    if not enabled() and not force:
+        # force=True (broker preflight, 2026-11-06) runs the check on a copy
+        # while the broker is still off, so the rollout can be verified first.
         # Rollout order is converter -> registry -> broker flag. Until the
         # broker is deliberately enabled, identity enforcement must not alter
         # the existing production Comfy pool.

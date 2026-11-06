@@ -24,6 +24,7 @@ from . import (
     model_eligibility,
     multiref,
     music,
+    priority,
     routing,
     stream_decode,
     templating,
@@ -347,15 +348,62 @@ def _host_managed_progress(
 def is_autorig(task) -> bool:
     """An AutoRig task (owner 2026-10-15: priority on worker-4090): the farm client
     marked it, or it came under an AutoRig user name. Collection background work
-    is AutoRig's own bulk and never takes priority."""
-    if not config.AUTORIG_PRIORITY:
-        return False
-    if str(getattr(task, "queue_class", "") or "") == "collection_background":
-        return False
-    prompt = getattr(task, "prompt", None)
-    if str(getattr(prompt, "priority_class", "") or "").strip().lower() == "autorig":
-        return True
-    return str(getattr(prompt, "user_name", "") or "").strip() in config.AUTORIG_USER_NAMES
+    is AutoRig's own bulk and never takes priority.
+
+    Compat wrapper: the rule lives in renderfin.priority (legacy_is_autorig), the
+    tier scheduler asks priority.task_tier instead."""
+    return priority.legacy_is_autorig(task)
+
+
+def _lifo_order(waiting: List[Any], now: float) -> List[Any]:
+    """The 2026-09-27 order of one batch of waiting tasks (oldest-first input):
+    starving tasks oldest first, then submission bursts newest first."""
+    if not config.LIFO or len(waiting) < 2:
+        return list(waiting)
+    starving = [t for t in waiting if now - float(t.created_at or 0) > config.STARVE_MINUTES * 60]
+    rest = [t for t in waiting if now - float(t.created_at or 0) <= config.STARVE_MINUTES * 60]
+    groups: List[List[Any]] = []
+    for task in rest:
+        if groups and float(task.created_at or 0) - float(groups[-1][-1].created_at or 0) <= config.LIFO_GROUP_SECONDS:
+            groups[-1].append(task)
+        else:
+            groups.append([task])
+    ordered = list(starving)
+    for group in reversed(groups):
+        ordered.extend(group)
+    return ordered
+
+
+def _preempt_immune(task) -> bool:
+    return int(getattr(task, "preemptions", 0) or 0) >= max(1, config.TIER_PREEMPT_MAX_PER_TASK)
+
+
+def _tiered_dispatch_order(waiting: List[Any], now: float) -> List[Any]:
+    """Tiers first (owner 2026-11-06): mplus, autorig, generation, background.
+
+    mplus and autorig run oldest first. Generation keeps the LIFO/starvation
+    order. A background task that has starved (STARVE_MINUTES) is served with
+    generation's starving tasks, so bulk work is late but never stuck forever.
+    A task preempted RENDERFIN_TIER_PREEMPT_MAX_PER_TASK times goes first in
+    its tier.
+    """
+    buckets: Dict[str, List[Any]] = {tier: [] for tier in priority.TIERS}
+    for task in waiting:
+        tier = priority.task_tier(task)
+        if (tier == priority.TIER_BACKGROUND and config.LIFO
+                and now - float(task.created_at or 0) > config.STARVE_MINUTES * 60):
+            tier = priority.TIER_GENERATION
+        buckets.setdefault(tier, []).append(task)
+    ordered: List[Any] = []
+    for tier in priority.TIERS:
+        batch = buckets.get(tier) or []
+        immune = [t for t in batch if _preempt_immune(t)]
+        batch = [t for t in batch if not _preempt_immune(t)]
+        if tier in (priority.TIER_MPLUS, priority.TIER_AUTORIG):
+            ordered.extend(immune + batch)
+        else:
+            ordered.extend(immune + _lifo_order(batch, now))
+    return ordered
 
 
 def excluded_boxes(task) -> Tuple[str, set]:
@@ -387,6 +435,9 @@ def dispatch_order(tasks, now: Optional[float] = None) -> List[Any]:
         (task for task in tasks if getattr(task, "status", "") == TASK_PENDING),
         key=lambda task: (float(getattr(task, "created_at", 0.0) or 0.0), str(task.id)),
     )
+    if priority.enabled():
+        return _tiered_dispatch_order(waiting, time.time() if now is None else now)
+    # RENDERFIN_TIER_PRIORITY=0: the 2026-10-15 order, verbatim.
     autorig = [t for t in waiting if is_autorig(t)]
     waiting = [t for t in waiting if not is_autorig(t)]
     if not config.LIFO or len(waiting) < 2:
@@ -580,6 +631,11 @@ class RenderQueue:
         self._server_missing_nodes: Dict[Tuple[str, str], float] = {}
         # signature of a starved dispatch pass -> when it was last printed.
         self._starvation_logged: Dict[str, float] = {}
+        # Tier preemption (2026-11-06): box -> when a higher tier last took it.
+        self._tier_preempted_at: Dict[str, float] = {}
+        # Broker rollout (RENDERFIN_WORKLOAD_BROKER_UNVERIFIED=unmanaged): managed
+        # boxes whose identity did not verify, dispatched without a lease.
+        self._broker_unmanaged: set = set()
         # GPU memory / hang recovery (2026-09-29, see renderfin.gpu_budget).
         # box -> (measured_at, vram_total, vram_free) from its /system_stats
         self._box_vram: Dict[str, Tuple[float, int, int]] = {}
@@ -748,6 +804,11 @@ class RenderQueue:
                 else "comfy"
             ),
         )
+        if priority.enabled():
+            # The tier's broker class (mplus -> ai_vision, autorig ->
+            # autorig_interactive, ...): it orders boxes by reserve role in
+            # _pick_server; the broker itself is asked for broker_lease_class.
+            task.workload_class = priority.workload_class(priority.task_tier(task))
         task.output_url = (
             f"{config.PUBLIC_BASE_URL}/render/{prompt.user_name}/{task.id}{ext}"
         )
@@ -1338,12 +1399,42 @@ class RenderQueue:
             identity_ok = await workload_lease.refresh_managed_identity(
                 self._client, server
             )
+            identity_ok = self._broker_identity_fallback(server, identity_ok)
             new_status = "online" if online and identity_ok else "offline"
             if server.status != new_status or workload_lease.managed_server(server):
                 server.status = new_status
                 self.registry.save(server)
         if config.OOM_RECOVERY_ENABLED:
             await self._refresh_box_vram()
+
+    def _broker_identity_fallback(self, server: RenderServer, identity_ok: bool) -> bool:
+        """RENDERFIN_WORKLOAD_BROKER_UNVERIFIED=unmanaged: a managed box whose
+        machine identity did not verify keeps dispatching without a central
+        lease (as with the broker off) instead of going offline. A box with a
+        leased task still bound to it stays fail-closed: that lease must
+        reconcile on the verified path."""
+        name = server.render_server_name
+        fallback = bool(
+            not identity_ok
+            and workload_lease.enabled()
+            and workload_lease.managed_server(server)
+            and config.WORKLOAD_BROKER_UNVERIFIED == "unmanaged"
+            and not any(
+                t.workload_lease_id and t.server_name == name
+                for t in self._tasks.values()
+                if t.status in (TASK_PENDING, TASK_RENDERING)
+            )
+        )
+        if fallback:
+            if name not in self._broker_unmanaged:
+                print(f"[Renderfin][Queue] {name}: workload identity not verified; "
+                      f"dispatching without a broker lease (RENDERFIN_WORKLOAD_BROKER_UNVERIFIED=unmanaged)")
+            self._broker_unmanaged.add(name)
+            return True
+        if name in self._broker_unmanaged and identity_ok:
+            print(f"[Renderfin][Queue] {name}: workload identity verified; broker leases resume")
+        self._broker_unmanaged.discard(name)
+        return identity_ok
 
     # ---------- GPU budget (2026-09-29) ----------
 
@@ -1489,46 +1580,181 @@ class RenderQueue:
             return False
         if time.time() - float(task.created_at or 0) < config.AUTORIG_PREEMPT_SECONDS:
             return False
+        tiered = priority.enabled()
+        boxes = priority.tier_boxes(priority.TIER_AUTORIG) if tiered else config.AUTORIG_PRIORITY_BOXES
         for victim in list(self._tasks.values()):
             box = str(victim.server_name or "")
-            if victim.status != TASK_RENDERING or box not in config.AUTORIG_PRIORITY_BOXES or is_autorig(victim):
+            if victim.status != TASK_RENDERING or box not in boxes or is_autorig(victim):
                 continue
+            if tiered and priority.rank(priority.task_tier(victim)) <= priority.rank(priority.TIER_AUTORIG):
+                continue                                  # tiers: never an M+ (or AutoRig) render
             server = self.registry.get(box)
             if server is None or server.status != "online" or not routing.server_can_run(server, task.workflow):
                 continue
             fits, _ = self._hard_fit(server, task)
             if not fits:
                 continue
-            freed = await self._free_box_after_restart(box, str(victim.comfy_prompt_id or ""))
-            old_prompt_id = str(victim.comfy_prompt_id or "")
-            victim.recovery_log.append(f"preempted-for-autorig:{task.id}@{box}")
-            if old_prompt_id and old_prompt_id not in victim.retired_comfy_prompt_ids:
-                victim.retired_comfy_prompt_ids.append(old_prompt_id)
-            victim.status = TASK_PENDING
-            victim.error = ""
-            victim.notice = config.AUTORIG_PREEMPTED_NOTICE
-            victim.server_name = ""
-            victim.comfy_prompt_id = ""
-            victim.started_at = 0
-            victim.finished_at = 0
-            victim.submit_failures = 0
-            victim.workload_request_id = f"rf_{uuid.uuid4().hex}"
-            victim.workload_lease_id = ""
-            victim.workload_physical_resource_id = ""
-            victim.workload_node_id = ""
-            victim.workload_lease_state = "waiting"
-            victim.workload_heartbeat_at = 0
-            victim.managed_prompt = False
-            victim.host_comfy_registered = False
-            victim.artifact_sha256 = ""
-            victim.output_path = ""
-            victim.extra_outputs = {}
-            await self._persist(victim)
+            freed = await self._requeue_preempted(victim, task, box, priority.TIER_AUTORIG,
+                                                  count=False)
             print(f"[Renderfin][Queue] {box}: render {victim.id} ({victim.prompt.user_name}, {victim.workflow}) "
                   f"re-queued for AutoRig task {task.id} ({task.workflow}) after "
                   f"{int(time.time() - float(task.created_at or 0))} s waiting: {freed}")
             return True
         return False
+
+    def _tier_waiting_for(self, server: RenderServer, tier: str) -> str:
+        """The id of a waiting task of exactly this tier that this box could run, else ''."""
+        for other in self._tasks.values():
+            if (other.status == TASK_PENDING and priority.task_tier(other) == tier
+                    and routing.server_can_run(server, other.workflow)):
+                return other.id
+        return ""
+
+    def _reserved_for_higher_tier(self, server: RenderServer, task: RenderTask) -> Optional[Tuple[str, str]]:
+        """("reserved-<tier>", waiting task id) when this box is held for a tier
+        above this task's and a task of that tier waits for it; else None."""
+        if not priority.enabled():
+            if server.render_server_name in config.AUTORIG_PRIORITY_BOXES and not is_autorig(task):
+                held = self._autorig_waiting_for(server)
+                if held:
+                    return ("reserved-autorig", held)
+            return None
+        mine = priority.rank(priority.task_tier(task))
+        for tier in priority.TIERS:
+            if priority.rank(tier) >= mine:
+                break
+            if server.render_server_name not in priority.tier_boxes(tier):
+                continue
+            held = self._tier_waiting_for(server, tier)
+            if held:
+                return (f"reserved-{tier}", held)
+        return None
+
+    def _preempt_victim_refusal(self, victim: RenderTask, server: RenderServer, now: float) -> str:
+        """Why this running task may not be preempted ('' when it may)."""
+        if victim.workflow in config.TIER_NEVER_PREEMPT_WORKFLOWS:
+            return "3d"
+        if _preempt_immune(victim):
+            return "preempted-enough"
+        if int(victim.restart_resumes or 0) >= max(0, config.RESTART_RESUME_MAX - 1):
+            return "near-restart-cap"
+        if int(victim.submit_failures or 0) >= 2:
+            return "near-submit-cap"
+        if victim.workload_lease_id or victim.managed_prompt:
+            # A broker-leased prompt is preempted by the broker, not by us.
+            return "leased"
+        expected = float(server.average_render_time or 0)
+        started = float(victim.started_at or 0)
+        if expected > 0 and started > 0 and now - started > config.TIER_PREEMPT_MAX_PROGRESS * expected:
+            return "nearly-done"
+        return ""
+
+    async def _preempt_for_tier(self, task: RenderTask) -> bool:
+        """A waiting mplus task with no free capable box takes a box held for M+
+        (RENDERFIN_TIER_BOXES) from a running task of a strictly lower tier.
+        An AutoRig task keeps the 2026-10-15 _preempt_for_autorig (worker-4090,
+        45 s), which with tiers on spares M+ renders.
+
+        Limits for M+ (owner 2026-11-06, audit §5.6): only after
+        RENDERFIN_MPLUS_PREEMPT_SECONDS (15 s); at most one preemption per box per
+        TIER_PREEMPT_BOX_INTERVAL_SECONDS; never a 3D job, a broker-leased one,
+        one past 70 % of its box's average render time, one near its restart or
+        submit caps, or one already preempted TIER_PREEMPT_MAX_PER_TASK times;
+        expensive H3 video goes last. RENDERFIN_TIER_PRIORITY=0 runs the
+        2026-10-15 _preempt_for_autorig instead.
+        """
+        if not priority.enabled():
+            return await self._preempt_for_autorig(task)
+        tier = priority.task_tier(task)
+        if tier == priority.TIER_AUTORIG:
+            # "4090 rules unchanged": AutoRig keeps the 2026-10-15 preemption
+            # (45 s, its boxes, no extra limits); with tiers on it only spares
+            # M+ renders, which rank above it.
+            return await self._preempt_for_autorig(task)
+        wait = float(config.TIER_PREEMPT_SECONDS.get(tier, 0) or 0)
+        if wait <= 0:
+            return False
+        now = time.time()
+        waited = now - float(task.created_at or 0)
+        if waited < wait:
+            return False
+        boxes = priority.tier_boxes(tier)
+        if not boxes:
+            return False
+        mine = priority.rank(tier)
+        candidates = []
+        for victim in list(self._tasks.values()):
+            box = str(victim.server_name or "")
+            if victim.status != TASK_RENDERING or box not in boxes:
+                continue
+            victim_tier = priority.task_tier(victim)
+            if priority.rank(victim_tier) <= mine:
+                continue
+            if now - self._tier_preempted_at.get(box, 0.0) < config.TIER_PREEMPT_BOX_INTERVAL_SECONDS:
+                continue
+            server = self.registry.get(box)
+            if server is None or server.status != "online" or not routing.server_can_run(server, task.workflow):
+                continue
+            if self._preempt_victim_refusal(victim, server, now):
+                continue
+            fits, _ = self._hard_fit(server, task)
+            if not fits:
+                continue
+            expected = float(server.average_render_time or 0)
+            progress = ((now - float(victim.started_at or now)) / expected) if expected > 0 else 0.0
+            candidates.append((
+                1 if victim.workflow in config.TIER_EXPENSIVE_WORKFLOWS else 0,   # H3 video last
+                -priority.rank(victim_tier),                                     # lowest tier first
+                progress,                                                        # least work lost
+                victim.id, victim, box,
+            ))
+        if not candidates:
+            return False
+        candidates.sort(key=lambda c: c[:4])
+        *_, victim, box = candidates[0]
+        victim_tier = priority.task_tier(victim)
+        self._tier_preempted_at[box] = now
+        freed = await self._requeue_preempted(victim, task, box, tier, count=True)
+        print(f"[Renderfin][Queue] preempt tier={tier} {box}: render {victim.id} "
+              f"(tier={victim_tier}, {victim.prompt.user_name}, {victim.workflow}, "
+              f"preemptions={victim.preemptions}) re-queued for {tier} task {task.id} "
+              f"({task.workflow}) after {int(waited)} s waiting: {freed}")
+        return True
+
+    async def _requeue_preempted(self, victim: RenderTask, task: RenderTask, box: str,
+                                 tier: str, *, count: bool) -> str:
+        """Take the victim's prompt off the box and put it back in the queue under
+        its own id (its output URL stays), as a restart resume does, without
+        spending its restart cap."""
+        freed = await self._free_box_after_restart(box, str(victim.comfy_prompt_id or ""))
+        old_prompt_id = str(victim.comfy_prompt_id or "")
+        victim.recovery_log.append(f"preempted-for-{tier}:{task.id}@{box}")
+        if count:
+            victim.preemptions = int(victim.preemptions or 0) + 1
+        if old_prompt_id and old_prompt_id not in victim.retired_comfy_prompt_ids:
+            victim.retired_comfy_prompt_ids.append(old_prompt_id)
+        victim.status = TASK_PENDING
+        victim.error = ""
+        victim.notice = (config.MPLUS_PREEMPTED_NOTICE if tier == priority.TIER_MPLUS
+                         else config.AUTORIG_PREEMPTED_NOTICE)
+        victim.server_name = ""
+        victim.comfy_prompt_id = ""
+        victim.started_at = 0
+        victim.finished_at = 0
+        victim.submit_failures = 0
+        victim.workload_request_id = f"rf_{uuid.uuid4().hex}"
+        victim.workload_lease_id = ""
+        victim.workload_physical_resource_id = ""
+        victim.workload_node_id = ""
+        victim.workload_lease_state = "waiting"
+        victim.workload_heartbeat_at = 0
+        victim.managed_prompt = False
+        victim.host_comfy_registered = False
+        victim.artifact_sha256 = ""
+        victim.output_path = ""
+        victim.extra_outputs = {}
+        await self._persist(victim)
+        return freed
 
     def _busy_servers(self) -> Dict[str, str]:
         busy: Dict[str, str] = {}
@@ -1575,10 +1801,10 @@ class RenderQueue:
                 return soft
         if server.render_server_name in busy:
             return ("busy", busy[server.render_server_name])
-        if task is not None and server.render_server_name in config.AUTORIG_PRIORITY_BOXES and not is_autorig(task):
-            held = self._autorig_waiting_for(server)
-            if held:
-                return ("reserved-autorig", held)
+        if task is not None:
+            reserved = self._reserved_for_higher_tier(server, task)
+            if reserved is not None:
+                return reserved
         if self._server_missing_nodes.get((server.render_server_name, token), 0) > now:
             return ("missing-node", token)
         until = self._server_submit_cooldowns.get(server.render_server_name, 0)
@@ -1632,8 +1858,18 @@ class RenderQueue:
         workload_class = str(
             getattr(task, "workload_class", "") or "comfy"
         )
+        if not priority.enabled() and workload_class not in ("comfy", "collection_background"):
+            # Rollback: a task tagged while tiers were on sorts as before.
+            workload_class = "comfy"
+        # Tiers: M+ goes to its held boxes first, everything else uses them
+        # last, so they stay free (and warm) for M+. Nothing changes without
+        # an mplus entry in RENDERFIN_TIER_BOXES.
+        mplus_boxes = priority.tier_boxes(priority.TIER_MPLUS) if priority.enabled() else frozenset()
+        is_mplus = bool(mplus_boxes) and task is not None and priority.task_tier(task) == priority.TIER_MPLUS
         candidates.sort(
             key=lambda s: (
+                ((0 if s.render_server_name in mplus_boxes else 1) if is_mplus
+                 else (1 if s.render_server_name in mplus_boxes else 0)),
                 workload_lease.server_role_rank(
                     workload_class,
                     getattr(s, "reserve_role_string", "shared"),
@@ -1752,7 +1988,7 @@ class RenderQueue:
                 self._client, self.registry.all(), task.prompt
             )
             server = self._pick_server(task.workflow, depths, task, eligible)
-            if server is None and await self._preempt_for_autorig(task):
+            if server is None and await self._preempt_for_tier(task):
                 return False                                  # the next pass puts it on the freed box
             if server is None:
                 key, text = self._starvation_report(task, eligible)
@@ -1855,7 +2091,8 @@ class RenderQueue:
         self, task: RenderTask, server: RenderServer
     ) -> Dict[str, Any]:
         assert self._client is not None
-        if not workload_lease.enabled() or not workload_lease.managed_server(server):
+        if (not workload_lease.enabled() or not workload_lease.managed_server(server)
+                or (server.render_server_name in self._broker_unmanaged and not task.workload_lease_id)):
             task.managed_prompt = False
             task.host_comfy_registered = False
             return {}
@@ -1883,7 +2120,7 @@ class RenderQueue:
         lease = await workload_lease.acquire(
             self._client,
             server=server,
-            workload_class=task.workload_class,
+            workload_class=priority.broker_lease_class(task.workload_class),
             owner_task_id=task.id,
             request_id=task.workload_request_id,
             metadata={

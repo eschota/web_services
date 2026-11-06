@@ -340,6 +340,70 @@ AUTORIG_USER_NAMES = frozenset(
 AUTORIG_PREEMPT_SECONDS = float(os.getenv("RENDERFIN_AUTORIG_PREEMPT_SECONDS", "45"))   # 0 = never preempt
 AUTORIG_PREEMPTED_NOTICE = "preempted_for_autorig"
 
+# Owner 2026-11-06: «чёткий балансер … с приоритетом для М+, потом AutoRig, и
+# только потом Renderfin-генерация картинок/видео». Three tiers (renderfin/
+# priority.py): mplus > autorig > generation (> background bulk). The switch is
+# the rollback: RENDERFIN_TIER_PRIORITY=0 runs exactly the 2026-10-15 AutoRig-only
+# code paths (dispatch order, 4090 reservation, preemption, broker class).
+TIER_PRIORITY = os.getenv("RENDERFIN_TIER_PRIORITY", "1").strip().lower() not in ("0", "false", "no", "")
+
+
+def parse_tier_boxes(raw: str) -> dict:
+    """RENDERFIN_TIER_BOXES="mplus=f15;autorig=worker-4090" -> {"mplus": {"f15"}, "autorig": {...}}.
+
+    Also accepts "," between tiers when every part has "=" ("mplus=f13-ai,f7-ai"
+    keeps both boxes for mplus: a part without "=" belongs to the tier before it).
+    """
+    out: dict = {}
+    current = ""
+    for chunk in str(raw or "").replace(";", ",").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "=" in chunk:
+            key, _, box = chunk.partition("=")
+            current = key.strip().lower()
+            chunk = box.strip()
+        if current and chunk:
+            out.setdefault(current, set()).add(chunk)
+    return out
+
+
+# Renderfin ComfyUI boxes held for a tier: while a task of that tier waits, the
+# box takes no lower-tier work, and a lower-tier render on it may be preempted.
+# AutoRig keeps its 2026-10-15 boxes (RENDERFIN_AUTORIG_PRIORITY_BOXES) unless
+# named here. Empty for mplus = no Comfy box is held for M+.
+TIER_BOXES = parse_tier_boxes(os.getenv("RENDERFIN_TIER_BOXES", ""))
+# Seconds a tier waits with no free capable box before it may preempt. AutoRig
+# keeps its own 2026-10-15 rule (AUTORIG_PREEMPT_SECONDS, 45 s, no extra limits).
+TIER_PREEMPT_SECONDS = {
+    "mplus": float(os.getenv("RENDERFIN_MPLUS_PREEMPT_SECONDS", "15")),
+}
+TIER_PREEMPT_BOX_INTERVAL_SECONDS = float(os.getenv("RENDERFIN_TIER_PREEMPT_BOX_INTERVAL_SECONDS", "60"))
+TIER_PREEMPT_MAX_PER_TASK = int(os.getenv("RENDERFIN_TIER_PREEMPT_MAX_PER_TASK", "2"))
+# A victim past this share of its box's average render time is left to finish.
+TIER_PREEMPT_MAX_PROGRESS = float(os.getenv("RENDERFIN_TIER_PREEMPT_MAX_PROGRESS", "0.7"))
+MPLUS_PREEMPTED_NOTICE = "preempted_for_mplus"
+# Never preempted for anyone: 3D generation (hours on a GTX box, no resume).
+TIER_NEVER_PREEMPT_WORKFLOWS = frozenset(
+    w.strip() for w in os.getenv("RENDERFIN_TIER_NEVER_PREEMPT_WORKFLOWS", "image_to_3d.json").split(",") if w.strip())
+# Expensive H3 video goes last when a victim has to be chosen.
+TIER_EXPENSIVE_WORKFLOWS = frozenset(
+    w.strip() for w in os.getenv("RENDERFIN_TIER_EXPENSIVE_WORKFLOWS", "gen_video_minimax_h3_by_url.json").split(",") if w.strip())
+# Workload broker rollout: what a managed box whose machine identity could not
+# be verified does. "offline" (the code default, fail closed) takes it out of
+# rotation; "unmanaged" keeps it dispatching without a central lease, exactly
+# as with the broker off, so enabling the broker can never empty the farm.
+#
+# Vision/Text LLM nodes (ai_vision_api, main backend): nodes pinned for a tier,
+# e.g. "mplus=f13-ai,f7-ai". M+ goes there first; lower tiers are steered off a
+# pinned node while an M+ request is in flight on it.
+TIER_VISION_BOXES = parse_tier_boxes(os.getenv("RENDERFIN_TIER_VISION_BOXES", ""))
+# Every N minutes an idle pinned node without its model loaded gets a one-token
+# text request so the weights are resident when M+ asks. 0 = off.
+VISION_WARM_MINUTES = float(os.getenv("RENDERFIN_VISION_WARM_MINUTES", "0"))
+WORKLOAD_BROKER_UNVERIFIED = (os.getenv("RENDERFIN_WORKLOAD_BROKER_UNVERIFIED", "offline").strip().lower() or "offline")
+
 
 def parse_exclude_boxes(raw: str) -> dict:
     """RENDERFIN_EXCLUDE_BOXES_FOR="red_autopost:worker-4090,f12;sura-bot:f5" ->

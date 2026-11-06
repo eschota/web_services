@@ -40,14 +40,22 @@ def set_from_headers(headers: Dict[str, str]) -> None:
     # client and the AutoRig conveyor send X-Autorig-Priority: autorig; it is
     # honoured only from inside the host (no proxy headers), so a visitor's
     # browser cannot claim it.
-    prio = str(headers.get("x-autorig-priority") or "").strip().lower()
-    if prio == "autorig" and not (headers.get("x-real-ip") or headers.get("x-forwarded-for")):
-        values["priority_class"] = "autorig"
     # 2026-10-16: an internal client names itself the same way (X-Autorig-Priority:
     # red_autopost), so renderfin can keep it off given boxes (RENDERFIN_EXCLUDE_BOXES_FOR).
-    # Only "autorig" brings priority; any other class is a plain label.
-    elif _CLASS.match(prio) and not (headers.get("x-real-ip") or headers.get("x-forwarded-for")):
-        values["priority_class"] = prio
+    # 2026-11-06 (tiers, renderfin/priority.py): "mplus" comes from M+ servers on the
+    # internet and is accepted only with a valid X-Priority-Key; "autorig" and the
+    # plain labels keep the inside-the-host rule above.
+    klass = ""
+    try:
+        from renderfin import priority as _priority
+        klass = _priority.priority_class_from_headers(headers)
+    except Exception:
+        logger.exception("priority headers not read; falling back to the 2026-10-16 rule")
+        prio = str(headers.get("x-autorig-priority") or "").strip().lower()
+        if _CLASS.match(prio) and prio != "mplus" and not (headers.get("x-real-ip") or headers.get("x-forwarded-for")):
+            klass = prio
+    if klass:
+        values["priority_class"] = klass
     _context.set(values)
 
 

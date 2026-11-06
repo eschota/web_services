@@ -67,7 +67,9 @@ async def api_render_task_status(task_id: str):
             # Restart resume (2026-10-11): the job came back by itself after a
             # server restart; the editor shows the localized line.
             "restart_resumes_int": int(row.get("restart_resumes_int") or 0),
-            "notice_string": str(row.get("notice_string") or "")}
+            "notice_string": str(row.get("notice_string") or ""),
+            # Scheduling tier (2026-11-06): mplus > autorig > generation > background.
+            "tier_string": str(row.get("tier_string") or "")}
     try:
         import user_language
         if result["notice_string"] and not result["finished_bool"]:
@@ -544,6 +546,7 @@ def _note_submitted(task_id: str, worker: Dict[str, object]) -> None:
 def _note_finished(task_id: str, status: str) -> None:
     if status not in ("Completed", "Failed"):
         return
+    _AI_MPLUS_INFLIGHT.pop(task_id, None)
     seen = _AI_SUBMITTED.pop(task_id, None)
     if not seen:
         return
@@ -582,6 +585,62 @@ def _recent_picks(key: tuple, now: float) -> int:
     return len(picks or ())
 
 
+# Tiers (owner 2026-11-06, renderfin/priority.py): M+ requests go to the nodes
+# pinned for them (RENDERFIN_TIER_VISION_BOXES="mplus=f13-ai,f7-ai"), and lower
+# tiers are steered off a pinned node while an M+ request is in flight on it.
+MPLUS_INFLIGHT_SECONDS = float(os.getenv("RENDERFIN_MPLUS_INFLIGHT_SECONDS", "300"))
+MPLUS_PIN_MAX_WAIT_SECONDS = float(os.getenv("RENDERFIN_MPLUS_PIN_MAX_WAIT_SECONDS", "30"))
+_AI_MPLUS_INFLIGHT: Dict[str, Tuple[float, tuple]] = {}   # task id / pick token -> (at, probe key)
+
+
+def _tier_module():
+    try:
+        from renderfin import priority
+        return priority
+    except Exception:
+        logger.exception("renderfin.priority not importable; vision tiers off")
+        return None
+
+
+def _request_tier(request: Optional[Request]) -> str:
+    """The tier an incoming /api/vision or /api/text2text request may claim ('' = none/off)."""
+    priority = _tier_module()
+    if priority is None or request is None or not priority.enabled():
+        return ""
+    try:
+        return priority.request_tier(request.headers)
+    except Exception:
+        logger.exception("priority headers not read")
+        return ""
+
+
+def _pinned_keys(tier: str) -> frozenset:
+    priority = _tier_module()
+    if priority is None or not priority.enabled():
+        return frozenset()
+    return priority.vision_boxes(tier)
+
+
+def _is_pinned(worker: Dict[str, object], pinned: frozenset) -> bool:
+    if not pinned:
+        return False
+    return (_node_key(worker) in pinned
+            or str(worker.get("name") or "").strip().lower() in pinned
+            or str(worker.get("physical_node") or "").strip().lower() in pinned)
+
+
+def _note_mplus(token: str, worker: Dict[str, object]) -> None:
+    now = time.monotonic()
+    for old in [t for t, (at, _) in _AI_MPLUS_INFLIGHT.items() if now - at > MPLUS_INFLIGHT_SECONDS]:
+        _AI_MPLUS_INFLIGHT.pop(old, None)
+    _AI_MPLUS_INFLIGHT[token] = (now, _probe_key(worker))
+
+
+def _mplus_inflight(key: tuple, now: float) -> int:
+    return sum(1 for at, k in list(_AI_MPLUS_INFLIGHT.values())
+               if k == key and now - at < MPLUS_INFLIGHT_SECONDS)
+
+
 def _note_refusal(worker: Dict[str, object], exc: HTTPException) -> None:
     """A node that refused as busy or could not be reached is not offered the next job straight away."""
     detail = exc.detail if isinstance(exc.detail, dict) else {}
@@ -598,12 +657,18 @@ async def _pick_worker(
     client: httpx.AsyncClient, model_id: Optional[str] = None,
     *, require_system_prompt: bool = False, require_unlimited_output: bool = False,
     with_info: bool = False, exclude: Optional[set] = None,
+    tier: Optional[str] = None,
 ):
     """The least loaded reachable node that actually serves the requested model.
 
     With `with_info` the node's probe record comes back alongside it, so the
     caller can say which model the node really serves instead of echoing what
     was asked for.
+
+    `tier` (2026-11-06): an "mplus" request prefers the nodes pinned for M+
+    (RENDERFIN_TIER_VISION_BOXES) unless they are busy with a conversion or a
+    3D job; any other request avoids a pinned node while an M+ request is in
+    flight on it. No pinned nodes configured (or tiers off) = the old order.
     """
     workers = _load_ai_workers()
     # Used to step past a node that just refused: it is still reachable and
@@ -676,7 +741,24 @@ async def _pick_worker(
     # Load first, warmth only as a tie-break: swapping weights costs seconds,
     # but queueing behind a conversion costs however long that conversion runs.
     now = time.monotonic()
+    pinned = _pinned_keys("mplus")
+    is_mplus = str(tier or "") == "mplus"
+
+    def tier_rank(item) -> int:
+        if not pinned:
+            return 0
+        worker_, info_ = item
+        on_pin = _is_pinned(worker_, pinned)
+        if is_mplus:
+            # A pinned node behind a conversion/3D job, or with a longer line
+            # than MPLUS_PIN_MAX_WAIT_SECONDS, is no better than any other.
+            busy_long = any(a in AI_BUSY_ACTIVITIES for a in (info_.get("activities") or []))
+            short_line = _expected_wait(worker_, info_, now) <= MPLUS_PIN_MAX_WAIT_SECONDS
+            return 0 if on_pin and not busy_long and short_line else 1
+        return 1 if on_pin and _mplus_inflight(_probe_key(worker_), now) else 0
+
     carrying.sort(key=lambda item: (
+        tier_rank(item),                                  # M+ pinning (2026-11-06)
         0 if _node_idle(item[0], item[1], now) else 1,   # a free node first (owner 2026-10-12: «должно быть 7(0)»)
         round(_expected_wait(item[0], item[1], now), 3),
         0 if wanted and item[1].get("loaded") == wanted else 1,
@@ -686,6 +768,87 @@ async def _pick_worker(
     if with_info:
         return worker, info
     return worker
+
+
+VISION_WARM_PROMPT = "Reply with: ok"
+_VISION_WARM_LOG: Dict[str, float] = {}
+
+
+async def _warm_pinned_once(client: httpx.AsyncClient) -> List[str]:
+    """One warm-up pass: a one-line text request to every M+-pinned node that
+    is reachable, idle (nothing queued, none of ours in flight, no conversion
+    or 3D job) and does not hold the farm model. Returns the nodes pinged.
+
+    Uses the same probe cache as routing (_probe_for_ai), so it adds at most
+    one /server-status call per node per pass. A node that yields its GPU to
+    ComfyUI answers accepting_ai_vision=false and is left alone.
+    """
+    pinned = _pinned_keys("mplus")
+    if not pinned:
+        return []
+    wanted = str(DEFAULT_MODEL_ID or "").strip().lower()
+    pinged: List[str] = []
+    now = time.monotonic()
+    for worker in _load_ai_workers():
+        if not _is_pinned(worker, pinned):
+            continue
+        try:
+            ok, info = await _probe_for_ai(client, worker)
+        except Exception:
+            continue
+        if not ok or not isinstance(info, dict):
+            continue
+        loaded = str(info.get("loaded") or "").strip().lower()
+        if loaded and (not wanted or loaded == wanted):
+            continue                                  # already warm
+        if not _node_idle(worker, info, now):
+            continue                                  # busy: the work itself keeps it warm
+        models = [str(m).lower() for m in (info.get("models") or [])]
+        if wanted and models and wanted not in models:
+            continue                                  # cannot load the farm model at all
+        try:
+            await _submit(client, worker, "/text2text", {
+                "prompt": VISION_WARM_PROMPT, "max_output_tokens": 8,
+                "model": DEFAULT_MODEL_ID})
+        except HTTPException as exc:
+            _note_refusal(worker, exc)
+            continue
+        key = _node_key(worker)
+        pinged.append(key)
+        if now - _VISION_WARM_LOG.get(key, 0.0) > 3600:
+            _VISION_WARM_LOG[key] = now
+            logger.info("Vision warm-up: %s had no model loaded (%r); sent a warm-up request", key, loaded)
+    return pinged
+
+
+async def _vision_warm_loop(minutes: float) -> None:
+    interval = max(60.0, float(minutes) * 60.0)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            async with httpx.AsyncClient() as client:
+                await _warm_pinned_once(client)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Vision warm-up pass failed")
+
+
+def start_vision_warmer() -> Optional["asyncio.Task"]:
+    """Start the periodic warm-up of M+-pinned Vision nodes
+    (RENDERFIN_VISION_WARM_MINUTES > 0 and RENDERFIN_TIER_VISION_BOXES has mplus)."""
+    priority = _tier_module()
+    if priority is None or not priority.enabled():
+        return None
+    try:
+        from renderfin import config as renderfin_config
+        minutes = float(renderfin_config.VISION_WARM_MINUTES or 0)
+    except Exception:
+        return None
+    if minutes <= 0 or not _pinned_keys("mplus"):
+        return None
+    logger.info("Vision warm-up every %.1f min for %s", minutes, sorted(_pinned_keys("mplus")))
+    return asyncio.create_task(_vision_warm_loop(minutes), name="vision-warm")
 
 
 def _worker_by_key(key: str) -> Optional[Dict[str, object]]:
@@ -1351,6 +1514,7 @@ async def _run(
     payload: Dict[str, object],
     wait_seconds: Optional[float],
     service_id: str = "",
+    tier: str = "",
 ) -> Dict[str, object]:
     model_id = str(request_model["id"])
     async with httpx.AsyncClient() as client:
@@ -1359,6 +1523,10 @@ async def _run(
             requirements["require_system_prompt"] = True
         if payload.get("max_output_tokens") == -1:
             requirements["require_unlimited_output"] = True
+        if tier:
+            # Only when a tier is known, so callers/test doubles that predate it
+            # see the same call as before.
+            requirements["tier"] = tier
         try:
             picked = await _pick_worker(client, model_id, with_info=True, **requirements)
         except HTTPException as exc:
@@ -1392,6 +1560,8 @@ async def _run(
             worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
         task_id = f"{_node_key(worker)}.{worker_task_id}"
         _note_submitted(task_id, worker)
+        if tier == "mplus":
+            _note_mplus(task_id, worker)
         raw: Dict[str, object] = {"status": "Pending"}
         if wait_seconds and wait_seconds > 0:
             deadline = time.monotonic() + min(float(wait_seconds), MAX_WAIT_SECONDS)
@@ -1512,7 +1682,8 @@ async def _uncached_api_vision(request: Request, body: VisionRequest):
     payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
     _apply_standing_instruction(
         model, payload, _standing_instruction(body.system_prompt, body.structured))
-    return await _run(model, "/ai-vision", payload, body.wait_seconds, "vision")
+    return await _run(model, "/ai-vision", payload, body.wait_seconds, "vision",
+                      tier=_request_tier(request))
 
 
 @router.get("/api/text2text")
@@ -1561,7 +1732,8 @@ async def _uncached_api_text2text(request: Request, body: TextRequest):
     _apply_standing_instruction(
         model, payload, _standing_instruction(body.system_prompt, body.structured))
     payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
-    return await _run(model, "/text2text", payload, body.wait_seconds, "text")
+    return await _run(model, "/text2text", payload, body.wait_seconds, "text",
+                      tier=_request_tier(request))
 
 
 @router.get("/api/ai/status/{task_id}")

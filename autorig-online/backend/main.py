@@ -1285,6 +1285,15 @@ async def lifespan(app: FastAPI):
         _artifact_cache_retention_loop(),
         name="artifact-cache-retention",
     )
+    # 2026-11-06 tiers: keep the M+-pinned Vision nodes warm (off unless
+    # RENDERFIN_VISION_WARM_MINUTES > 0 and RENDERFIN_TIER_VISION_BOXES has mplus).
+    try:
+        import ai_vision_api as _ai_vision_api
+
+        app.state.vision_warmer = _ai_vision_api.start_vision_warmer()
+    except Exception as exc:
+        app.state.vision_warmer = None
+        print(f"[Vision] warm-up not started: {type(exc).__name__}: {exc}")
     # V3 task runtime (2026-10-10): durable outbox -> Motion Transfer /api/mt/v3.
     # Restart-safe: unsettled bindings are re-enqueued, lost projections replayed.
     app.state.v3_runtime = None
@@ -1337,6 +1346,9 @@ async def lifespan(app: FastAPI):
         startup_disk_maintenance.cancel()
     if artifact_cache_retention:
         artifact_cache_retention.cancel()
+    vision_warmer = getattr(app.state, "vision_warmer", None)
+    if vision_warmer:
+        vision_warmer.cancel()
     scheduler_wake_transport = getattr(app.state, "scheduler_wake_transport", None)
     if scheduler_wake_transport:
         scheduler_wake_transport.close()

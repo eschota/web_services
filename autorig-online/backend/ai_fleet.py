@@ -172,7 +172,28 @@ def _queue_summary(tasks: List[dict], servers: List[dict],
         "eta_seconds_float": eta_value,
         "estimate_kind_string": estimate_kind,
         "sample_count_int": len(used_samples),
+        # Scheduling tiers (2026-11-06): what each tier has on the farm.
+        "by_tier_object": _tier_breakdown(active, pending),
     }
+
+
+def _tiers_config() -> Dict[str, object]:
+    """Non-secret tier settings (no key values, only how many are configured)."""
+    try:
+        from renderfin import priority
+        return priority.describe()
+    except Exception:
+        return {}
+
+
+def _tier_breakdown(active: List[dict], pending: List[dict]) -> Dict[str, Dict[str, int]]:
+    out: Dict[str, Dict[str, int]] = {}
+    for key, rows in (("running_int", active), ("waiting_int", pending)):
+        for task in rows:
+            tier = str(task.get("tier_string") or "") or "unknown"
+            bucket = out.setdefault(tier, {"running_int": 0, "waiting_int": 0})
+            bucket[key] += 1
+    return out
 
 
 def _running_from_renderfin(tasks: List[dict]) -> Dict[str, Dict[str, int]]:
@@ -463,6 +484,7 @@ async def _build_snapshot() -> Dict[str, object]:
         "services_object": services,
         "capacity_object": capacity,
         "queue_object": queue,
+        "tiers_object": _tiers_config(),
         "server_time_unix_int": int(time.time()),
         "snapshot_ttl_seconds_float": SNAPSHOT_TTL_SECONDS,
     }

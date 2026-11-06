@@ -91,6 +91,7 @@ class RenderPrompt(BaseModel):
     user_name: str = "default_user"
     # "autorig": an AutoRig task (owner 2026-10-15: priority on worker-4090); set by
     # the MT farm client / the AutoRig backend paths through ai_graph_context.
+    # "mplus": an M+ task (2026-11-06, top tier), only with a valid X-Priority-Key.
     priority_class: str = ""
     render_mode: str = ""
     # Music (renderfin.music): clip length in seconds; 0 = the default 30 s.
@@ -269,9 +270,17 @@ class RenderTask(BaseModel):
     # back in the queue, and the notice its status shows meanwhile.
     restart_resumes: int = 0
     notice: str = ""
+    # Tier preemption (2026-11-06): how often a higher tier took this task's
+    # box. At RENDERFIN_TIER_PREEMPT_MAX_PER_TASK it is never preempted again
+    # and goes first in its tier.
+    preemptions: int = 0
 
     def public_dict(self) -> Dict[str, Any]:
+        from . import priority
+
         return {
+            "tier_string": priority.task_tier(self),
+            "preemptions_int": int(self.preemptions or 0),
             "id": self.id,
             "status": self.status,
             "status_string": self.status,
