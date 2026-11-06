@@ -1,0 +1,5 @@
+{
+  "1": {"class_type": "LoadImage", "inputs": {"image": "$image"}},
+  "2": {"class_type": "OpenposePreprocessor", "inputs": {"image": ["1", 0], "detect_hand": "enable", "detect_body": "enable", "detect_face": "enable", "resolution": 960, "scale_stick_for_xinsr_cn": "disable"}},
+  "3": {"class_type": "SaveImage", "inputs": {"filename_prefix": "$output_url", "images": ["2", 0]}}
+}

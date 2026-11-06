@@ -104,6 +104,60 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 404)
 
+    def _enqueue_pending(self):
+        resp = self.client.post(
+            "/renderfin/api-render",
+            json={
+                "prompt": "walk cycle",
+                "image_url": "https://h/base.png",
+                "work_flow": "autorig_animal_loop_ltx2_19b_v1",
+                "user_name": "pilot",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        return resp.json()["task_id"]
+
+    def test_cancel_if_pending_records_the_given_reason(self):
+        task_id = self._enqueue_pending()
+        reason = "  no worker advertises autorig_animal_loop_ltx2_19b_v1;" + chr(10) + "  stood down by the operator  "
+        resp = self.client.post(
+            "/renderfin/api-render/cancel-if-pending",
+            json={"task_id": task_id, "reason": reason},
+        )
+        self.assertEqual(resp.status_code, 200)
+        expected = "no worker advertises autorig_animal_loop_ltx2_19b_v1; stood down by the operator"
+        self.assertEqual(
+            resp.json(), {"cancelled": True, "status": "Pending", "reason": expected}
+        )
+        task = self.client.get(f"/renderfin/api-render/tasks/{task_id}").json()
+        self.assertEqual(task["status"], "Error")
+        self.assertEqual(task["error"], expected)
+
+    def test_cancel_if_pending_keeps_the_default_reason(self):
+        from renderfin.api import CANCEL_REASON_DEFAULT, CANCEL_REASON_MAX_CHARS
+
+        task_id = self._enqueue_pending()
+        resp = self.client.post(
+            "/renderfin/api-render/cancel-if-pending", json={"task_id": task_id}
+        )
+        self.assertEqual(resp.json()["reason"], CANCEL_REASON_DEFAULT)
+        task = self.client.get(f"/renderfin/api-render/tasks/{task_id}").json()
+        self.assertEqual(task["error"], CANCEL_REASON_DEFAULT)
+
+        second = self._enqueue_pending()
+        resp = self.client.post(
+            "/renderfin/api-render/cancel-if-pending",
+            json={"task_id": second, "reason": "x" * (CANCEL_REASON_MAX_CHARS + 50)},
+        )
+        self.assertEqual(len(resp.json()["reason"]), CANCEL_REASON_MAX_CHARS)
+
+        again = self.client.post(
+            "/renderfin/api-render/cancel-if-pending",
+            json={"task_id": second, "reason": "late"},
+        )
+        self.assertEqual(again.json()["cancelled"], False)
+        self.assertEqual(again.json()["status"], "Error")
+
     def test_character_gen_create_and_status(self):
         resp = self.client.post(
             "/renderfin/api-character-gen",

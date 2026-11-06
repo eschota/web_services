@@ -560,6 +560,26 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
     if not glb_url and stage != "failed" and await _canon_redispatch(db, task, meta, job):
         return
 
+    if stage == "failed" and job_id.startswith("tripo:") and not meta.get("tripo_fallback"):
+        # 2026-10-26: Tripo refuses some pictures after accepting them (content policy on an adult character): the
+        # owner's task then goes to the farm's Hunyuan once instead of failing (the start-time refusal already did).
+        try:
+            import picture_isolate
+            from config import APP_URL
+
+            _tok = picture_isolate.token_of(str(task.input_url))
+            _img = (f"{APP_URL}/u/{_tok}/cutout.png" if _tok and picture_isolate.cutout_ready(_tok)
+                    else str(task.input_url))
+            new_job = await render_prompting.start_character_gen_from_image(_img, source_task_id=task.id,
+                                                                            user_name="site")
+            set_generation_meta(task, job_id=new_job, provider="renderfin", tripo_fallback=True,
+                                tripo_error=str(job.get("error") or "")[:300], sub_key="", sub_started_at=time.time())
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            print(f"[Generation] Tripo failed for {task.id} ({str(job.get('error') or '')[:120]}) -> renderfin {new_job}")
+            return
+        except Exception as exc:                               # noqa: BLE001 - then it fails as before
+            print(f"[Generation] Tripo fallback to renderfin failed for {task.id}: {type(exc).__name__}: {exc}")
     if stage == "failed":
         task.status = "error"
         task.error_message = f"3D generation failed: {str(job.get('error') or '')[:200]}"

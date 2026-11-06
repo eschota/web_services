@@ -10,19 +10,44 @@ from __future__ import annotations
 import json
 import random
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 SEED_MAX = 574131870028331  # C# random seed upper bound
 _GLASS_RE = re.compile(r"\bglass(?:es)?\b", re.IGNORECASE)
 _SEED_KEYS = ("noise_seed", "seed")
-MAX_PROMPT_CHARS = 2000
+MAX_PROMPT_CHARS = 12000
+# The one ESRGAN model every FLUX image box carries. A template that asks for
+# an upscaler must still parse when nothing was chosen.
+DEFAULT_UPSCALE_MODEL = "4x_NMKD-Siax_200k.pth"
+# Every clip this product delivers is 24 fps, so `frame_count` frames are
+# `frame_count / 24` seconds of video wherever they were rendered. The LTXV
+# 0.9.8 template shipped with the 25 the C# exporter wrote into it, which made
+# the same 97 frames arrive 4% short of the length the caller asked for.
+VIDEO_FPS = 24
 
 
 def sanitize_prompt(text: str) -> str:
-    """Strip the words glasses/glass (C# parity) and clamp length."""
-    text = _GLASS_RE.sub("", text or "")
+    """Preserve visual attributes and action instructions, with a bounded size."""
+    text = text or ""
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text[:MAX_PROMPT_CHARS].strip()
+
+
+def _ltxv_frames(frames: int, default: int = 121) -> int:
+    """LTXV samplers accept 8*k+1 frames; 0 means "keep the template default"."""
+    count = int(frames or 0)
+    if count <= 0:
+        return default
+    return max(1, round((count - 1) / 8)) * 8 + 1
+
+
+def _video_fps(fps: object, default: int = VIDEO_FPS) -> int:
+    """The delivered frame rate; 0 or nonsense means the product's own 24."""
+    try:
+        rate = int(fps or 0)
+    except (TypeError, ValueError):
+        return default
+    return rate if 1 <= rate <= 120 else default
 
 
 def _json_escape(text: str) -> str:
@@ -37,18 +62,46 @@ def render_workflow_text(
     prompt: str,
     negative_prompt: str,
     image_filename: str,
+    image_end_filename: str = "",
+    control_video_filename: str = "",
+    video_prefix_filename: str = "",
     output_prefix: str,
     workflow_type: str = "",
+    frames: int = 0,
+    fps: int = VIDEO_FPS,
     randomize_seeds: bool = True,
     seed: Optional[int] = None,
+    checkpoint: str = "",
+    lora: str = "",
+    lora_strength: Optional[float] = None,
+    loras: Any = None,
+    pose_prompt: str = "",
+    upscale_model: str = "",
 ) -> Dict[str, Any]:
     """Substitute placeholders, parse, normalize. Returns the workflow dict
     ready for POST /prompt."""
     text = template_text
+    text = text.replace("$frames", str(_ltxv_frames(frames)))
+    # Frame rate and frame count are one contract: a template that states its
+    # own rate turns a requested length into a different number of seconds.
+    text = text.replace("$fps", str(_video_fps(fps)))
+    # The longer edge, for workflows that scale by it rather than by a
+    # width and a height. Without this the template keeps a bare token
+    # and does not parse.
+    text = text.replace("$long_side", str(int(max(width, height))))
     text = text.replace("$width", str(int(width)))
     text = text.replace("$height", str(int(height)))
+    text = text.replace(
+        "$upscale_model",
+        _json_escape((upscale_model or "").strip() or DEFAULT_UPSCALE_MODEL),
+    )
     text = text.replace("$prompt", _json_escape(sanitize_prompt(prompt)))
+    text = text.replace("$pose_prompt", _json_escape(sanitize_prompt(pose_prompt)))
     text = text.replace("$negative_prompt", _json_escape(sanitize_prompt(negative_prompt)))
+    # $image_end must go first: "$image" is a prefix of it.
+    text = text.replace("$image_end", _json_escape(image_end_filename or ""))
+    text = text.replace("$control_video", _json_escape(control_video_filename or ""))
+    text = text.replace("$video_prefix", _json_escape(video_prefix_filename or ""))
     text = text.replace("$image", _json_escape(image_filename or ""))
     # $output_url must go last: it is a prefix of $output_url_Isolated etc.
     text = text.replace("$output_url", _json_escape(output_prefix or ""))
@@ -61,6 +114,16 @@ def render_workflow_text(
     if randomize_seeds:
         _randomize_seeds(workflow, seed)
     _normalize_workflow(workflow, width=width, height=height, workflow_type=workflow_type)
+    # The prefix guide goes first: it hangs off the end-frame guide, so with
+    # both absent the guider falls back to the end guide, then to frame 0.
+    if not (video_prefix_filename or "").strip():
+        _prune_optional_guide(workflow, OPTIONAL_PREFIX_GUIDE, "prefix clip")
+    if not (image_end_filename or "").strip():
+        _prune_optional_guide(workflow)
+    # Last, so a chosen model is not undone by normalisation or pruning.
+    apply_model_choice(workflow, checkpoint=checkpoint, lora=lora,
+                       lora_strength=lora_strength)
+    apply_lora_stack(workflow, loras)
     return workflow
 
 
@@ -102,6 +165,230 @@ def _normalize_workflow(
             meta = node.get("_meta")
             if isinstance(meta, dict):
                 meta["title"] = "VAE Decode"
+
+
+OPTIONAL_GUIDE = "AIGent optional end-frame guide"
+# A clip whose frames and sound anchor the start of the video (MiniMax H3 only):
+# the same optional-branch pattern, its feeders titled "... prefix clip".
+OPTIONAL_PREFIX_GUIDE = "AIGent optional prefix guide"
+
+
+def _prune_optional_guide(workflow, title=OPTIONAL_GUIDE, orphan_suffix="end frame"):
+    """Drop the end-frame branch when no second image was given.
+
+    The farm only schedules workflow names a node advertises, so the frame-to-frame guide lives
+    inside the normal template. Without an end image its LoadImage would fail, and the whole
+    chain is removed instead: consumers fall back to the guide it was chained from.
+    `title` names the guide node to drop and `orphan_suffix` the titles of what only fed it.
+    """
+    target = next((nid for nid, node in workflow.items()
+                   if isinstance(node, dict) and (node.get("_meta") or {}).get("title") == title), None)
+    if target is None:
+        return
+    inputs = workflow[target]["inputs"]
+    fallback = next((inputs[key] for key in ("image1", "positive", "image") if isinstance(inputs.get(key), list)), None)
+    if not fallback:
+        return
+    source = fallback[0]
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        for key, value in list((node.get("inputs") or {}).items()):
+            if isinstance(value, list) and value and value[0] == target:
+                node["inputs"][key] = [source, value[1]]
+    workflow.pop(target, None)
+    _restore_single_anchor(workflow)
+    # Remove what only fed the dropped guide, walking back until nothing orphaned is left.
+    while True:
+        referenced = {value[0] for node in workflow.values() if isinstance(node, dict)
+                      for value in (node.get("inputs") or {}).values()
+                      if isinstance(value, list) and value}
+        orphans = [nid for nid, node in workflow.items()
+                   if isinstance(node, dict) and nid not in referenced
+                   and (node.get("_meta") or {}).get("title", "").endswith(orphan_suffix)]
+        if not orphans:
+            return
+        for nid in orphans:
+            workflow.pop(nid, None)
+        _restore_single_anchor(workflow)
+
+
+def _restore_single_anchor(workflow):
+    """With the end frame gone the sampler must condition on frame 0 only."""
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        indices = (node.get("inputs") or {}).get("optional_cond_indices")
+        if isinstance(indices, str) and "-1" in indices:
+            kept = [part.strip() for part in indices.split(",") if part.strip() not in ("-1", "")]
+            node["inputs"]["optional_cond_indices"] = ",".join(kept) or "0"
+
+
+# Which input on which loader names the model file. Keyed by class_type so a
+# workflow can be re-saved with different node ids without breaking this.
+CHECKPOINT_SLOTS = {
+    "CheckpointLoaderSimple": "ckpt_name",
+    "UNETLoader": "unet_name",
+    "ImageOnlyCheckpointLoader": "ckpt_name",
+    # ComfyUI-GGUF keeps its own loader rather than teaching UNETLoader about
+    # .gguf, so a quantised model chosen on the node reaches nothing unless
+    # that loader is named here too.
+    "UnetLoaderGGUF": "unet_name",
+}
+LORA_SLOTS = {
+    "LoraLoaderModelOnly": "lora_name",
+    "LoraLoader": "lora_name",
+}
+POWER_LORA_LOADER = "Power Lora Loader (rgthree)"
+
+
+def apply_model_choice(
+    workflow: Dict[str, Any],
+    *,
+    checkpoint: str = "",
+    lora: str = "",
+    lora_strength: Optional[float] = None,
+) -> Dict[str, list]:
+    """Point the workflow's loaders at the chosen files.
+
+    Done after parsing rather than by substituting a placeholder, because the
+    templates were exported from ComfyUI with real file names already in them
+    and adding placeholders to every one of them would be a bigger change than
+    this. Returns what was actually changed so a caller can tell the difference
+    between "not asked for" and "asked for but this workflow has no such node".
+    A chosen LoRA is chained onto the model loader (see apply_lora_stack);
+    only rgthree's Power Lora Loader, a slot meant for user LoRAs, is steered.
+    """
+    changed: Dict[str, list] = {"checkpoint": [], "lora": []}
+    if not checkpoint and not lora and lora_strength is None:
+        return changed
+
+    for node_id, node in list(workflow.items()):
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type") or "")
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+
+        if checkpoint and class_type in CHECKPOINT_SLOTS:
+            slot = CHECKPOINT_SLOTS[class_type]
+            if slot in inputs:
+                inputs[slot] = checkpoint
+                changed["checkpoint"].append(node_id)
+
+        if class_type == POWER_LORA_LOADER:
+            # rgthree keeps each LoRA as its own dict rather than a flat input.
+            # Only the first slot is steered; the rest of the stack the workflow
+            # ships with is left alone.
+            entry = inputs.get("lora_1")
+            if isinstance(entry, dict):
+                if lora:
+                    entry["lora"] = lora
+                    entry["on"] = True
+                    changed["lora"].append(node_id)
+                if lora_strength is not None:
+                    entry["strength"] = float(lora_strength)
+    if lora and not changed["lora"]:
+        # The chosen LoRA is added to the model, never swapped into a loader
+        # the template already has: every LoRA baked into today's templates is
+        # a step-distill adapter the fixed schedule depends on (the H3 turbo
+        # 4-step LoRA, Wan's lightx2v). Replacing one ran H3 at four steps
+        # without its turbo weights. It joins the same chain as a stack.
+        strength = float(lora_strength) if lora_strength is not None else 1.0
+        changed["lora"].extend(apply_lora_stack(workflow, [
+            {"name": lora, "strength_model": strength, "strength_clip": strength}]))
+    return changed
+
+
+# Loaders a LoRA stack attaches to. ImageOnlyCheckpointLoader is left out: it
+# loads an image-conditioned video model whose adapters are not LoRAs.
+STACK_LOADERS = ("CheckpointLoaderSimple", "CheckpointLoader", "UNETLoader", "UnetLoaderGGUF")
+
+
+def _stack_entries(loras: Any) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    for item in loras or []:
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        model = float(item.get("strength_model", 1.0))
+        clip = float(item.get("strength_clip", model))
+        entries.append({"name": name, "strength_model": model, "strength_clip": clip})
+    return entries
+
+
+def apply_lora_stack(workflow: Dict[str, Any], loras: Any) -> List[str]:
+    """Chain LoRA loaders directly onto every model loader, in stack order.
+
+    A checkpoint whose CLIP output feeds the graph gets `LoraLoader` nodes, so
+    each LoRA's text-encoder weights apply with their own strength (SD1.5/SDXL/
+    Pony LoRAs carry them). A diffusion-model-only loader - UNETLoader, GGUF,
+    or a checkpoint whose CLIP nobody reads - gets `LoraLoaderModelOnly`.
+    Every consumer of the loader's MODEL/CLIP outputs, including LoRA loaders
+    the template already had, is rewired to the end of the new chain. LoRAs
+    add their deltas, so the chain's position does not change the result
+    beyond float rounding; its order is kept anyway so a stack renders the
+    same way twice. Returns the ids of the inserted nodes.
+    """
+    entries = _stack_entries(loras)
+    if not entries:
+        return []
+    loaders = [node_id for node_id, node in workflow.items()
+               if isinstance(node, dict) and node.get("class_type") in STACK_LOADERS]
+    if not loaders:
+        raise ValueError("This workflow has no model loader to attach the LoRA stack to")
+    inserted: List[str] = []
+    for loader in loaders:
+        loader_class = workflow[loader].get("class_type")
+        consumers = [(node_id, key) for node_id, node in workflow.items()
+                     if isinstance(node, dict) and isinstance(node.get("inputs"), dict)
+                     for key, value in node["inputs"].items()
+                     if isinstance(value, list) and len(value) == 2 and value[0] == loader]
+        uses_clip = (loader_class in ("CheckpointLoaderSimple", "CheckpointLoader")
+                     and any(workflow[node_id]["inputs"][key][1] == 1
+                             for node_id, key in consumers))
+        model_src: List[Any] = [loader, 0]
+        clip_src: List[Any] = [loader, 1]
+        for index, entry in enumerate(entries):
+            node_id = f"autorig_lora_{loader}_{index}"
+            while node_id in workflow:
+                node_id += "_"
+            if uses_clip:
+                workflow[node_id] = {
+                    "class_type": "LoraLoader",
+                    "inputs": {"lora_name": entry["name"],
+                               "strength_model": entry["strength_model"],
+                               "strength_clip": entry["strength_clip"],
+                               "model": model_src, "clip": clip_src},
+                    "_meta": {"title": f"LoRA stack {index + 1}"},
+                }
+                clip_src = [node_id, 1]
+            else:
+                workflow[node_id] = {
+                    "class_type": "LoraLoaderModelOnly",
+                    "inputs": {"lora_name": entry["name"],
+                               "strength_model": entry["strength_model"],
+                               "model": model_src},
+                    "_meta": {"title": f"LoRA stack {index + 1}"},
+                }
+            model_src = [node_id, 0]
+            inserted.append(node_id)
+        for node_id, key in consumers:
+            output = workflow[node_id]["inputs"][key][1]
+            if output == 0:
+                workflow[node_id]["inputs"][key] = list(model_src)
+            elif output == 1 and uses_clip:
+                workflow[node_id]["inputs"][key] = list(clip_src)
+    return inserted
+
+
+def stack_file_names(loras: Any) -> List[str]:
+    return [entry["name"] for entry in _stack_entries(loras)]
 
 
 def workflow_placeholders(template_text: str) -> Tuple[str, ...]:

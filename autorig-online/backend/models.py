@@ -126,6 +126,9 @@ class TaskStatusResponse(BaseModel):
     rig_v2_animal_detection: Optional[dict] = None
     viewer_theme_selection: Optional[dict] = None
     viewer_environment: Optional[dict] = None
+    # Localization V3: the task owner's language (user_language.py; agents answer in owner_language_code)
+    owner_language: Optional[dict] = None
+    owner_language_code: Optional[str] = None
 
 
 class AnimalVariantFileState(BaseModel):
@@ -241,6 +244,9 @@ class AuthStatusResponse(BaseModel):
     anon: Optional[AnonInfo] = None
     credits_remaining: int
     login_required: bool
+    # Localization V3: the requester's language (code to answer in, ui, dir, source ...)
+    language: Optional[dict] = None
+    language_code: Optional[str] = None
 
 
 # =============================================================================
@@ -506,10 +512,14 @@ class GalleryItem(BaseModel):
     like_count: int = 0
     liked_by_me: bool = False
     sales_count: int = 0  # Number of purchases for this task
-    author_email: Optional[str] = None  # Owner email if owner_type == "user"
-    author_nickname: Optional[str] = None  # Preferred display name (fallback to email)
+    author_email: Optional[str] = None  # always null since 2026-10-11 (privacy): use author_handle / author_url
+    author_nickname: Optional[str] = None  # public display name: nickname, else User-XXXX / Guest-XXXX
+    author_handle: Optional[str] = None  # public handle (10 hex), the /author/<handle> page
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
     version: int = 1  # restart_count + 1
     content_rating: Optional[str] = None
+    category: str = "humanoid"  # V3 rig category: humanoid | quadruped | equine | bird | serpent | monster | multilimb | hands | vehicle | other
     rig_icon_key: str = "humanoid"  # humanoid | dog | bear | … for UI icon under Icons_png/
 
 
@@ -542,8 +552,11 @@ class TaskCardInfo(BaseModel):
     like_count: int = 0
     liked_by_me: bool = False
     sales_count: int = 0
-    author_email: Optional[str] = None
+    author_email: Optional[str] = None  # always null since 2026-10-11 (privacy)
     author_nickname: Optional[str] = None
+    author_handle: Optional[str] = None
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
     time_ago: str = ""
     version: int = 1  # restart_count + 1
     content_rating: Optional[str] = None
@@ -837,6 +850,9 @@ class RoadmapVoteRequest(BaseModel):
 class SupportChatSessionPostRequest(BaseModel):
     visitor_id_string: str = Field(..., min_length=8, max_length=96)
     page_url_string: Optional[str] = Field(None, max_length=4096)
+    # Localization V3: the widget's interface language and navigator.languages ("fa-IR,fa,en-US")
+    language_string: Optional[str] = Field(None, max_length=32)
+    browser_languages_string: Optional[str] = Field(None, max_length=256)
 
 
 class SupportChatSessionPostResponse(BaseModel):
@@ -847,6 +863,9 @@ class SupportChatSessionPostResponse(BaseModel):
     support_configured_bool: bool
     page_url_string: Optional[str] = None
     user_email_string: Optional[str] = None
+    # Localization V3: the visitor's language, stored on support_chat_sessions.language
+    language_string: Optional[str] = None
+    language: Optional[dict] = None
 
 
 class SupportChatMessagePostRequest(BaseModel):

@@ -1,0 +1,419 @@
+"""Image enhancement API backed by Renderfin/ComfyUI.
+
+Three separate services, one shape: a picture goes in, the same picture comes
+back improved, at a size this module works out rather than one the caller has
+to guess.
+
+* ``/api/upscale``  - super-resolution. ``fast`` is the ESRGAN model on its
+  own; ``refine`` runs a low-creativity tiled diffusion pass over the enlarged
+  picture so the invented pixels carry real detail instead of smooth edges.
+* ``/api/detail``   - detail enhancement at the source size: a tiled, low
+  denoise pass plus a light unsharp finish.
+* ``/api/facefix``  - face repair: the face is segmented, cropped out at a far
+  higher pixel density, re-rendered under a noise mask and stitched back.
+
+What runs where is farm-dependent and deliberately explicit: every template
+these endpoints ask for is scheduled with a token that only the FLUX image
+boxes advertise (see ``renderfin.routing.ENHANCE_SCHEDULING_TOKEN``).
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import time
+from typing import Dict, Optional, Tuple
+
+import httpx
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+import ai_graph_context
+from ai_vision_api import (
+    MAX_WAIT_SECONDS,
+    SUBMIT_TIMEOUT_SECONDS,
+    _decode_inline_image,
+    _publish_inline_image,
+)
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+RENDERFIN_BASE = os.getenv("RENDERFIN_INTERNAL_URL", "http://127.0.0.1:8210").rstrip("/")
+
+# Mirrors renderfin.routing.ENHANCE_MAX_SIDE. The backend and renderfin are
+# separate processes, so this is stated rather than imported; the renderfin
+# clamp is the one that actually binds, and asking for more than it allows
+# would silently change the aspect ratio.
+MAX_SIDE = 4096
+DEFAULT_SIZE = (960, 540)
+# v2: v1 sized the job from a probe that clamped each side to 2048, so a
+# source taller than that was answered at the wrong aspect ratio.
+CACHE_NAMESPACE = "image-enhance-20260922-v2"
+
+# The one ESRGAN file present on every FLUX image box. RealESRGAN_x2/x4 exist
+# on f15 alone, so offering them would make the result depend on which card
+# happened to be free; the catalogue lists them disabled for the same reason.
+DEFAULT_UPSCALE_MODEL = "4x_NMKD-Siax_200k.pth"
+INSTALLED_UPSCALE_MODELS = (DEFAULT_UPSCALE_MODEL,)
+
+
+def _fit(width: int, height: int, limit: int = MAX_SIDE) -> Tuple[int, int]:
+    """Largest whole size within `limit` that keeps the aspect ratio.
+
+    Clamping each side on its own is what a naive ceiling does, and it turns a
+    4x enlargement of a portrait into a squashed picture, because the delivery
+    resize downstream crops to whatever was asked for.
+    """
+    width = max(1, int(width))
+    height = max(1, int(height))
+    longest = max(width, height)
+    if longest > limit:
+        width = max(64, round(width * limit / longest))
+        height = max(64, round(height * limit / longest))
+    return max(64, min(limit, width)), max(64, min(limit, height))
+
+
+MAX_PROBE_BYTES = 48 * 1024 * 1024
+
+
+async def _source_size(client: httpx.AsyncClient, url: str) -> Tuple[int, int]:
+    """The picture's true pixel size.
+
+    Deliberately not ai_controlnet_api.probe_image_size, which clamps each
+    side to 2048 on its own: that is the right ceiling for a control map, and
+    the wrong one here. An already-enlarged 1664x2432 picture came back as
+    1664x2048, and the delivery resize then squashed the face fix that
+    followed an upscale in the same chain. Oversize sources are brought inside
+    the ceiling by _fit, which keeps the aspect ratio.
+    """
+    try:
+        response = await client.get(url, timeout=30.0, follow_redirects=True)
+        if response.status_code != 200 or len(response.content) > MAX_PROBE_BYTES:
+            return DEFAULT_SIZE
+        from io import BytesIO
+
+        from PIL import Image
+        with Image.open(BytesIO(response.content)) as picture:
+            width, height = picture.size
+    except Exception:
+        logger.info("Could not read the size of %s; using the default size", url)
+        return DEFAULT_SIZE
+    if width < 1 or height < 1:
+        return DEFAULT_SIZE
+    return int(width), int(height)
+
+
+async def _resolve_source(client: httpx.AsyncClient, image_url: Optional[str],
+                          image_base64: Optional[str]) -> str:
+    source = str(image_url or "").strip()
+    if not source and image_base64:
+        source = await _publish_inline_image(client, _decode_inline_image(image_base64))
+    if not source.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail={
+            "error_string": "image_required",
+            "message_string": "Provide image_url or image_base64",
+        })
+    return source
+
+
+async def _run(service: str, payload: Dict[str, object], wait_seconds: Optional[float],
+               *, produces: str = "image") -> Dict[str, object]:
+    """Submit one renderfin job and answer in the shape /api/controlnet uses."""
+    async with httpx.AsyncClient() as client:
+        try:
+            payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
+            response = await client.post(RENDERFIN_BASE + "/api-render", json=payload,
+                                         timeout=SUBMIT_TIMEOUT_SECONDS)
+        except Exception:
+            logger.exception("Renderfin did not accept an enhancement request")
+            raise HTTPException(status_code=502, detail={
+                "error_string": "enhance_service_unreachable",
+                "message_string": "The image farm did not answer",
+            }) from None
+        if response.status_code not in (200, 202):
+            raise HTTPException(status_code=502, detail={
+                "error_string": "enhance_service_rejected",
+                "message_string": f"Image farm answered HTTP {response.status_code}",
+            })
+        accepted = response.json() or {}
+        output_url = str(accepted.get("output_url") or "").strip()
+        task_id = str(accepted.get("task_id") or "").strip()
+        if not output_url:
+            raise HTTPException(status_code=502, detail={
+                "error_string": "enhance_service_no_output",
+                "message_string": "Image farm accepted the request without an output URL",
+            })
+
+        ready = False
+        if wait_seconds and wait_seconds > 0:
+            deadline = time.monotonic() + min(float(wait_seconds), MAX_WAIT_SECONDS)
+            while time.monotonic() < deadline:
+                await asyncio.sleep(3)
+                try:
+                    probe = await client.head(output_url, timeout=15.0)
+                    if probe.status_code == 200:
+                        ready = True
+                        break
+                except Exception:
+                    continue
+        answer = {
+            "success_bool": True,
+            "task_id_string": task_id,
+            "status_string": "completed" if ready else "pending",
+            "finished_bool": ready,
+            "service_string": service,
+            "entity_type_string": produces,
+            "poll_url_string": output_url,
+            "status_url_string": output_url,
+            "server_time_unix_int": int(time.time()),
+        }
+        answer["video_url_string" if produces == "video" else "image_url_string"] = output_url
+        return answer
+
+
+# ------------------------------------------------------------------- upscale
+
+
+class UpscaleRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="Source image, public http(s) URL")
+    image_base64: Optional[str] = Field(None, description="Source image as base64 or data URL")
+    scale: int = Field(2, ge=2, le=4, description="2 or 4; the output follows the source × scale")
+    model: Optional[str] = Field(None, description="Installed upscale model file name")
+    mode: str = Field("fast", description="fast = ESRGAN only, refine = ESRGAN + tiled diffusion")
+    prompt: Optional[str] = Field(None, description="Subject text for the refine pass")
+    width: Optional[int] = Field(None, ge=64, le=MAX_SIDE, description="Explicit output width")
+    height: Optional[int] = Field(None, ge=64, le=MAX_SIDE, description="Explicit output height")
+    wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+
+
+@router.get("/api/upscale")
+async def api_upscale_docs():
+    return {
+        "status_string": "ok", "method_string": "POST", "url_string": "/api/upscale",
+        "required_fields_array": ["image_url or image_base64"],
+        "modes_array": ["fast", "refine"],
+        "scales_array": [2, 4],
+        "installed_models_array": list(INSTALLED_UPSCALE_MODELS),
+        "max_side_int": MAX_SIDE,
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/upscale")
+async def api_upscale(body: UpscaleRequest):
+    import ai_request_cache
+    return await ai_request_cache.run_cached(
+        "upscale", body.model_dump(exclude_none=True),
+        lambda: _uncached_upscale(body), namespace=CACHE_NAMESPACE)
+
+
+async def _uncached_upscale(body: UpscaleRequest):
+    mode = str(body.mode or "fast").strip().lower()
+    if mode not in ("fast", "refine"):
+        raise HTTPException(status_code=400, detail={
+            "error_string": "unknown_upscale_mode",
+            "message_string": "mode must be fast or refine",
+            "modes_array": ["fast", "refine"],
+        })
+    model = str(body.model or "").strip() or DEFAULT_UPSCALE_MODEL
+    if model not in INSTALLED_UPSCALE_MODELS:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "upscale_model_not_installed",
+            "message_string": f"{model} is not installed on every image worker",
+            "installed_models_array": list(INSTALLED_UPSCALE_MODELS),
+        })
+    scale = 4 if int(body.scale or 2) >= 4 else 2
+    async with httpx.AsyncClient() as client:
+        source = await _resolve_source(client, body.image_url, body.image_base64)
+        if body.width and body.height:
+            width, height = _fit(body.width, body.height)
+        else:
+            source_width, source_height = await _source_size(client, source)
+            width, height = _fit(source_width * scale, source_height * scale)
+    payload: Dict[str, object] = {
+        "image_url": source,
+        "type": "upscale_refine" if mode == "refine" else "upscale_fast",
+        "main_size_width": width,
+        "main_size_height": height,
+        "upscale_model": model,
+    }
+    if mode == "refine":
+        payload["prompt"] = str(body.prompt or "").strip()
+        # Low enough that the subject is kept and only its texture is redrawn.
+        payload["creativity"] = 0.35
+    return await _run("upscale", payload, body.wait_seconds)
+
+
+# ---------------------------------------------------------------- upscale 2x
+
+# The fast x2 model, on every image box since 2026-09-26 (f5, f15, Raptor).
+UPSCALE_X2_MODEL = "RealESRGAN_x2.pth"
+VIDEO_SUFFIXES = (".mp4", ".webm", ".mov", ".m4v")
+
+
+class Upscale2xRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="Picture or clip, public http(s) URL")
+    image_base64: Optional[str] = Field(None, description="Picture as base64 or data URL")
+    video_url: Optional[str] = Field(None, description="Clip, public http(s) URL (same as image_url with a video)")
+    wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+
+
+@router.get("/api/upscale2x")
+async def api_upscale2x_docs():
+    return {
+        "status_string": "ok", "method_string": "POST", "url_string": "/api/upscale2x",
+        "required_fields_array": ["image_url (picture or clip) or image_base64 or video_url"],
+        "model_string": UPSCALE_X2_MODEL, "factor_int": 2,
+        "note_string": "Output = input x2. A clip is enlarged frame by frame at 24 fps (up to 16 s).",
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/upscale2x")
+async def api_upscale2x(body: Upscale2xRequest):
+    import ai_request_cache
+    return await ai_request_cache.run_cached(
+        "upscale2x", body.model_dump(exclude_none=True),
+        lambda: _uncached_upscale2x(body), namespace=CACHE_NAMESPACE + "-x2")
+
+
+def _is_video_url(url: str) -> bool:
+    path = str(url or "").split("?", 1)[0].split("#", 1)[0].lower()
+    return path.endswith(VIDEO_SUFFIXES)
+
+
+async def _uncached_upscale2x(body: Upscale2xRequest):
+    clip = str(body.video_url or "").strip()
+    if not clip and _is_video_url(str(body.image_url or "")):
+        clip = str(body.image_url).strip()
+    if clip:
+        if not clip.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail={
+                "error_string": "video_required", "message_string": "Provide a public clip URL"})
+        payload: Dict[str, object] = {
+            "type": "upscale_video_x2",
+            # Renderfin admits a job by a prompt or a picture; a clip job has
+            # neither, so it carries a label the workflow never reads.
+            "prompt": "upscale 2x",
+            "control_video_url": clip,
+            # 8k+1 ceiling of the clip loader; a shorter clip keeps its length.
+            "frame_count": 393,
+            "upscale_model": UPSCALE_X2_MODEL,
+            "main_size_width": 1920, "main_size_height": 1080,
+        }
+        answer = await _run("upscale2x", payload, body.wait_seconds, produces="video")
+    else:
+        async with httpx.AsyncClient() as client:
+            source = await _resolve_source(client, body.image_url, body.image_base64)
+            source_width, source_height = await _source_size(client, source)
+        width, height = _fit(source_width * 2, source_height * 2)
+        payload = {
+            "image_url": source, "type": "upscale_x2",
+            "main_size_width": width, "main_size_height": height,
+            "upscale_model": UPSCALE_X2_MODEL,
+        }
+        answer = await _run("upscale2x", payload, body.wait_seconds)
+    answer["output_url_string"] = answer.get("video_url_string") or answer.get("image_url_string") or ""
+    return answer
+
+
+# ------------------------------------------------------------------- detail
+
+
+class DetailRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="Source image, public http(s) URL")
+    image_base64: Optional[str] = Field(None, description="Source image as base64 or data URL")
+    strength: float = Field(0.35, ge=0, le=1, description="How much texture to invent")
+    tile: bool = Field(True, description="Tile the diffusion pass; required over ~1.5 MP")
+    prompt: Optional[str] = Field(None, description="Subject text, if there is one")
+    wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+
+
+@router.get("/api/detail")
+async def api_detail_docs():
+    return {
+        "status_string": "ok", "method_string": "POST", "url_string": "/api/detail",
+        "required_fields_array": ["image_url or image_base64"],
+        "strength_range_array": [0, 1],
+        "note_string": ("Detail Daemon is not installed on the farm; strength drives "
+                        "the denoise of a tiled refinement pass instead"),
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/detail")
+async def api_detail(body: DetailRequest):
+    import ai_request_cache
+    return await ai_request_cache.run_cached(
+        "detail", body.model_dump(exclude_none=True),
+        lambda: _uncached_detail(body), namespace=CACHE_NAMESPACE)
+
+
+async def _uncached_detail(body: DetailRequest):
+    async with httpx.AsyncClient() as client:
+        source = await _resolve_source(client, body.image_url, body.image_base64)
+        width, height = _fit(*await _source_size(client, source))
+    strength = max(0.0, min(1.0, float(body.strength)))
+    payload: Dict[str, object] = {
+        "image_url": source,
+        "type": "detail_tiled" if body.tile else "detail_plain",
+        "main_size_width": width,
+        "main_size_height": height,
+        "prompt": str(body.prompt or "").strip(),
+        # 0 would mean "leave the template's own value" downstream, so the
+        # floor is deliberately above it.
+        "creativity": round(0.15 + 0.45 * strength, 3),
+    }
+    return await _run("detail", payload, body.wait_seconds)
+
+
+# ------------------------------------------------------------------ face fix
+
+
+class FaceFixRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="Source image, public http(s) URL")
+    image_base64: Optional[str] = Field(None, description="Source image as base64 or data URL")
+    fidelity: float = Field(0.6, ge=0, le=1,
+                            description="1 keeps the original face, 0 rebuilds it")
+    hands_eyes: bool = Field(False,
+                             description="Also repair the bare skin the parser finds")
+    prompt: Optional[str] = Field(None, description="Subject text, if there is one")
+    wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+
+
+@router.get("/api/facefix")
+async def api_facefix_docs():
+    return {
+        "status_string": "ok", "method_string": "POST", "url_string": "/api/facefix",
+        "required_fields_array": ["image_url or image_base64"],
+        "fidelity_range_array": [0, 1],
+        "note_string": ("CodeFormer/GFPGAN and the Impact Pack FaceDetailer are not "
+                        "installed on the farm; the face is segmented, cropped at a "
+                        "higher pixel density, re-rendered and stitched back"),
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/facefix")
+async def api_facefix(body: FaceFixRequest):
+    import ai_request_cache
+    return await ai_request_cache.run_cached(
+        "facefix", body.model_dump(exclude_none=True),
+        lambda: _uncached_facefix(body), namespace=CACHE_NAMESPACE)
+
+
+async def _uncached_facefix(body: FaceFixRequest):
+    async with httpx.AsyncClient() as client:
+        source = await _resolve_source(client, body.image_url, body.image_base64)
+        width, height = _fit(*await _source_size(client, source))
+    fidelity = max(0.0, min(1.0, float(body.fidelity)))
+    payload: Dict[str, object] = {
+        "image_url": source,
+        "type": "face_fix_skin" if body.hands_eyes else "face_fix",
+        "main_size_width": width,
+        "main_size_height": height,
+        "prompt": str(body.prompt or "").strip(),
+        "creativity": round(0.60 - 0.45 * fidelity, 3),
+    }
+    return await _run("facefix", payload, body.wait_seconds)

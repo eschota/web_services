@@ -8,9 +8,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from .models import RenderPrompt, RenderServer
+from .models import TASK_PENDING, RenderPrompt, RenderServer
 
 router = APIRouter(prefix="/renderfin")
+
+# cancel-if-pending records its reason as the task's error text.
+CANCEL_REASON_DEFAULT = "cancelled by the composition"
+CANCEL_REASON_MAX_CHARS = 300
 
 
 def _queue(request: Request):
@@ -65,12 +69,173 @@ async def health(request: Request) -> Dict[str, Any]:
     }
 
 
+@router.get("/api-render/tasks/{task_id}")
+async def api_render_task(request: Request, task_id: str) -> Dict[str, Any]:
+    queue = _queue(request)
+    task = queue.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="render task not found")
+    # A waiting caller is told where in the line it is, not merely that there
+    # is a line. Zero means "not waiting": rendering, finished or failed.
+    return {**task.public_dict(), **queue.queue_position(task_id)}
+
+
 @router.get("/api-render")
 async def api_render_get(request: Request) -> Dict[str, Any]:
     return {
         "servers": [s.model_dump() for s in _registry(request).all()],
         "tasks": [t.public_dict() for t in _queue(request).all_tasks()[:100]],
     }
+
+
+@router.post("/api-render/cancel-if-pending")
+async def api_render_cancel_if_pending(request: Request) -> Dict[str, Any]:
+    """Stand a task down, but only while it is still waiting for a card.
+
+    Deliberately narrower than the queue's own cancel, which also interrupts a
+    render in progress. A job that has started has already spent GPU minutes
+    and its result is still wanted; only the queue ahead of it is waste.
+    """
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from None
+    task_id = str(body.get("task_id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="task_id is required")
+    # The reason becomes the task's error text, which is what a caller polling
+    # the task sees. An operator standing down a task no box can ever take
+    # says why, so the ledger and the poller are told the truth rather than
+    # the node editor's default wording.
+    reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    if not reason:
+        reason = CANCEL_REASON_DEFAULT
+    queue = _queue(request)
+    task = queue.get(task_id)
+    if task is None:
+        return {"cancelled": False, "status": "unknown", "reason": "no such task"}
+    if task.status != TASK_PENDING:
+        return {"cancelled": False, "status": task.status,
+                "reason": "already started or finished"}
+    cancelled = await queue.cancel(task_id, reason=reason)
+    return {"cancelled": bool(cancelled), "status": TASK_PENDING, "reason": reason}
+
+
+@router.post("/api-render/cancel-pending")
+async def api_render_cancel_pending(request: Request) -> Dict[str, Any]:
+    """Clear the whole queue, leaving every running render alone.
+
+    Deliberately takes no task list: whoever asks for this wants the farm
+    free, and enumerating ids from outside would race the pump. Access is the
+    caller's business - this port is bound to localhost, and the public site
+    only reaches it through an endpoint that requires an administrator.
+    nginx does publish /renderfin/ though, so a forwarded request is refused.
+    """
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="clearing the queue is not public")
+    return await _queue(request).cancel_all_pending()
+
+
+@router.get("/api-render/graph/{graph_id}")
+async def api_render_graph(request: Request, graph_id: str) -> Dict[str, Any]:
+    """This graph's share of the queue: its queued/running jobs and the rest."""
+    return _queue(request).graph_summary(graph_id)
+
+
+@router.post("/api-render/cancel-stale-graph")
+async def api_render_cancel_stale_graph(request: Request) -> Dict[str, Any]:
+    """Stand down queued jobs a saved graph no longer wants (2026-09-28).
+
+    Body: {"graph_id": ..., "wanted": {node_id: signature, ...}, "reason": ...}.
+    The site calls this after every save of a graph; it decides what "wanted"
+    means (present, not bypassed, current signature). Only queued jobs go;
+    a job on a card finishes and the editor drops a stale result itself.
+    """
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from None
+    graph_id = str(body.get("graph_id") or "").strip()
+    wanted = body.get("wanted")
+    if not graph_id or not isinstance(wanted, dict):
+        raise HTTPException(status_code=400, detail="graph_id and wanted{} are required")
+    reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    identities = body.get("identities") if isinstance(body.get("identities"), dict) else {}
+    return await _queue(request).cancel_stale_for_graph(
+        graph_id, {str(k): str(v) for k, v in wanted.items()}, reason=reason,
+        identities={str(k): str(v) for k, v in identities.items()})
+
+
+@router.post("/api-render/cancel-graph")
+async def api_render_cancel_graph(request: Request) -> Dict[str, Any]:
+    """Stand down every queued job of one graph (the editor's button).
+
+    Body: {"graph_id": ..., "task_ids": [...optional subset...], "reason": ...}.
+    Ownership is the site's business (it passes the subset the caller owns).
+    """
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from None
+    graph_id = str(body.get("graph_id") or "").strip()
+    if not graph_id:
+        raise HTTPException(status_code=400, detail="graph_id is required")
+    task_ids = body.get("task_ids")
+    if task_ids is not None and not isinstance(task_ids, list):
+        raise HTTPException(status_code=400, detail="task_ids must be a list")
+    reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    return await _queue(request).cancel_graph_pending(
+        graph_id, task_ids=[str(t) for t in task_ids] if task_ids is not None else None,
+        reason=reason)
+
+
+@router.get("/api-render/last-start-wipe")
+async def api_render_last_start_wipe(request: Request) -> Dict[str, Any]:
+    """What the last start wiped (owner rule: every restart clears the queue)."""
+    return getattr(_queue(request), "last_start_wipe", None) or {"note_string": "no wipe at the last start"}
+
+
+@router.post("/api-render/resume")
+async def api_render_resume(request: Request, dry_run: int = Query(default=0),
+                            task_id: List[str] = Query(default=[]),
+                            window_seconds: float = Query(default=-1.0)) -> Dict[str, Any]:
+    """Bring back jobs a server restart cancelled, under their own ids (2026-10-11).
+
+    Localhost only, like reset. `dry_run=1` lists what would come back.
+    """
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="the restart resume is not public")
+    return await _queue(request).resume_after_restart(
+        task_ids=[t for t in task_id if t] or None, dry_run=bool(dry_run),
+        window_seconds=None if window_seconds < 0 else window_seconds, reason="api")
+
+
+@router.get("/api-render/last-start-resume")
+async def api_render_last_start_resume(request: Request) -> Dict[str, Any]:
+    """What the last renderfin start resumed (owner rule 2026-10-11)."""
+    from . import config as _config
+    queue = _queue(request)
+    return {"policy_string": _config.RESTART_POLICY,
+            "resurrect_object": getattr(queue, "_resurrect_counts", None) or {},
+            "revive_object": getattr(queue, "last_start_resume", None) or {}}
+
+
+@router.post("/api-render/reset")
+async def api_render_reset(request: Request, dry_run: int = Query(default=0),
+                           spare_non_graph: int = Query(default=0),
+                           reason: str = Query(default="")) -> Dict[str, Any]:
+    """Cancel everything queued and running and clear every box's ComfyUI queue.
+
+    Localhost only, like cancel-pending: the site reaches it through an
+    administrator endpoint (ai_queue_admin.py).
+    """
+    # nginx publishes this service under /renderfin/ and sets X-Real-IP on
+    # everything it forwards; only a direct loopback call (the site's admin
+    # endpoint) may reset the farm.
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="the farm reset is not public")
+    kwargs = {"reason": reason[:200]} if reason else {}
+    return await _queue(request).reset_farm(dry_run=bool(dry_run), spare_non_graph=bool(spare_non_graph), **kwargs)
 
 
 @router.post("/api-render")

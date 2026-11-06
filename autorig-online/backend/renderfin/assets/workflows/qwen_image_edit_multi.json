@@ -1,0 +1,15 @@
+{
+  "model":{"class_type":"UnetLoaderGGUF","inputs":{"unet_name":"qwen-image-edit-2511-Q3_K_S.gguf"}},
+  "clip":{"class_type":"CLIPLoader","inputs":{"clip_name":"qwen_2.5_vl_7b_fp8_scaled.safetensors","type":"qwen_image","device":"default"}},
+  "vae":{"class_type":"VAELoader","inputs":{"vae_name":"qwen_image_vae.safetensors"}},
+  "shift":{"class_type":"ModelSamplingAuraFlow","inputs":{"model":["model",0],"shift":3.1}},
+  "guidance":{"class_type":"CFGNorm","inputs":{"model":["shift",0],"strength":1.0}},
+  "positive":{"class_type":"TextEncodeQwenImageEditPlus","inputs":{"clip":["clip",0],"prompt":"$prompt","vae":["vae",0]}},
+  "negative":{"class_type":"TextEncodeQwenImageEditPlus","inputs":{"clip":["clip",0],"prompt":"$negative_prompt","vae":["vae",0]}},
+  "positive_method":{"class_type":"FluxKontextMultiReferenceLatentMethod","inputs":{"conditioning":["positive",0],"reference_latents_method":"index_timestep_zero"}},
+  "negative_method":{"class_type":"FluxKontextMultiReferenceLatentMethod","inputs":{"conditioning":["negative",0],"reference_latents_method":"index_timestep_zero"}},
+  "latent":{"class_type":"EmptySD3LatentImage","inputs":{"width":$width,"height":$height,"batch_size":1}},
+  "sample":{"class_type":"KSampler","inputs":{"model":["guidance",0],"seed":42,"steps":20,"cfg":2.5,"sampler_name":"euler","scheduler":"simple","denoise":1.0,"positive":["positive_method",0],"negative":["negative_method",0],"latent_image":["latent",0]}},
+  "decode":{"class_type":"VAEDecode","inputs":{"samples":["sample",0],"vae":["vae",0]}},
+  "save":{"class_type":"SaveImage","inputs":{"images":["decode",0],"filename_prefix":"$output_url"}}
+}

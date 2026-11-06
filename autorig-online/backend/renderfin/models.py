@@ -8,28 +8,149 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+class LoraStackItem(BaseModel):
+    """One LoRA in a stack. The name is a file the worker loads off its own
+    disk, so it is restricted to a plain relative file name."""
+
+    name: str
+    strength_model: float = 1.0
+    strength_clip: float = 1.0
+
+    @field_validator("name")
+    @classmethod
+    def _safe_name(cls, v: str) -> str:
+        v = str(v or "").strip()
+        if (not v or len(v) > 255 or ".." in v or v.startswith(("/", "\\"))
+                or ":" in v or not v.lower().endswith((".safetensors", ".pt", ".ckpt"))):
+            raise ValueError(f"'{v}' is not a LoRA file name")
+        return v
+
+    @field_validator("strength_model", "strength_clip")
+    @classmethod
+    def _bounded_strength(cls, v: float) -> float:
+        v = float(v)
+        if not -4.0 <= v <= 4.0:
+            raise ValueError("LoRA strength must be within -4..4")
+        return v
+
+
 class RenderPrompt(BaseModel):
     """Port of C# RenderPrompt (Render.cs:1061)."""
 
     prompt: str = ""
+    # Wan-Animate-2 keeps driver motion text separate from target appearance.
+    pose_prompt: str = ""
     negative_prompt: str = ""
     image_url: str = ""
+    image_url_end: str = ""
+    control_video_url: str = ""
+    # A clip whose last `video_prefix_frames` frames (and their sound) are
+    # anchored at the start of the video, so it continues that clip (MiniMax
+    # H3 clip guide). Empty = no prefix, the template's prefix branch is pruned.
+    video_prefix_url: str = ""
+    video_prefix_frames: int = 22
+    # Ordered FLUX.2 reference inputs. Avatar requests put the canonical
+    # identity image first, an optional detail/second identity view next, and
+    # the scene/composition reference last. The order is meaningful to the
+    # prompt ("image 1", "image 2", ...), so it must survive persistence.
+    reference_image_urls: List[str] = Field(default_factory=list)
+    # Qwen-Image 2.1 edit: influence 0..1 of each reference, in the same order
+    # (missing = 1). See multiref.inject_qwen21_references.
+    reference_strengths: List[float] = Field(default_factory=list)
     type: str = ""
     work_flow: str = ""
     main_size_width: int = 0
     main_size_height: int = 0
     aspect_ratio: float = 0
     frame_count: int = 60
+    # Delivered frame rate of a video (templating $fps); 24 is the product default.
+    fps: int = 24
     noise_seed: int = 0
     steps: int = 0
+    cfg: Optional[float] = None
+    clip_skip: Optional[int] = None
+    sampler: str = ""
+    scheduler: str = ""
+    control_strength: float = 0.8
+    control_start: float = 0.0
+    control_end: float = 1.0
     creativity: float = 0
+    # Which model file to load. Empty leaves the workflow's own choice,
+    # which is what every request did before these existed.
+    checkpoint: str = ""
+    # Which ESRGAN-family file the super-resolution templates load. Separate
+    # from `checkpoint`, which names a diffusion model and would be applied to
+    # the refinement pass instead.
+    upscale_model: str = ""
+    lora: str = ""
+    lora_strength: float = 0
+    # An ordered LoRA stack applied after `lora`, first entry nearest the
+    # model loader. Each entry is {name, strength_model, strength_clip}; the
+    # public API has already resolved names against the catalogue.
+    loras: List["LoraStackItem"] = Field(default_factory=list)
     user_name: str = "default_user"
+    # "autorig": an AutoRig task (owner 2026-10-15: priority on worker-4090); set by
+    # the MT farm client / the AutoRig backend paths through ai_graph_context.
+    priority_class: str = ""
     render_mode: str = ""
+    # Music (renderfin.music): clip length in seconds; 0 = the default 30 s.
+    audio_seconds: float = 0
+    # Which node of which saved /nodes graph asked for this (2026-09-28), the
+    # node's signature at submit time (computed by the site from the stored
+    # graph) and the Render press that sent it. Empty for anything that is
+    # not a graph node. A save whose node no longer matches stands the task
+    # down while it is still queued; see RenderQueue.cancel_stale_for_graph.
+    graph_id: str = ""
+    node_id: str = ""
+    node_signature: str = ""
+    submit_session: str = ""
+    # The text behind node_signature (what the site hashed), kept so a later
+    # "node changed" cancel can say what changed (journal), never compared.
+    node_identity: str = ""
+
+    @field_validator("fps")
+    @classmethod
+    def _clamp_fps(cls, v: int) -> int:
+        return max(8, min(60, int(v or 24)))
 
     @field_validator("frame_count")
     @classmethod
     def _clamp_frame_count(cls, v: int) -> int:
-        return max(0, min(300, int(v or 0)))
+        return max(0, min(400, int(v or 0)))
+
+    @field_validator("video_prefix_frames")
+    @classmethod
+    def _clamp_prefix_frames(cls, v: int) -> int:
+        # The H3 clip guide takes 17k+5 frames; renderfin snaps down to that grid.
+        return max(5, min(124, int(v or 22)))
+
+    @field_validator("reference_image_urls", mode="before")
+    @classmethod
+    def _bounded_reference_image_urls(cls, value: Any) -> List[str]:
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("reference_image_urls must be a list")
+        if len(value) > 4:
+            raise ValueError("reference_image_urls may contain at most 4 URLs")
+        urls: List[str] = []
+        for item in value:
+            url = str(item or "").strip()
+            if not url or len(url) > 4096:
+                raise ValueError("reference image URL must be 1 to 4096 characters")
+            urls.append(url)
+        return urls
+
+    @field_validator("loras", mode="before")
+    @classmethod
+    def _bounded_loras(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("loras must be a list")
+        if len(value) > 8:
+            raise ValueError("at most 8 LoRAs can be stacked")
+        return value
 
     @field_validator("user_name")
     @classmethod
@@ -136,6 +257,18 @@ class RenderTask(BaseModel):
     managed_comfy_last_progress_at: float = 0
     managed_comfy_host_stale_at: float = 0
     managed_comfy_watchdog_requested_at: float = 0
+    # GPU memory / hang recovery (2026-09-29). How often this task was moved
+    # after running out of GPU memory or after its box hung, the boxes it
+    # should not go back to while another box can take it, and a short
+    # history ("oom@f15") that the final error text names.
+    oom_retries: int = 0
+    hang_retries: int = 0
+    avoid_servers: List[str] = Field(default_factory=list)
+    recovery_log: List[str] = Field(default_factory=list)
+    # Restart resume (2026-10-11): how often a server restart put this task
+    # back in the queue, and the notice its status shows meanwhile.
+    restart_resumes: int = 0
+    notice: str = ""
 
     def public_dict(self) -> Dict[str, Any]:
         return {
@@ -152,11 +285,18 @@ class RenderTask(BaseModel):
             "error": self.error,
             "error_string": self.error,
             "user_name": self.prompt.user_name,
+            "graph_id_string": self.prompt.graph_id,
+            "node_id_string": self.prompt.node_id,
+            "submit_session_string": self.prompt.submit_session,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "workload_class_string": self.workload_class,
             "workload_lease_state_string": self.workload_lease_state,
+            "retries_int": int(self.oom_retries or 0) + int(self.hang_retries or 0),
+            "recovery_log_array": list(self.recovery_log or []),
+            "restart_resumes_int": int(self.restart_resumes or 0),
+            "notice_string": self.notice or "",
         }
 
 

@@ -16,16 +16,32 @@ from urllib.parse import urlparse
 import httpx
 
 from . import config
+from .errors import RequestFaultError
 from .models import RenderServer
 
 CLIENT_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479"  # C# parity (Adapter_Comfy.cs:332)
 
 VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".avi", ".mkv")
 MODEL_EXTENSIONS = (".glb", ".gltf", ".obj", ".fbx")
+AUDIO_EXTENSIONS = (".mp3", ".flac", ".wav", ".opus", ".ogg")
 
 
 class ComfyAdapterError(RuntimeError):
-    pass
+    """Talking to a ComfyUI worker failed.
+
+    Unless the subclass says otherwise this describes the box, so the
+    dispatcher is right to cool it down and try a peer.
+    """
+
+
+class ComfyRequestError(ComfyAdapterError, RequestFaultError):
+    """The worker refused, or we could not build, *this request*.
+
+    The next box would fail identically, so the task has to stop instead of
+    walking the fleet and quarantining it one machine at a time.  Kept a
+    subclass of ComfyAdapterError so every existing ``except
+    ComfyAdapterError`` still catches it.
+    """
 
 
 class ComfyCapacityWait(RuntimeError):
@@ -74,7 +90,7 @@ async def download_input_image(client: httpx.AsyncClient, image_url: str) -> Tup
     """Fetch the caller's image_url. Local mask URLs short-circuit to disk."""
     image_url = (image_url or "").strip()
     if not image_url:
-        raise ComfyAdapterError("empty image_url")
+        raise ComfyRequestError("empty image_url")
     marker = "/render/masks/"
     if marker in image_url:
         name = image_url.rsplit("/", 1)[-1]
@@ -91,9 +107,38 @@ async def download_input_image(client: httpx.AsyncClient, image_url: str) -> Tup
             return path.name, path.read_bytes()
     resp = await client.get(image_url, timeout=60.0, follow_redirects=True)
     if resp.status_code != 200:
-        raise ComfyAdapterError(f"failed to download image {image_url}: HTTP {resp.status_code}")
+        raise ComfyRequestError(
+            f"failed to download image {image_url}: HTTP {resp.status_code}"
+        )
     name = urlparse(image_url).path.rsplit("/", 1)[-1] or "input.png"
-    return name, resp.content
+    return _fit_input_image(name, resp.content)
+
+
+# A picture bigger than this on either side (or in bytes) is scaled down before
+# it reaches a worker: a 12k photo only costs VRAM (owner, 2026-09-27).
+MAX_INPUT_SIDE = 4096
+MAX_INPUT_BYTES = 40 * 1024 * 1024
+
+
+def _fit_input_image(name: str, data: bytes) -> Tuple[str, bytes]:
+    try:
+        from io import BytesIO
+        from PIL import Image
+        with Image.open(BytesIO(data)) as picture:
+            width, height = picture.size
+            if max(width, height) <= MAX_INPUT_SIDE and len(data) <= MAX_INPUT_BYTES:
+                return name, data
+            scale = min(1.0, MAX_INPUT_SIDE / float(max(width, height)))
+            if len(data) > MAX_INPUT_BYTES:
+                scale = min(scale, 2048 / float(max(width, height)))
+            size = (max(1, int(width * scale)), max(1, int(height * scale)))
+            resized = picture.convert("RGBA" if picture.mode in ("RGBA", "LA", "P") else "RGB").resize(size, Image.LANCZOS)
+            out = BytesIO()
+            resized.save(out, format="PNG", optimize=True)
+            stem = name.rsplit(".", 1)[0] or "input"
+            return stem + ".png", out.getvalue()
+    except Exception:
+        return name, data
 
 
 async def upload_image(
@@ -197,7 +242,13 @@ async def submit(
     if _capacity_wait(resp):
         raise ComfyCapacityWait(f"Comfy GPU temporarily leased: HTTP {resp.status_code}")
     if resp.status_code != 200:
-        raise ComfyAdapterError(f"prompt submit failed: HTTP {resp.status_code} {resp.text[:500]}")
+        # ComfyUI answers /prompt with 400 for exactly one reason: the prompt
+        # it was handed does not validate (unknown node, missing checkpoint,
+        # a size the graph rejects).  That is the request, not the machine -
+        # every other worker parses the same JSON and says the same thing.
+        # Anything else (401/403 auth, 404 route, 5xx, proxy noise) is the box.
+        error = ComfyRequestError if resp.status_code == 400 else ComfyAdapterError
+        raise error(f"prompt submit failed: HTTP {resp.status_code} {resp.text[:500]}")
     payload = resp.json()
     node_errors = payload.get("node_errors")
     if isinstance(node_errors, dict) and node_errors:
@@ -206,7 +257,7 @@ async def submit(
         # and expose the uploaded control image as a temporary artifact.  A
         # render with rejected output nodes was never accepted successfully.
         summary = json.dumps(node_errors, ensure_ascii=True, sort_keys=True)
-        raise ComfyAdapterError(
+        raise ComfyRequestError(
             f"prompt validation failed: node_errors={summary[:1500]}"
         )
     returned_prompt_id = str(payload.get("prompt_id") or "")
@@ -319,14 +370,21 @@ async def queue_contains(
 
 
 async def poll_history(
-    client: httpx.AsyncClient, server: RenderServer, prompt_id: str
+    client: httpx.AsyncClient, server: RenderServer, prompt_id: str,
+    *, timeout: float = 30.0, strict: bool = False,
 ) -> Tuple[str, Optional[Dict[str, Any]]]:
     """GET /history/{prompt_id}. Returns (state, entry) where state is one of
     'pending', 'unknown', 'success', 'error'. 'unknown' means the worker has no
-    record of the prompt, which the caller must disambiguate against /queue."""
+    record of the prompt, which the caller must disambiguate against /queue.
+
+    With ``strict`` a 5xx answer is 'unavailable' instead of 'pending': behind
+    the boxes' nginx edge a dead ComfyUI is a 502, which must count as a box
+    that does not answer rather than a render still in progress."""
     base = _validate_server_url(server.render_server_url)
-    resp = await client.get(f"{base}/history/{prompt_id}", timeout=30.0, auth=_auth_for(server))
+    resp = await client.get(f"{base}/history/{prompt_id}", timeout=timeout, auth=_auth_for(server))
     if resp.status_code != 200:
+        if strict and resp.status_code >= 500:
+            return "unavailable", None
         return "pending", None
     try:
         payload = resp.json()
@@ -376,7 +434,7 @@ def resolve_artifacts(
     # Temporary previews are not deliverables.  Falling back to them when all
     # SaveImage nodes failed turns an uploaded pose/control image into an
     # apparently successful result, which downstream 3D faithfully corrupts.
-    outputs = [f for f in found if f.get("type") != "temp"]
+    outputs = [f for f in found if f.get("type", "output").lower() == "output"]
 
     def rank(f: Dict[str, str]) -> Tuple[int, int]:
         name = f.get("filename", "").lower()
@@ -385,6 +443,8 @@ def resolve_artifacts(
             ext_ok = 0 if name.endswith(VIDEO_EXTENSIONS) else 1
         elif output_ext == ".glb":
             ext_ok = 0 if name.endswith(MODEL_EXTENSIONS) else 1
+        elif output_ext in AUDIO_EXTENSIONS:
+            ext_ok = 0 if name.endswith(AUDIO_EXTENSIONS) else 1
         else:
             ext_ok = 0 if name.endswith((".png", ".jpg", ".jpeg", ".webp")) else 1
         return (frag, ext_ok)
@@ -450,3 +510,92 @@ async def check_server_online(client: httpx.AsyncClient, server: RenderServer) -
         return resp.status_code == 200
     except Exception:
         return False
+
+
+# ------------------------------------------------ GPU memory / hang recovery
+# (2026-09-29) Everything below is best effort: a box that cannot be asked is
+# reported as such, never as healthy.
+
+
+async def system_stats(
+    client: httpx.AsyncClient, server: RenderServer, *, timeout: float = 5.0
+) -> Optional[Dict[str, Any]]:
+    """GET /system_stats (RAM, VRAM total/free). None when the box does not answer."""
+    try:
+        base = _validate_server_url(server.render_server_url)
+        resp = await client.get(f"{base}/system_stats", timeout=timeout, auth=_auth_for(server))
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+async def free_memory(
+    client: httpx.AsyncClient, server: RenderServer, *, timeout: float = 15.0
+) -> bool:
+    """POST /free: unload every model and empty the CUDA cache.
+
+    ComfyUI keeps the models of a prompt that died of OOM loaded, so the next
+    big job on that box starts with the card already full (f15, 2026-09-29:
+    after the first OOM the next three H3 jobs failed in 50-90 s with
+    model/clip/vae "cached"). The worker applies it between prompts.
+    """
+    try:
+        base = _validate_server_url(server.render_server_url)
+        resp = await client.post(
+            f"{base}/free", json={"unload_models": True, "free_memory": True},
+            timeout=timeout, auth=_auth_for(server),
+        )
+        return 200 <= resp.status_code < 300
+    except Exception:
+        return False
+
+
+async def running_prompt_ids(
+    client: httpx.AsyncClient, server: RenderServer, *, timeout: float = 10.0
+) -> Optional[Tuple[List[str], List[str]]]:
+    """(running, pending) prompt ids on the box, or None if it cannot be asked."""
+    try:
+        base = _validate_server_url(server.render_server_url)
+        resp = await client.get(f"{base}/queue", timeout=timeout, auth=_auth_for(server))
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        return (_queue_prompt_ids(payload, "queue_running"),
+                _queue_prompt_ids(payload, "queue_pending"))
+    except Exception:
+        return None
+
+
+async def request_restart(
+    client: httpx.AsyncClient, server: RenderServer, *, timeout: float = 10.0
+) -> str:
+    """Ask ComfyUI-Manager to restart this ComfyUI (POST, then legacy GET).
+
+    Returns "requested", "forbidden" (Manager security level), "unsupported"
+    (no Manager route) or "unreachable". The Manager replaces the process
+    (os.execv), so a dropped connection after the request is the normal
+    answer, not a failure.
+    """
+    try:
+        base = _validate_server_url(server.render_server_url)
+    except ComfyAdapterError:
+        return "unreachable"
+    auth = _auth_for(server)
+    for method in ("POST", "GET"):
+        try:
+            resp = await client.request(method, f"{base}/manager/reboot", timeout=timeout, auth=auth)
+        except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ReadTimeout):
+            return "requested"
+        except Exception:
+            return "unreachable"
+        if resp.status_code in (404, 405):
+            continue
+        if resp.status_code in (401, 403):
+            return "forbidden"
+        if 200 <= resp.status_code < 300:
+            return "requested"
+        return "unreachable"
+    return "unsupported"

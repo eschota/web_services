@@ -67,23 +67,43 @@ GOOGLE_CLIENT_SECRET = os.getenv(
     "GOOGLE_CLIENT_SECRET",
     "your-google-client-secret-here"
 )
+# AutoRig's background channel is bound to its original YouTube OAuth client.
+AUTORIG_YOUTUBE_CLIENT_ID = os.getenv("AUTORIG_YOUTUBE_CLIENT_ID", GOOGLE_CLIENT_ID).strip()
+AUTORIG_YOUTUBE_CLIENT_SECRET = os.getenv("AUTORIG_YOUTUBE_CLIENT_SECRET", GOOGLE_CLIENT_SECRET).strip()
+U3D_YOUTUBE_CLIENT_ID = os.getenv("U3D_YOUTUBE_CLIENT_ID", "").strip()
+U3D_YOUTUBE_CLIENT_SECRET = os.getenv("U3D_YOUTUBE_CLIENT_SECRET", "").strip()
+U3D_YOUTUBE_AGENT_KEYS = tuple(
+    key.strip() for key in os.getenv("U3D_YOUTUBE_AGENT_KEYS", "").split(",") if key.strip()
+)
 GOOGLE_REDIRECT_URI = os.getenv(
     "GOOGLE_REDIRECT_URI",
     f"{APP_URL}/auth/callback"
 )
 
-# YouTube Data API (same Google OAuth client; separate redirect URI + scope youtube.upload)
-YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
-    "YOUTUBE_OAUTH_REDIRECT_URI",
+# AutoRig YouTube OAuth remains separate from the U3D provider account.
+AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
+    "AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI",
     f"{APP_URL.rstrip('/')}/api/oauth/youtube/callback",
+)
+U3D_YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
+    "U3D_YOUTUBE_OAUTH_REDIRECT_URI",
+    f"{APP_URL.rstrip('/')}/api/oauth/u3d-youtube/callback",
 )
 # Auto-uploads are always public (not unlisted / not link-only). Not overridable via env.
 YOUTUBE_UPLOAD_PRIVACY = "public"
 
+# OAuth callback guard: only persist credentials for the owner's intended channel.
+U3D_YOUTUBE_EXPECTED_CHANNEL_ID = os.getenv("U3D_YOUTUBE_EXPECTED_CHANNEL_ID", "UCpCN8wm6UXr8Ke_m-zSaThQ").strip()
+
 # Optional: paste refresh token from OAuth (or use /api/admin/youtube/oauth/start + DB row)
 YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()
 
-# OpenAI (poster vision metadata for YouTube / task UI; set in production env only)
+# OpenAI (poster vision metadata for YouTube / task UI; set in production env only).
+# Owner 2026-10-11: no paid LLM APIs. Unless AUTORIG_PAID_LLM is switched on, the paid keys are forgotten here
+# (paid_llm.py) and every vision/text consumer runs on the fleet's own models instead.
+from paid_llm import scrub_environ as _scrub_paid_llm_environ  # noqa: E402
+
+_scrub_paid_llm_environ()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
 # =============================================================================
@@ -234,8 +254,49 @@ AUTORIG_SUBSCRIPTION_PRODUCT_KEYS = frozenset(
 AUTORIG_SUBSCRIPTION_PRICE_USD = float(os.getenv("AUTORIG_SUBSCRIPTION_PRICE_USD", "20"))
 GUMROAD_WEBHOOK_SECRET = os.getenv("GUMROAD_WEBHOOK_SECRET", "").strip()
 
+# Task pack (owner, 2026-10-16): «покупка скачиваний 5 моделей за 9$ (каждая открывает все скачивания таска
+# безлимитно)». One Gumroad product that pays AUTORIG_TASK_PACK_TASKS × 10 credits; unlocking a task spends 10 of
+# them (main.TASK_UNLOCK_CREDITS) and opens every download of that task for good (a task_file_purchases row).
+# The key starts with "autorig-", so the checkout route and the webhook accept it as a credit product.
+AUTORIG_TASK_PACK_PRODUCT_KEY = os.getenv("AUTORIG_TASK_PACK_PRODUCT_KEY", "autorig-5-tasks").strip().lower()
+AUTORIG_TASK_PACK_TASKS = int(os.getenv("AUTORIG_TASK_PACK_TASKS", "5") or 5)
+AUTORIG_TASK_PACK_PRICE_USD = float(os.getenv("AUTORIG_TASK_PACK_PRICE_USD", "9") or 9)
+AUTORIG_TASK_PACK_UNLOCK_CREDITS = 10
+if AUTORIG_TASK_PACK_PRODUCT_KEY:
+    GUMROAD_PRODUCT_CREDITS.setdefault(AUTORIG_TASK_PACK_PRODUCT_KEY,
+                                       AUTORIG_TASK_PACK_TASKS * AUTORIG_TASK_PACK_UNLOCK_CREDITS)
+
 # Public checkout allowlist.  Do not add the legacy credit-pack keys here.
-AUTORIG_PUBLIC_CHECKOUT_PRODUCT_KEYS = frozenset({AUTORIG_SUBSCRIPTION_PRODUCT_KEY})
+AUTORIG_PUBLIC_CHECKOUT_PRODUCT_KEYS = frozenset({AUTORIG_SUBSCRIPTION_PRODUCT_KEY, AUTORIG_TASK_PACK_PRODUCT_KEY})
+
+# Subscription launch offer (owner, 2026-10-16): «скидка 50% типа на месяц на сайте, чтобы по 10$ стоила подписка».
+# A Gumroad discount code (the owner creates it on the membership product) is appended to the checkout URL while
+# the offer runs: https://u3d.gumroad.com/l/<product>/<code>. The list price stays AUTORIG_SUBSCRIPTION_PRICE_USD.
+# AUTORIG_SUBSCRIPTION_OFFER_UNTIL is a UTC date (exclusive); an empty code or percent 0 turns the offer off.
+AUTORIG_SUBSCRIPTION_OFFER_CODE = os.getenv("AUTORIG_SUBSCRIPTION_OFFER_CODE", "V3HALF").strip()
+AUTORIG_SUBSCRIPTION_OFFER_PERCENT = int(os.getenv("AUTORIG_SUBSCRIPTION_OFFER_PERCENT", "50") or 0)
+AUTORIG_SUBSCRIPTION_OFFER_UNTIL = os.getenv("AUTORIG_SUBSCRIPTION_OFFER_UNTIL", "2026-11-16").strip()
+
+
+def subscription_offer(now=None) -> dict:
+    """{active, code, percent, price_usd, list_price_usd, until}: the subscription offer as of ``now`` (UTC)."""
+    from datetime import datetime
+
+    until = None
+    if AUTORIG_SUBSCRIPTION_OFFER_UNTIL:
+        try:
+            until = datetime.strptime(AUTORIG_SUBSCRIPTION_OFFER_UNTIL, "%Y-%m-%d")
+        except ValueError:
+            until = None
+    current = now or datetime.utcnow()
+    active = bool(AUTORIG_SUBSCRIPTION_OFFER_CODE and 0 < AUTORIG_SUBSCRIPTION_OFFER_PERCENT < 100
+                  and (until is None or current < until))
+    list_price = float(AUTORIG_SUBSCRIPTION_PRICE_USD)
+    price = round(list_price * (100 - AUTORIG_SUBSCRIPTION_OFFER_PERCENT) / 100.0, 2) if active else list_price
+    return {"active": active, "code": AUTORIG_SUBSCRIPTION_OFFER_CODE if active else "",
+            "percent": AUTORIG_SUBSCRIPTION_OFFER_PERCENT if active else 0, "price_usd": price,
+            "list_price_usd": list_price, "until": AUTORIG_SUBSCRIPTION_OFFER_UNTIL if active else ""}
+
 
 # Gumroad product_permalink -> USD minimum price for the Blender plugin ABCD test.
 BLENDER_PLUGIN_AB_VARIANTS = {

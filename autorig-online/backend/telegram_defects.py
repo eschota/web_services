@@ -101,9 +101,14 @@ def similar_line(row: dict) -> str:
         detail.append(f"img {float(row['img']):.2f}")
     if row.get("pose") is not None:
         detail.append(f"pose {float(row['pose']):.2f}")
+    # Legless rig · V3 (spec §3, 2026-10-17): the neighbour's category, ✓ when the owner / an agent confirmed it, so
+    # the owner sees at once when neighbours disagree
+    cat = re.sub(r"[^\w/-]", "", str(row.get("category") or ""))[:20]
+    tag = f" [{cat}{'✓' if row.get('category_confirmed') else ''}]" if cat else ""
     return (f"🔗 похожие: {float(row.get('score') or 0):.2f} {html.escape(str(row.get('matched') or ''))} · "
             f"<a href=\"{html.escape(url)}\">{task[:8]}</a>"
-            + (f" {html.escape(what)}" if what else "") + (f" ({', '.join(detail)})" if detail else ""))
+            + (f" {html.escape(what)}" if what else "") + html.escape(tag)
+            + (f" ({', '.join(detail)})" if detail else ""))
 
 
 async def similar_html(run_id: str | None) -> str:

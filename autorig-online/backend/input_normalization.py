@@ -238,6 +238,14 @@ def _atomic_json(path: Path, value: dict) -> None:
             os.unlink(temp_name)
 
 
+def _make_servable(path: Path) -> None:
+    """mkstemp creates 0600; nginx serves /u/ as another user and needs 0644."""
+    try:
+        os.chmod(path, 0o644)
+    except OSError:
+        pass
+
+
 def _fsync_directory(path: Path) -> None:
     """Persist a directory entry on POSIX; Windows has no equivalent handle."""
     if os.name != "posix":
@@ -362,6 +370,7 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
             if os.name == "posix":
                 with temp_path.open("rb") as stream:
                     os.fsync(stream.fileno())
+            _make_servable(temp_path)
             os.replace(temp_path, derived)
             _fsync_directory(source.parent)
             record = {
@@ -428,6 +437,7 @@ def _mirror_remote_glb(input_url: str) -> NormalizedInput | None:
             record.get("schema") == "autorig.input_mirror.v1"
             and int(record.get("bytes") or 0) == target.stat().st_size
         ):
+            _make_servable(target)
             return NormalizedInput(local_url, True, record)
 
     free = shutil.disk_usage(upload_root).free
@@ -471,6 +481,7 @@ def _mirror_remote_glb(input_url: str) -> NormalizedInput | None:
                         stream.write(chunk)
             if received < 12:
                 raise OSError("source returned a truncated GLB")
+            _make_servable(temp_path)
             os.replace(temp_path, target)
         finally:
             if temp_path.exists():

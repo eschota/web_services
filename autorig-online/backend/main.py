@@ -13152,6 +13152,10 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
         select(Task).where(
             Task.status == "processing",
             Task.pipeline_kind != "v3",
+            # a picture task (pipeline_kind generate) waits for renderfin CharGen, which owns its retries and deadline;
+            # the legacy requeue wiped its job and after 3 rounds deleted the customer task (owner tasks 50d0b9b4,
+            # 3aa044dc, 591c0b79, 2026-10-17)
+            Task.pipeline_kind != "generate",
             Task.preemption_state.notin_(("requested", "stopping")),
         )
     )
@@ -13201,17 +13205,30 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
                 )
         except Exception as e:
             print(f"[StuckHour] Collection recovery failed {task.id}: {e}")
+    # customer sources and outputs are never deleted (AGENTS.md): an exhausted task is closed as failed_stuck with its
+    # row and files kept (it used to be deleted here). The status stays the terminal "error" that every reader, refund
+    # and the task page already understand; the error_string failed_stuck names the cause.
+    from tasks import _schedule_task_error_notification, release_task_workload_lease
+
     for tid in to_delete_ids:
         try:
             t = await get_task_by_id(db, tid)
             if not t:
                 continue
-            _delete_task_artifacts(t)
-            await _delete_task_record_and_related(db, tid)
+            await release_task_workload_lease(db, t, outcome="released", clear_for_retry=False)
+            t.status = "error"
+            t.error_message = (
+                f"failed_stuck: no progress after {t.stuck_hour_requeue_count or 0} automatic requeues "
+                f"({STUCK_HOUR_MINUTES} min each); files kept"
+            )
+            t.updated_at = datetime.utcnow()
+            await db.commit()
+            _schedule_task_error_notification(t.id)
             actions += 1
-            print(f"[StuckHour] Deleted {tid} (stuck_hour requeues exhausted)")
+            print(f"[StuckHour] failed_stuck {tid} (stuck_hour requeues exhausted; row and files kept)")
         except Exception as e:
-            print(f"[StuckHour] Delete failed {tid}: {e}")
+            print(f"[StuckHour] failed_stuck close failed {tid}: {e}")
+            await db.rollback()
     return actions
 
 

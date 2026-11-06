@@ -28,6 +28,11 @@ class RoutingImageBranchTests(unittest.TestCase):
         self.assertEqual(scheduling_token(p), WORKFLOW_GEN_IMAGE)
         self.assertEqual(resolve_workflow_file(p), (WORKFLOW_GEN_IMAGE, None))
 
+    def test_explicit_image_workflow_is_the_scheduling_token(self):
+        p = RenderPrompt(prompt="portrait", work_flow="gen_image_sdxl.json")
+        self.assertEqual(scheduling_token(p), "gen_image_sdxl.json")
+        self.assertEqual(resolve_workflow_file(p)[0], "gen_image_sdxl.json")
+
     def test_typed_request_with_image_is_image_request(self):
         p = RenderPrompt(prompt="x", type="t_pose", image_url="https://h/render/masks/t_pose.jpg")
         self.assertTrue(is_image_request(p))
@@ -38,6 +43,24 @@ class RoutingImageBranchTests(unittest.TestCase):
         wf, forced = resolve_workflow_file(p)
         self.assertEqual(wf, WORKFLOW_T_POSE)
         self.assertEqual(forced, (1024, 1024))
+
+    def test_t_pose_honours_an_explicit_square_api_size(self):
+        p = RenderPrompt(type="t_pose", main_size_width=1536, main_size_height=1536)
+        self.assertEqual(resolve_workflow_file(p), (WORKFLOW_T_POSE, None))
+
+    def test_t_pose_renders_square_when_sent_the_landscape_default(self):
+        # The T-pose quality gate compares the render with the square skeleton,
+        # so the image API's 960x540 default was rejected every time.
+        p = RenderPrompt(type="t_pose", main_size_width=960, main_size_height=540)
+        self.assertEqual(resolve_workflow_file(p), (WORKFLOW_T_POSE, (1024, 1024)))
+
+    def test_legacy_typed_mode_keeps_gen_image_scheduling_token(self):
+        p = RenderPrompt(type="open_pose", work_flow="gen_image_sdxl.json")
+        self.assertEqual(scheduling_token(p), WORKFLOW_GEN_IMAGE)
+
+    def test_control_generation_uses_its_exact_worker_token(self):
+        p = RenderPrompt(type="image_control_pose", work_flow="gen_image_control_pose.json")
+        self.assertEqual(scheduling_token(p), "gen_image_control_pose.json")
 
     def test_t_poses_alias(self):
         p = RenderPrompt(type="t_poses", image_url="https://h/m.jpg")
@@ -128,17 +151,23 @@ class RuntimeWorkflowTests(unittest.TestCase):
 
 
 class ClampTests(unittest.TestCase):
+    def test_video_preserves_half_hd_and_custom_delivery_size(self):
+        from renderfin.routing import clamp_video_dims
+        self.assertEqual(clamp_video_dims(0, 0), (960, 540))
+        self.assertEqual(clamp_video_dims(960, 540), (960, 540))
+        self.assertEqual(clamp_video_dims(1030, 1527), (1030, 1528))
+
     def test_defaults(self):
-        self.assertEqual(clamp_image_dims(0, 0), (1024, 1024))
+        self.assertEqual(clamp_image_dims(0, 0), (960, 540))
 
     def test_clamp_and_round(self):
-        self.assertEqual(clamp_image_dims(2000, 50), (1024, 64))
-        self.assertEqual(clamp_image_dims(1000, 700), (992, 704))
+        self.assertEqual(clamp_image_dims(2000, 50), (2000, 64))
+        self.assertEqual(clamp_image_dims(1001, 701), (1001, 701))
 
 
 class PromptModelTests(unittest.TestCase):
     def test_frame_count_clamped(self):
-        self.assertEqual(RenderPrompt(frame_count=999).frame_count, 300)
+        self.assertEqual(RenderPrompt(frame_count=999).frame_count, 400)
         self.assertEqual(RenderPrompt(frame_count=-5).frame_count, 0)
 
     def test_user_name_sanitized(self):
@@ -148,3 +177,12 @@ class PromptModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ControlMapRoutingTests(unittest.TestCase):
+    def test_each_extraction_channel_has_its_own_capability(self):
+        for channel in ("pose", "depth", "canny"):
+            p = RenderPrompt(type="control_" + channel, image_url="https://example.org/ref.png")
+            expected = "gen_control_" + channel + ".json"
+            self.assertEqual(scheduling_token(p), expected)
+            self.assertEqual(resolve_workflow_file(p), (expected, None))

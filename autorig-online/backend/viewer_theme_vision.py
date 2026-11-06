@@ -125,6 +125,9 @@ def coerce_viewer_theme_metadata(raw: Dict[str, Any], fallback_id: str) -> Dict[
 
 
 def analyze_backdrop_theme_with_openai(*, image_path: Path, cfg: Dict[str, Any], fallback_id: str) -> Optional[Dict[str, Any]]:
+    import paid_llm
+
+    cfg = paid_llm.vision_cfg(cfg)   # owner 2026-10-11: no paid LLM; the fleet's Qwen answers behind the shim
     api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
     api_url = str(cfg.get("open_ai_api_url_string") or "https://api.openai.com/v1/chat/completions").strip()
     if not api_key or not api_url:
