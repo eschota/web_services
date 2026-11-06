@@ -476,4 +476,5 @@ webserver (`%LOCALAPPDATA%\Freestock\WEBSERVER`, face indexer / vision plugin) t
 bursts every ~15 min (10.99 of 11.26 GB used, GPU 96-100 %), and up to ~5.4 GB earlier the same night. The masks
 service holds 18 MB. Suspected: a burst landing while llama generates oversubscribes VRAM and leaves llama-server
 answering `????` until it restarts. Not reproduced in a 33-minute watch (11 probes fine, bursts did not overlap a
-generation).
+generation). At 03:53 local Freestock rose to 4.85 GB and llama-server's dedicated memory dropped 7873 -> 5777 MB
+(~2.1 GB evicted to shared memory) for about a minute: the eviction is real, the "????" was not caught that time.
