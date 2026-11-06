@@ -357,7 +357,8 @@ class HunyuanWorkerTests(unittest.TestCase):
                 self.assertEqual(ai_vision_api._load_hunyuan_workers(), [])
 
     def test_no_cleared_node_is_a_service_error_not_a_crash(self):
-        with mock.patch.object(ai_vision_api, "_load_hunyuan_workers", return_value=[]):
+        # Direct farm path on purpose: the live gen3d queue switch must never decide this test.
+        with mock.patch.object(ai_vision_api, "_gen3d_on", return_value=False),                 mock.patch.object(ai_vision_api, "_load_hunyuan_workers", return_value=[]):
             response = _app().post("/api/3dmodel", json={"image_url": "https://e.test/a.png"})
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"]["error_string"], "no_3d_node_available")
