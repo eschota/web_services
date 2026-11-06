@@ -44,6 +44,15 @@ def call(base, token, method, path, body=None, timeout=60):
             return exc.code, {}
 
 
+def _degenerate(text):
+    """Same test as backend ai_vision_api._degenerate_answer: nearly all one repeated non-word character."""
+    compact = "".join(text.split())
+    if len(compact) < 24:
+        return False
+    char = max(set(compact), key=compact.count)
+    return not char.isalnum() and compact.count(char) >= 0.9 * len(compact)
+
+
 def log_size(path):
     try:
         return os.path.getsize(path)
@@ -127,7 +136,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--prompt-file", required=True)
-    ap.add_argument("--image-url", required=True)
+    ap.add_argument("--image-url", required=True,
+                    help="one URL, or several separated by commas (sequential mode cycles them)")
     ap.add_argument("--n", type=int, default=5)
     ap.add_argument("--warmup", type=int, default=1)
     ap.add_argument("--max-output-tokens", type=int, default=640)
@@ -163,7 +173,8 @@ def main():
     for i in range(args.warmup + args.n):
         warm = i < args.warmup
         mark = log_size(llama_log) if llama_log else 0
-        body = {"prompt": "[ref nb-%s-%s-%d]\n\n%s" % (args.label, run_id, i, prompt), "image_url": args.image_url,
+        urls = [u for u in args.image_url.split(",") if u]  # several URLs: request i uses urls[i % len]
+        body = {"prompt": "[ref nb-%s-%s-%d]\n\n%s" % (args.label, run_id, i, prompt), "image_url": urls[i % len(urls)],
                 "max_output_tokens": args.max_output_tokens, "model": model}
         t0 = time.monotonic()
         code, accepted = call(base, token, "POST", "/ai-vision", body)
@@ -183,6 +194,8 @@ def main():
                 break
         row.update(status=st.get("status"), error=st.get("error") or "", node_elapsed=st.get("elapsed_seconds"),
                    wall=round(time.monotonic() - t0, 2), answer_chars=len(st.get("answer") or ""),
+                   answer_head=str(st.get("answer") or "")[:60],
+                   degenerate=_degenerate(str(st.get("answer") or "")),
                    reasoning_chars=len(st.get("reasoning") or ""), usage=st.get("model_usage"))
         timings = read_timings(llama_log, mark) if llama_log else []
         # Other callers may share the node: our request is the one with the largest prompt in this window.

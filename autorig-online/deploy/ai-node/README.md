@@ -292,7 +292,7 @@ and uncensored.
 | `llama_server` | required | Path to `llama-server.exe`, or an argv prefix list (the self-test uses one). |
 | `llama_port` | 8092 | llama-server port, on loopback only. |
 | `ngl` | 99 | `-ngl`. |
-| `extra_llama_args` | `[]` | Appended to the launch line, for example `["--flash-attn","on"]`. |
+| `extra_llama_args` | `[]` | Appended to the launch line, for example `["--flash-attn","on"]`. Qwen3.5 nodes: `["--presence-penalty","1.5","--top-k","20","--top-p","0.8"]` (see "Sampling for Qwen3.5"). |
 | `llama_log_file` | empty (discard) | llama-server output for the last run. |
 | `cuda_visible_devices` / `gpu_index` | empty / 0 | GPU selection for llama-server and for nvidia-smi `-i`. |
 | `nvidia_smi` | `nvidia-smi` | Command, or an argv list. |
@@ -334,6 +334,36 @@ copied between our own boxes (f11 → worker-4090 over SSH, then over each site'
 The farm tunnel key may only open each box's nginx port, hence the `/ai/` location on f11 and f7 (the converter
 route next to it is untouched). `max_tasks` is 8 on f11/f7 and 4 at home: with 2, bursts of parallel requests got
 `503 queue_full`, which the backend sees as `worker_busy`.
+
+## Sampling for Qwen3.5 (2026-11-07, live on f2-ai, f11-ai, f13-ai, worker-4090-ai)
+
+Every Qwen3.5 node carries Qwen's non-thinking sampling defaults as llama-server defaults:
+
+```json
+"extra_llama_args": ["--presence-penalty", "1.5", "--top-k", "20", "--top-p", "0.8"]
+```
+
+The node still sends only `temperature` (0.3) per request, so these become the server's values for everything else.
+Before them the 9B often repeated the same keywords until the 640-token cap, so the JSON never closed and M+ had to
+make a second call for title/description. M+ prompt, 10 images × 2, f13-ai (CUDA 12 build), backend `/api/vision`:
+
+| f13-ai, 9B | strict JSON (= has title) | 50 keywords saved | duplicate keywords (median) | p50 |
+|---|---|---|---|---|
+| before, 640 tokens (n=17) | 41 % | 71 % | 14 | 7.3 s |
+| after, 640 tokens (n=19) | 58 % | 100 % | 2 | 7.2 s |
+| after, 768 tokens (n=11) | 82 % | 73 %* | 0 | 4.3 s |
+
+\* sampling noise: an answer that completes under 640 completes the same way under 768; a cap only cuts.
+
+Applied with `set_sampling.ps1`-style edits: back up `config.json` (`config.json.bak-sampling-<time>`), set the
+node-wide `extra_llama_args`, restart the node when it is idle (`ensure-*.ps1` boxes: stop the ai_node process, the
+minute task starts it again). Rollback: copy the backup back and restart. Check with
+`Get-CimInstance Win32_Process` that the llama-server command line ends with the three flags.
+
+f2-ai caveat (2026-11-07): its 9B started answering only `????` (the backend fails such answers as "unreadable")
+some 20-30 minutes after a llama-server start - seen with the new `ai_node.py` without these flags and with the old
+`ai_node.py` with them; a node restart clears it for a while. The GPU is shared with the masks service (Hunyuan python), so suspect
+VRAM pressure on the 11 GB card, not the flags.
 
 ## The film director's brain (worker-4090, 2026-10-11)
 
@@ -419,3 +449,7 @@ f2, f13 ran `a1919c78` (ai-node-20261007); f11 an own build. The throughput patc
 `apply-node-tuning.ps1 -Task <task> -NewCode <patched ai_node.py> -Parallel <n> -LlamaArgs <flags>` installs it
 (backups `*.bak-vab-20261106`, idle-gated restart, `-Rollback` restores). Not applied anywhere: f13 went into the
 GPU swap before the change, and the f2 crash above stopped the rollout.
+
+2026-11-07: the 4B ran on f2 (ai-node-20261106-models) for the A/B, lost on quality (judge 81 % of the 9B) and was
+rolled back: f2 is on its original `ai_node.py` and config again (4B files stay in `models\qwen35-4b`). All four
+Qwen nodes now carry the sampling flags above; nothing else changed on them.

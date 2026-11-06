@@ -17,6 +17,7 @@
   "llama_port": 8092,
   "ngl": 99,
   "extra_llama_args": [],
+  "_comment_qwen": "Qwen3.5 nodes (qwen35-9b-uncensored, qwen35-4b): \"extra_llama_args\": [\"--presence-penalty\",\"1.5\",\"--top-k\",\"20\",\"--top-p\",\"0.8\"] - live on f2/f11/f13/worker-4090 since 2026-11-07, see README 'Sampling for Qwen3.5'.",
   "llama_log_file": "llama-server.log",
 
   "comfy_url": "http://127.0.0.1:8988",
