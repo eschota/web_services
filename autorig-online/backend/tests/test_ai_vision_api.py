@@ -643,5 +643,113 @@ class WorkerChoiceTests(unittest.TestCase):
             self._pick([WORKER], probe, model="qwen35-9b-uncensored")
 
 
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+
+class InlineToNodeTests(unittest.TestCase):
+    """2026-11-06: an inline image reaches the node inside the job, not via a download."""
+
+    def test_recognised_picture_becomes_a_data_uri(self):
+        import base64
+        uri = ai_vision_api._inline_image_for_node(PNG_BYTES)
+        self.assertTrue(uri.startswith("data:image/png;base64,"))
+        self.assertEqual(base64.b64decode(uri.split(",", 1)[1]), PNG_BYTES)
+        self.assertTrue(ai_vision_api._inline_image_for_node(b"\xff\xd8\xff\xe0abc").startswith("data:image/jpeg;"))
+        self.assertTrue(ai_vision_api._inline_image_for_node(b"RIFF\x00\x00\x00\x00WEBPVP8 ").startswith("data:image/webp;"))
+
+    def test_unknown_bytes_and_oversize_keep_the_url_route(self):
+        self.assertEqual(ai_vision_api._inline_image_for_node(b"not a picture"), "")
+        self.assertEqual(ai_vision_api._inline_image_for_node(b""), "")
+        with mock.patch.object(ai_vision_api, "VISION_INLINE_TO_NODE_BYTES", 16):
+            self.assertEqual(ai_vision_api._inline_image_for_node(PNG_BYTES), "")
+        with mock.patch.object(ai_vision_api, "VISION_INLINE_TO_NODE_BYTES", 0):
+            self.assertEqual(ai_vision_api._inline_image_for_node(PNG_BYTES), "")
+
+
+class InlineVisionDispatchTests(DispatchTests):
+    def _post(self, **env):
+        import base64
+        seen = {}
+
+        async def fake_pick(client, model_id=None, **kwargs):
+            return WORKER, {"models": [model_id or ""], "load": 0}
+
+        async def fake_submit(client, worker, path, payload):
+            seen["payload"] = payload
+            return "t-1"
+
+        async def fake_publish(client, data):
+            seen["published"] = True
+            return "https://autorig.online/dev/api/scratch/x.png"
+
+        body = {"prompt": "what is this", "image_base64": base64.b64encode(PNG_BYTES).decode()}
+        with mock.patch.object(ai_vision_api, "_pick_worker", fake_pick), \
+             mock.patch.object(ai_vision_api, "_submit", fake_submit), \
+             mock.patch.object(ai_vision_api, "_publish_inline_image", fake_publish), \
+             mock.patch.object(ai_vision_api, "VISION_INLINE_TO_NODE_BYTES", env.get("limit", 6 * 1024 * 1024)):
+            response = _app().post("/api/vision", json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        return seen
+
+    def test_inline_image_is_sent_to_the_node_without_publishing(self):
+        seen = self._post()
+        self.assertNotIn("published", seen)
+        self.assertTrue(seen["payload"]["image_url"].startswith("data:image/png;base64,"))
+
+    def test_switch_off_keeps_the_scratch_url(self):
+        seen = self._post(limit=0)
+        self.assertTrue(seen["published"])
+        self.assertEqual(seen["payload"]["image_url"], "https://autorig.online/dev/api/scratch/x.png")
+
+    # The inherited DispatchTests cases are not repeated for this subclass.
+    for _name in [n for n in dir(DispatchTests) if n.startswith("test_")]:
+        locals()[_name] = None
+    del _name
+
+
+class RefusalCooldownTests(unittest.TestCase):
+    def setUp(self):
+        ai_vision_api._AI_REFUSED_AT.clear()
+        self.addCleanup(ai_vision_api._AI_REFUSED_AT.clear)
+
+    def _pick(self, workers):
+        import asyncio
+
+        async def probe(client, worker):
+            # both look free and equally loaded: only the refusal can tell them apart
+            return True, {"load": 0, "models": ["bonsai2-27b"], "loaded": "bonsai2-27b"}
+
+        async def run():
+            with mock.patch.object(ai_vision_api, "_load_ai_workers", return_value=workers), \
+                 mock.patch.object(ai_vision_api, "_node_is_free", probe):
+                return await ai_vision_api._pick_worker(None, None)
+
+        return asyncio.run(run())
+
+    def test_a_node_that_just_refused_as_busy_is_skipped(self):
+        f12 = dict(WORKER, physical_node="f12-ai", name="f12-ai")
+        f2 = dict(WORKER, physical_node="f2-ai", name="f2-ai")
+        ai_vision_api._note_refusal(f12, HTTPException(503, detail={"error_string": "worker_busy"}))
+        for _ in range(5):
+            ai_vision_api._AI_PROBES.clear()
+            ai_vision_api._AI_RECENT_PICKS.clear()
+            self.assertEqual(self._pick([f12, f2])["physical_node"], "f2-ai")
+
+    def test_the_refused_node_is_still_used_when_it_is_the_only_one(self):
+        f12 = dict(WORKER, physical_node="f12-ai", name="f12-ai")
+        ai_vision_api._note_refusal(f12, HTTPException(503, detail={"error_string": "worker_busy"}))
+        self.assertEqual(self._pick([f12])["physical_node"], "f12-ai")
+
+    def test_the_cooldown_expires(self):
+        f12 = dict(WORKER, physical_node="a-f12", name="a-f12")
+        f2 = dict(WORKER, physical_node="z-f2", name="z-f2")
+        ai_vision_api._note_refusal(f12, HTTPException(503, detail={"error_string": "worker_busy"}))
+        ai_vision_api._AI_REFUSED_AT[ai_vision_api._node_key(f12)] -= ai_vision_api.AI_REFUSAL_COOLDOWN_SECONDS + 1
+        ai_vision_api._AI_PROBES.clear()
+        ai_vision_api._AI_RECENT_PICKS.clear()
+        self.assertIn(self._pick([f12, f2])["physical_node"], ("a-f12", "z-f2"))
+        self.assertFalse(ai_vision_api._recently_refused(ai_vision_api._node_key(f12), __import__("time").monotonic()))
+
+
 if __name__ == "__main__":
     unittest.main()
