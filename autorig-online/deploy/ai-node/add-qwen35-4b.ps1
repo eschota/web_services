@@ -19,7 +19,10 @@ param(
     [string]$NewCode = '',
     [switch]$Download,
     [string[]]$LlamaArgs = @('-b', '2048', '-ub', '1024', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0',
-                             '--image-min-tokens', '64', '--image-max-tokens', '1024'),
+                             '--image-min-tokens', '64', '--image-max-tokens', '1024',
+                             # Qwen's non-thinking sampling defaults (the request still sets temperature 0.3).
+                             # Without them the 4B looped one keyword until the token cap (f2, 2026-11-07).
+                             '--presence-penalty', '1.5', '--top-k', '20', '--top-p', '0.8'),
     [int]$VramNeedMb = 5600
 )
 $ErrorActionPreference = 'Stop'

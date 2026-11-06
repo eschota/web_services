@@ -403,6 +403,10 @@ Tests: `python -m unittest test_models_config` (config, routing, swap; no GPU) a
   `--reasoning off` (from `reasoning: off`). `--chat-template-kwargs '{"enable_thinking":false}'` is supported
   too but left out: `--reasoning off` is the same switch, and answers already come back with an empty
   `reasoning_content` (0 characters on f13).
+  Plus Qwen's non-thinking sampling defaults `--presence-penalty 1.5 --top-k 20 --top-p 0.8` (server
+  defaults; the request still sends temperature 0.3). Without them the 4B looped one keyword
+  ("sensors", "industrial", ...) until the 640-token cap on f2 (2026-11-07); with them 4 of 4 smoke
+  answers had no duplicates.
 * Backend: `AI_MODEL_EXTRA=qwen35-4b` in `/srv/autorig/secrets/storage-host.env` next to `AI_MODEL_SINGLE`,
   then a restart of autorig-storage (a deploy wipes queues - pick an empty moment). Requests that name
   `qwen35-4b` go only to nodes listing it; every other request is still served by the single 9B.
