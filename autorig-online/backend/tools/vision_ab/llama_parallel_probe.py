@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """How much does llama-server gain from 2-3 requests at once on this card? Run ON the node box.
 
+WARNING (2026-11-06): on f2 (b10709, 9B + mmproj) level 2 made llama-server abort and failed the node's own
+running task. Run it only on a box taken out of rotation (no ai_node traffic), never on a serving node.
+
 Talks to the node's already running llama-server (127.0.0.1:<llama_port>, it has -np auto = 4 slots) directly,
 changes nothing: 1 request alone, then 2 and 3 at once, M+ prompt + one image, fresh prefix each (no prompt
 cache reuse). Prints aggregate output tokens/s per level. If the model is not loaded it says so and exits.
