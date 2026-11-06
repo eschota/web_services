@@ -335,7 +335,8 @@ async def _converter_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
                           "busy": False, "activity": "", "activities": [],
                           "state": "offline", "queue_depth": 0, "task_id": "",
                           "task_status": "", "workflow": "",
-                          "assigned_worker": node_id})
+                          "assigned_worker": node_id,
+                          "quarantined_until": int(ai_vision_api.quarantined_until(node_id))})
             continue
         ok, info = probe
         load = int((info or {}).get("load") or 0) if isinstance(info, dict) else 0
@@ -363,6 +364,9 @@ async def _converter_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
             "task_status": "",
             "workflow": activities[0] if activities else "",
             "assigned_worker": node_id,
+            # Unix time a garbage-answer quarantine ends (0 = none): the node
+            # gets no AI work until then while another node answers.
+            "quarantined_until": int(ai_vision_api.quarantined_until(node_id)),
         })
     return {"nodes": nodes, "load": total_load, "running": running,
             "models": models}

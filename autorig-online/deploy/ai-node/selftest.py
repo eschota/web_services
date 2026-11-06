@@ -739,6 +739,22 @@ def integration(tmp):
               result.get("status") == "Completed" and orphan.poll() is not None,
               (result, orphan.poll()))
 
+        # ------------------- POST /ai-reload (backend, garbage answers)
+        code, _ = api.call("POST", "/api-converter-glb/ai-reload", {"reload": True}, token="wrong")
+        check("reload: wrong token -> 401", code == 401, code)
+        code, body = api.call("POST", "/api-converter-glb/ai-reload", {})
+        check("reload: body without reload:true -> 400", code == 400, (code, body))
+        wait_until(lambda: api.status()["ai_models"]["loaded_model"] == MODEL_ID, 5)
+        code, body = api.call("POST", "/api-converter-glb/ai-reload", {"reload": True, "reason": "selftest"})
+        check("reload: idle loaded model is stopped now",
+              code == 200 and body.get("reload") in ("stopped", "not_loaded"), (code, body))
+        check("reload: llama-server is gone", wait_until(lambda: not port_open(llama_port), 10))
+        code, body = api.submit("text", {"prompt": "after reload"})
+        result = api.finish(body.get("task_id", ""), timeout=60)
+        check("reload: next task loads the model again and completes",
+              result.get("status") == "Completed"
+              and api.status()["ai_models"]["loaded_model"] == MODEL_ID, result)
+
         # ----------------------------- killing ai_node kills llama
         if os.name == "nt":
             check("job: model loaded before the hard kill",

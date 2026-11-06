@@ -192,5 +192,38 @@ class NodeTests(Base):
         self.assertEqual(node.swaps, 0)
 
 
+
+class ReloadTests(NodeTests):
+    """POST /ai-reload (2026-11-07): the backend asks a node that answers "????" to reload its model."""
+
+    def test_idle_server_is_stopped_now(self):
+        node = self.node(self.cfg())
+        stops = []
+        node.llama.running = lambda: True
+        node.llama.stop_if_idle = lambda reason, min_idle=0.0: stops.append(reason) or True
+        self.assertEqual(node.request_reload("garbage"), {"reload": "stopped"})
+        self.assertEqual((node.reloads, node.reload_pending), (1, False))
+        self.assertIn("garbage", stops[0])
+
+    def test_busy_server_is_stopped_after_the_running_task(self):
+        node = self.node(self.cfg())
+        node.llama.running = lambda: True
+        node.llama.stop_if_idle = lambda reason, min_idle=0.0: False
+        self.assertEqual(node.request_reload(), {"reload": "after_running_task"})
+        self.assertTrue(node.reload_pending)
+
+    def test_nothing_loaded_nothing_to_do(self):
+        node = self.node(self.cfg())
+        node.llama.running = lambda: False
+        self.assertEqual(node.request_reload(), {"reload": "not_loaded"})
+        self.assertFalse(node.reload_pending)
+
+    def test_status_reports_reloads(self):
+        node = self.node(self.cfg())
+        with mock.patch.object(ai_node, "running_game", return_value=""):
+            status = node.server_status()
+        self.assertEqual((status["ai_node"]["reloads"], status["ai_node"]["reload_pending"]), (0, False))
+
+
 if __name__ == "__main__":
     unittest.main()

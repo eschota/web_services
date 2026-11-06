@@ -54,7 +54,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional, Tuple
 
-VERSION = "ai-node-20261106-models"
+VERSION = "ai-node-20261107-reload"
 API_PREFIX = "/api-converter-glb"
 WORKLOAD_AI_VISION = "ai_vision"
 
@@ -1359,6 +1359,8 @@ class Node:
         self.completed = 0
         self.failed = 0
         self.swaps = 0                          # model swaps on a node with a `models` list
+        self.reload_pending = False             # POST /ai-reload while a task generated: stop after it
+        self.reloads = 0
         self._comfy_freed_at = 0.0
         self._gate_wanted = False              # set by _ensure_model: waiting for ComfyUI to drain, or loading
         self._last_use = -1e9
@@ -1689,6 +1691,10 @@ class Node:
                     self.running_task_id = ""
                 if task.priority == "owner":
                     self._last_owner = time.monotonic()  # the conversation goes on: keep the card warm
+                if self.reload_pending and self.llama.stop_if_idle("reload requested (garbage answers)"):
+                    self.reload_pending = False
+                    self.reloads += 1
+                    logger.warning("llama-server stopped after task %s for the requested reload", task.task_id)
                 # Hand the card back now when ComfyUI wants it or when there is
                 # no keepalive; otherwise the monitor unloads after keepalive.
                 if not self.owner_warm() and (self.comfy_busy() or self.cfg.keepalive_seconds <= 0):
@@ -1725,6 +1731,26 @@ class Node:
         task.answer = answer
         task.reasoning = reasoning
         task.model_usage = usage
+
+    def request_reload(self, reason: str = "") -> Dict[str, object]:
+        """POST /ai-reload: restart llama-server (the backend asks after garbage answers like "????").
+
+        The server is stopped now when no task is generating, otherwise right after
+        the running task; the next task loads the model fresh. Nothing is queued
+        or lost: pending tasks simply load it.
+        """
+        label = "reload requested" + (f" ({reason})" if reason else "")
+        if not self.llama.running():
+            self.reload_pending = False
+            return {"reload": "not_loaded"}
+        if self.llama.stop_if_idle(label):
+            self.reload_pending = False
+            self.reloads += 1
+            logger.warning("llama-server stopped: %s", label)
+            return {"reload": "stopped"}
+        self.reload_pending = True
+        logger.warning("llama-server will stop after the running task: %s", label)
+        return {"reload": "after_running_task"}
 
     def _select_task_model(self, task: AiTask) -> None:
         """A node with several models: put the task's model in place. Called under _model_lock; with
@@ -1946,6 +1972,8 @@ class Node:
                 "loads": self.llama.loads,
                 "selected_model": cfg.model_id,
                 "model_swaps": self.swaps,
+                "reloads": self.reloads,
+                "reload_pending": self.reload_pending,
                 "max_tasks": cfg.max_tasks,
                 "max_prompt_chars": cfg.max_prompt_chars,
                 "context_tokens": cfg.context_tokens,
@@ -2050,6 +2078,24 @@ class Handler(BaseHTTPRequestHandler):
         path = self._path()
         modes = {API_PREFIX + "/ai-vision": "vision", API_PREFIX + "/text2text": "text"}
         try:
+            if path == API_PREFIX + "/ai-reload":
+                if not self._authorized():
+                    return
+                try:
+                    length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                except ValueError:
+                    length = 0
+                raw = self.rfile.read(length) if length > 0 else b""
+                try:
+                    payload = json.loads(raw.decode("utf-8")) if raw else {}
+                except (UnicodeDecodeError, ValueError):
+                    payload = {}
+                if not isinstance(payload, dict) or payload.get("reload") is not True:
+                    self._send(400, {"error": "invalid_request", "message": 'send {"reload": true}'})
+                    return
+                self._send(200, dict(self.node.request_reload(str(payload.get("reason") or "")[:80]),
+                                     version=VERSION))
+                return
             if path not in modes:
                 self._send(404, {"error": "not_found"})
                 return

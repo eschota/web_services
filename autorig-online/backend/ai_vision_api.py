@@ -230,6 +230,13 @@ VISION_INLINE_TO_NODE_BYTES = int(os.getenv("AI_VISION_INLINE_TO_NODE_BYTES", st
 # node is reachable. The probe cache would otherwise offer it again for up to
 # AI_PROBE_STALE_SECONDS (a render box that took its GPU back for ComfyUI).
 AI_REFUSAL_COOLDOWN_SECONDS = float(os.getenv("AI_REFUSAL_COOLDOWN_SECONDS", "20"))
+# Garbage answers (2026-11-07: f2's 9B answered only "????" ~25 min after each
+# llama-server start). AI_GARBAGE_THRESHOLD garbage answers from one node within
+# AI_GARBAGE_WINDOW_SECONDS take it out of routing for AI_GARBAGE_QUARANTINE_SECONDS.
+AI_GARBAGE_THRESHOLD = max(1, int(os.getenv("AI_GARBAGE_THRESHOLD", "2")))
+AI_GARBAGE_WINDOW_SECONDS = float(os.getenv("AI_GARBAGE_WINDOW_SECONDS", "600"))
+AI_GARBAGE_QUARANTINE_SECONDS = float(os.getenv("AI_GARBAGE_QUARANTINE_SECONDS", "900"))
+AI_GARBAGE_MIN_WORD_SHARE = 0.2
 SUBMIT_TIMEOUT_SECONDS = 60.0
 STATUS_TIMEOUT_SECONDS = 30.0
 # A cold node loads 7 GB of weights before the first answer, so the wait a
@@ -728,6 +735,57 @@ def _recently_refused(key: str, now: float) -> bool:
     return at is not None and now - at < AI_REFUSAL_COOLDOWN_SECONDS
 
 
+_AI_GARBAGE_AT: Dict[str, deque] = {}          # node key -> wall times of recent garbage answers
+_AI_GARBAGE_TASKS: "deque[str]" = deque(maxlen=512)  # task ids already counted (a task is polled many times)
+_AI_QUARANTINED_UNTIL: Dict[str, float] = {}   # node key -> wall time the quarantine ends
+
+
+def quarantined_until(key: str, now: Optional[float] = None) -> float:
+    """Unix time a node's garbage quarantine ends, 0 when it is not quarantined."""
+    until = _AI_QUARANTINED_UNTIL.get(str(key or "").strip().lower(), 0.0)
+    return until if until > (time.time() if now is None else now) else 0.0
+
+
+def _note_garbage(node_key: str, task_id: str, now: Optional[float] = None) -> bool:
+    """Count one garbage answer of a node; True when that starts a quarantine."""
+    key = str(node_key or "").strip().lower()
+    if not key or (task_id and task_id in _AI_GARBAGE_TASKS):
+        return False
+    if task_id:
+        _AI_GARBAGE_TASKS.append(task_id)
+    now = time.time() if now is None else now
+    seen = _AI_GARBAGE_AT.setdefault(key, deque())
+    seen.append(now)
+    while seen and now - seen[0] > AI_GARBAGE_WINDOW_SECONDS:
+        seen.popleft()
+    if len(seen) < AI_GARBAGE_THRESHOLD or quarantined_until(key, now):
+        return False
+    _AI_QUARANTINED_UNTIL[key] = now + AI_GARBAGE_QUARANTINE_SECONDS
+    seen.clear()
+    logger.warning("Node %s quarantined: garbage answers (%d within %.0f s); out of routing for %.0f s",
+                   key, AI_GARBAGE_THRESHOLD, AI_GARBAGE_WINDOW_SECONDS, AI_GARBAGE_QUARANTINE_SECONDS)
+    return True
+
+
+async def _ask_node_to_reload(node_key: str) -> None:
+    """Best effort: an ai-node from ai-node-20261107-reload on restarts its llama-server.
+
+    Older nodes answer 404 and are left alone; the quarantine still keeps work
+    away from them until it runs out.
+    """
+    worker = _worker_by_key(node_key)
+    if worker is None:
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(_ai_base(worker) + "/ai-reload", json={"reload": True},
+                                         headers={"Authorization": f"Bearer {worker['token']}"},
+                                         timeout=10.0)
+        logger.warning("Node %s asked to reload its model: HTTP %s", node_key, response.status_code)
+    except Exception as exc:
+        logger.warning("Node %s reload request failed: %s", node_key, exc)
+
+
 def _note_refusal(worker: Dict[str, object], exc: HTTPException) -> None:
     """A node that refused as busy or could not be reached is not offered the next job straight away."""
     detail = exc.detail if isinstance(exc.detail, dict) else {}
@@ -793,6 +851,12 @@ async def _pick_worker(
     refused_now = time.monotonic()
     reachable = [(w, i) for w, i in reachable
                  if not _recently_refused(_node_key(w), refused_now)] or reachable
+    # A node quarantined for garbage answers gets no work while anything else
+    # answers; when nothing else does it is still tried (after the reload it was
+    # asked for it may well be fine, and the caller retries a garbage answer).
+    wall_now = time.time()
+    reachable = [(w, i) for w, i in reachable
+                 if not quarantined_until(_node_key(w), wall_now)] or reachable
     wanted = str(model_id or "").strip()
     if require_unlimited_output:
         reachable = [(worker, info) for worker, info in reachable
@@ -1532,6 +1596,19 @@ def _degenerate_answer(text: str) -> bool:
     return not char.isalnum() and top >= 0.9 * len(compact)
 
 
+def _garbage_answer(text: str) -> bool:
+    """Empty, or less than a fifth letters/digits once whitespace is gone ("????…", "{}{}…")."""
+    compact = "".join(str(text or "").split())
+    if not compact:
+        return True
+    words = sum(1 for ch in compact if ch.isalnum())
+    return words < AI_GARBAGE_MIN_WORD_SHARE * len(compact)
+
+
+GARBAGE_ERROR = ("garbage_answer: the model returned an unreadable answer "
+                 "(empty or almost no letters, e.g. \"????\"); render the node again")
+
+
 def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
                    service_id: str = "", *,
                    served_model: str = "") -> Dict[str, object]:
@@ -1546,15 +1623,23 @@ def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
     # state, so a restart between submit and poll changes nothing.
     answer = str(raw.get("answer") or "")
     output_text, was_structured = _extract_output_text(answer)
-    if status == "Completed" and _degenerate_answer(output_text):
+    garbage = status == "Completed" and (_degenerate_answer(output_text) or _garbage_answer(output_text))
+    if garbage:
         # A model stuck repeating one character (1024 "?" from the 9B vision
         # model, 2026-09-29) is not an answer: passed on, it became the next
         # node's prompt. Fail it so the node shows an error and a re-render
         # asks again (a failed task is never served from the request cache).
+        # The code leads the message so a caller (M+) can match it and retry;
+        # the node is counted towards a quarantine.
         status = "Failed"
-        raw = dict(raw, error=("The model returned an unreadable answer (one character repeated); "
-                               "render the node again"))
-    return {
+        raw = dict(raw, error=GARBAGE_ERROR)
+        node_key = str(task_id or "").partition(".")[0]
+        if node_key and _note_garbage(node_key, str(task_id)):
+            try:
+                asyncio.get_running_loop().create_task(_ask_node_to_reload(node_key))
+            except RuntimeError:
+                pass                        # no loop (a sync test): the quarantine alone still holds
+    result = {
         "success_bool": status != "Failed",
         "task_id_string": task_id,
         "status_string": status.lower() or "pending",
@@ -1574,6 +1659,9 @@ def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
         "stage_string": str(raw.get("current_stage") or ""),
         "server_time_unix_int": int(time.time()),
     }
+    if garbage:
+        result["error_code_string"] = "garbage_answer"
+    return result
 
 
 def _folded_system_prompt(payload: Dict[str, object],
