@@ -1,0 +1,8 @@
+{
+  "_comment": "A/B configurations for run_ab.py. model = the id sent to POST /api/vision. long_side_px = the image is resized like M+ does (renderfinimage.ts: long side <= N px, never upscaled, JPEG ~q85, no EXIF) and sent as image_base64. max_output_tokens 512 = what M+ sends since a88d3cc.",
+  "configs": [
+    {"name": "A", "title": "qwen35-9b-uncensored as is (M+ today: 1024 px)", "model": "qwen35-9b-uncensored", "long_side_px": 1024, "max_output_tokens": 512},
+    {"name": "B", "title": "Qwen3.5-4B Q4_K_M + mmproj F16 (unsloth), 1024 px", "model": "qwen35-4b", "long_side_px": 1024, "max_output_tokens": 512},
+    {"name": "C", "title": "qwen35-9b-uncensored, image 768 px", "model": "qwen35-9b-uncensored", "long_side_px": 768, "max_output_tokens": 512}
+  ]
+}
