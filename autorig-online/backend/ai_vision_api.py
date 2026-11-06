@@ -219,6 +219,17 @@ def _resolve_model_id(model_id: Optional[str], single: str, extra: List[str], de
 
 MAX_PROMPT_CHARS = 8000
 MAX_INLINE_IMAGE_BYTES = 12 * 1024 * 1024
+# 2026-11-06: an image the caller sent inline goes to the node inside the job
+# (a data: URI, which the node decodes without any network fetch) instead of
+# being parked on the public scratch store for the node to download. The
+# download is what failed under load (WinError 10054/10060 on every node while
+# the scratch POST on our side was 200). Larger pictures keep the URL route.
+# 0 turns it off.
+VISION_INLINE_TO_NODE_BYTES = int(os.getenv("AI_VISION_INLINE_TO_NODE_BYTES", str(6 * 1024 * 1024)))
+# A node that just refused a job as busy is skipped for this long when another
+# node is reachable. The probe cache would otherwise offer it again for up to
+# AI_PROBE_STALE_SECONDS (a render box that took its GPU back for ComfyUI).
+AI_REFUSAL_COOLDOWN_SECONDS = float(os.getenv("AI_REFUSAL_COOLDOWN_SECONDS", "20"))
 SUBMIT_TIMEOUT_SECONDS = 60.0
 STATUS_TIMEOUT_SECONDS = 30.0
 # A cold node loads 7 GB of weights before the first answer, so the wait a
@@ -709,11 +720,21 @@ def _mplus_inflight(key: tuple, now: float) -> int:
                if k == key and now - at < MPLUS_INFLIGHT_SECONDS)
 
 
+_AI_REFUSED_AT: Dict[str, float] = {}
+
+
+def _recently_refused(key: str, now: float) -> bool:
+    at = _AI_REFUSED_AT.get(key)
+    return at is not None and now - at < AI_REFUSAL_COOLDOWN_SECONDS
+
+
 def _note_refusal(worker: Dict[str, object], exc: HTTPException) -> None:
     """A node that refused as busy or could not be reached is not offered the next job straight away."""
     detail = exc.detail if isinstance(exc.detail, dict) else {}
     code = str(detail.get("error_string") or "")
     key = _probe_key(worker)
+    if code in ("worker_busy", "worker_unreachable"):
+        _AI_REFUSED_AT[_node_key(worker)] = time.monotonic()
     if code == "worker_unreachable":
         _AI_PROBES[key] = (time.monotonic(), False, {})
     elif code == "worker_busy":
@@ -766,6 +787,12 @@ async def _pick_worker(
             detail={"error_string": "no_node_available",
                     "message_string": "No farm node answered; try again shortly"},
         )
+    # A node that refused a moment ago may still look reachable from a cached
+    # probe (a render box that yielded its GPU to ComfyUI): step past it when
+    # anything else answers, otherwise keep it rather than fail the request.
+    refused_now = time.monotonic()
+    reachable = [(w, i) for w, i in reachable
+                 if not _recently_refused(_node_key(w), refused_now)] or reachable
     wanted = str(model_id or "").strip()
     if require_unlimited_output:
         reachable = [(worker, info) for worker, info in reachable
@@ -1367,6 +1394,32 @@ def _decode_inline_image(raw: str) -> bytes:
     return data
 
 
+def _sniff_image_media_type(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return ""
+
+
+def _inline_image_for_node(data: bytes) -> str:
+    """`data:` URI for the node, or '' when the picture should take the URL route.
+
+    Only a recognised picture within VISION_INLINE_TO_NODE_BYTES goes inline;
+    anything else keeps the scratch-store path it always had.
+    """
+    if VISION_INLINE_TO_NODE_BYTES <= 0 or not data or len(data) > VISION_INLINE_TO_NODE_BYTES:
+        return ""
+    media_type = _sniff_image_media_type(data)
+    if not media_type:
+        return ""
+    return f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
+
+
 async def _publish_inline_image(client: httpx.AsyncClient, data: bytes) -> str:
     """Park an inline image on the public scratch store the farm can read.
 
@@ -1738,10 +1791,11 @@ async def _uncached_api_vision(request: Request, body: VisionRequest):
                 "message_string": "The video could not be turned into a picture"})
         video_note = str(reference.get("prompt_prefix_string") or "")
     elif not image_url:
-        async with httpx.AsyncClient() as client:
-            image_url = await _publish_inline_image(
-                client, _decode_inline_image(body.image_base64 or "")
-            )
+        inline_bytes = _decode_inline_image(body.image_base64 or "")
+        image_url = _inline_image_for_node(inline_bytes)
+        if not image_url:
+            async with httpx.AsyncClient() as client:
+                image_url = await _publish_inline_image(client, inline_bytes)
     if video_note:
         # Without this the model sees a collage and describes the tiles; with
         # it, it sees one video and describes what happens over its length.
