@@ -453,3 +453,27 @@ GPU swap before the change, and the f2 crash above stopped the rollout.
 2026-11-07: the 4B ran on f2 (ai-node-20261106-models) for the A/B, lost on quality (judge 81 % of the 9B) and was
 rolled back: f2 is on its original `ai_node.py` and config again (4B files stay in `models\qwen35-4b`). All four
 Qwen nodes now carry the sampling flags above; nothing else changed on them.
+
+## Garbage answers: backend quarantine and `POST /ai-reload` (2026-11-07)
+
+Backend (`ai_vision_api`, live since release `…-inline-garbage-quarantine`): a finished vision/text answer that is
+empty or less than 20 % letters/digits (`????…`) fails with `error_string` starting `garbage_answer:` and
+`error_code_string: "garbage_answer"` (M+ sees `renderfin_error: garbage_answer…` and retries). Two such answers from
+one node within 10 min (`AI_GARBAGE_THRESHOLD`, `AI_GARBAGE_WINDOW_SECONDS`) take the node out of `_pick_worker` for
+`AI_GARBAGE_QUARANTINE_SECONDS` (900); it is still tried when every reachable node is quarantined. The log says
+`Node X quarantined: garbage answers`; `/api/ai/fleet` shows `quarantined_until` (unix, 0 = none) on AI nodes.
+At the start of a quarantine the backend calls the node once:
+
+    POST /api-converter-glb/ai-reload   {"reload": true, "reason": "..."}   (Bearer token)
+
+From `ai-node-20261107-reload` on, the node stops llama-server at once when no task is generating, otherwise right
+after the running task (`reload_pending` in status), and the next task loads the model fresh; answers
+`{"reload": "stopped" | "after_running_task" | "not_loaded"}`. Older nodes answer 404 and the backend ignores it.
+Not rolled out yet (f2/f7/f11/f13 run ai-node-20261007): roll it with the usual idle-gated code copy.
+
+f2 cause (read-only look, 2026-11-07): besides llama-server (7.87 GB dedicated with a 1024 px image), the Freestock
+webserver (`%LOCALAPPDATA%\Freestock\WEBSERVER`, face indexer / vision plugin) takes 2.8 GB of the 11 GB card in
+bursts every ~15 min (10.99 of 11.26 GB used, GPU 96-100 %), and up to ~5.4 GB earlier the same night. The masks
+service holds 18 MB. Suspected: a burst landing while llama generates oversubscribes VRAM and leaves llama-server
+answering `????` until it restarts. Not reproduced in a 33-minute watch (11 probes fine, bursts did not overlap a
+generation).
