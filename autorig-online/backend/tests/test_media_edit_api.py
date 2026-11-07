@@ -287,6 +287,11 @@ class StatusMappingTests(unittest.TestCase):
                                                     "output_meta": {"w": 1080, "h": 1920, "bytes": 5}}, 1004),
                          "publish")
         self.assertEqual((rec["status"], rec["stage"]), ("rendering", "publishing"))
+        self.assertEqual(rec["started_at"], 1003)                 # backend clock, not the node's 1002
+        rec["finished_at"] = 1300.0
+        me.apply_node_status(rec, {"status": "Completed", "output_ready": True, "elapsed_seconds": 4.25,
+                                   "output_meta": {"w": 1080, "h": 1920, "bytes": 5}}, 1005)
+        self.assertEqual(me.public_status(rec)["render_seconds_float"], 4.2)   # the node's own elapsed time
         out = me.public_status(rec)
         self.assertFalse(out["finished_bool"])
         self.assertEqual(out["output_meta"]["w"], 1080)

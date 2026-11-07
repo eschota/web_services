@@ -620,7 +620,8 @@ def public_status(record: Dict[str, object]) -> Dict[str, object]:
         "created_at_unix_float": float(record.get("created_at") or 0),
         "started_at_unix_float": started_at,
         "finished_at_unix_float": finished_at,
-        "render_seconds_float": round(finished_at - started_at, 1) if finished_at and started_at else 0,
+        "render_seconds_float": (round(float(record["node_elapsed"]), 1) if record.get("node_elapsed")
+                                 else round(finished_at - started_at, 1) if finished_at and started_at else 0),
         "total_seconds_float": (round(finished_at - float(record.get("created_at") or 0), 1)
                                 if finished_at else 0),
         "server_time_unix_int": int(time.time()),
@@ -640,8 +641,12 @@ def apply_node_status(record: Dict[str, object], raw: Dict[str, object], now: Op
     record["queue_position"] = int(raw.get("queue_position") or 0)
     if raw.get("source_meta"):
         record["source_meta"] = raw["source_meta"]
-    if raw.get("started_at") and not record.get("started_at"):
-        record["started_at"] = float(raw["started_at"])
+    # Backend clock, not the node's: node clocks drift (f13 ran 4 min behind, 2026-11-07); the node's own
+    # elapsed_seconds is the render time.
+    if state != "queued" and not record.get("started_at"):
+        record["started_at"] = now
+    if raw.get("elapsed_seconds"):
+        record["node_elapsed"] = round(float(raw["elapsed_seconds"]), 2)
     if state == "completed":
         record["output_meta"] = dict(raw.get("output_meta") or {})
         if raw.get("output_ready"):
