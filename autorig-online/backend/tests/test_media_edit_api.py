@@ -231,6 +231,22 @@ class DispatchTests(Base):
         self.assertEqual(len(posts), 1)
         self.assertNotIn("n13", posts[0][1])                       # the loaded node was not chosen
 
+    def test_a_burst_is_spread_over_the_nodes(self):
+        def handler(request):
+            if request.url.path.endswith("/server-status"):
+                return httpx.Response(200, json={"media_edit": media_block()})
+            return httpx.Response(202, json={"task_id": "t-" + request.url.host})
+
+        self.transport(handler)
+        payload = {"source_url": "https://cdn.example.com/a.mp4", "media_kind": "video", "operation": {}}
+        spec = me.parse_media_edit_request(payload)
+
+        async def burst():
+            return await asyncio.gather(*(me.submit(spec, payload, "mplus") for _ in range(3)))
+
+        nodes = sorted(answer["node_string"] for answer in run(burst()))
+        self.assertEqual(nodes, ["f13-ai", "f2-ai", "worker-4090-ai"])
+
     def test_busy_node_hands_over_to_the_next(self):
         def handler(request):
             if request.url.path.endswith("/server-status"):

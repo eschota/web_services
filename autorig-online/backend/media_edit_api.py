@@ -542,6 +542,9 @@ async def submit(spec: Dict[str, object], payload: Dict[str, object], tier: str)
                          retryable_bool=True)
         for worker, info in ranked[:MAX_SUBMIT_ATTEMPTS]:
             node = ai_vision_api._node_key(worker)
+            # Reserved before the first await: a burst of requests ranks on the same cached probes, and without
+            # this every one of them picked the same node (2026-11-07, 4 at once all went to f11-ai).
+            _RECENT_PICKS.setdefault(node, deque()).append(time.monotonic())
             try:
                 response = await client.post(ai_vision_api._ai_base(worker) + "/media-edit", json=body,
                                              headers=_auth(worker), timeout=30.0)
@@ -554,7 +557,6 @@ async def submit(spec: Dict[str, object], payload: Dict[str, object], tier: str)
                 if not node_task:
                     last = _error(502, "worker_no_task_id", f"Farm node {node} returned no task id")
                     continue
-                _RECENT_PICKS.setdefault(node, deque()).append(time.monotonic())
                 return _accepted(node, node_task, spec, tier, info)
             reason = ""
             try:
