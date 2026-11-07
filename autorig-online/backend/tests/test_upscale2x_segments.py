@@ -155,6 +155,15 @@ class CommandTests(unittest.TestCase):
         line = " ".join(upscale_video.concat_command(Path("l.txt"), Path("j.mp4")))
         self.assertIn("-f concat -safe 0 -i l.txt -map 0:v:0 -c copy", line)
 
+    def test_each_piece_starts_where_the_previous_one_ends(self):
+        from fractions import Fraction
+        listing = upscale_video.concat_list(
+            [Path("v_0000.mp4"), Path("v_0001.mp4")], [Fraction(130, 30), Fraction(4004, 30000)])
+        self.assertEqual(listing, "file 'v_0000.mp4'\nduration 4.333333333\n"
+                                  "file 'v_0001.mp4'\nduration 0.133466667\n")
+        argv = upscale_video.video_only_command(Path("out_0000.mp4"), Path("v_0000.mp4"))
+        self.assertIn("-map 0:v:0 -c copy -an", " ".join(argv))
+
 
 class RowFieldTests(unittest.TestCase):
     def test_progress_fields(self):
@@ -434,6 +443,15 @@ def _stream(path, kind):
     return next(s for s in json.loads(done.stdout)["streams"] if s["codec_type"] == kind)
 
 
+def _frame_steps(path):
+    """The distinct gaps between consecutive frame times, in stream ticks."""
+    done = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                           "packet=pts", "-of", "csv=p=0", str(path)],
+                          capture_output=True, text=True, check=True)
+    times = sorted(int(x) for x in done.stdout.split() if x.strip().lstrip("-").isdigit())
+    return {b - a for a, b in zip(times, times[1:])}
+
+
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg unavailable")
 class RealSegmentedUpscaleTests(unittest.TestCase):
     """A 25 s 30 fps clip with sound, split, 'enlarged' piece by piece, joined."""
@@ -464,6 +482,7 @@ class RealSegmentedUpscaleTests(unittest.TestCase):
                     await upscale_video.store_output(task_id, plan, index, rendered.read_bytes())
                 final = env.root / "final.mp4"
                 meta = await upscale_video.assemble(task_id, plan, final)
+                self.frame_steps = _frame_steps(final)
                 out_v, src_v = _stream(final, "video"), _stream(source, "video")
                 out_a, src_a = _stream(final, "audio"), _stream(source, "audio")
                 return plan, meta, out_v, src_v, out_a, src_a, _audio_md5(final), _audio_md5(source)
@@ -476,6 +495,7 @@ class RealSegmentedUpscaleTests(unittest.TestCase):
         self.assertEqual(plan["segment_frames_array"], [130, 130, 130, 130, 130, 100])
         self.assertEqual(out_v["avg_frame_rate"], src_v["avg_frame_rate"])
         self.assertEqual(int(out_v["nb_read_packets"]), int(src_v["nb_read_packets"]))
+        self.assertEqual(len(self.frame_steps), 1, self.frame_steps)   # no gap at any join
         self.assertEqual((out_v["width"], out_v["height"]), (640, 480))
         self.assertLessEqual(abs(float(out_v["duration"]) - float(src_v["duration"])), 1 / 30)
         for key in ("codec_name", "channels", "sample_rate", "bit_rate"):
@@ -490,7 +510,10 @@ class RealSegmentedUpscaleTests(unittest.TestCase):
     def test_ntsc_rate_keeps_every_frame(self):
         plan, meta, out_v, src_v, *_rest, out_md5, src_md5 = self.run_pipeline(rate="30000/1001", seconds=9)
         self.assertEqual(plan["fps_string"], "30000/1001")
+        self.assertEqual(out_v["avg_frame_rate"], "30000/1001")
         self.assertEqual(int(out_v["nb_read_packets"]), int(src_v["nb_read_packets"]))
+        self.assertEqual(len(self.frame_steps), 1, self.frame_steps)
+        self.assertEqual(out_md5, src_md5)
         self.assertLessEqual(abs(float(out_v["duration"]) - float(src_v["duration"])), 1001 / 30000)
 
     def test_pcm_mov_is_refused_at_admission(self):

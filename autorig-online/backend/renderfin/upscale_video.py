@@ -315,8 +315,26 @@ async def store_output(task_id: str, plan: Dict[str, Any], index: int, data: byt
 # --------------------------------------------------------------- assemble
 
 
-def concat_list(paths: List[Path]) -> str:
-    return "".join("file '" + p.name.replace("'", "'\\''") + "'\n" for p in paths)
+def concat_list(paths: List[Path], durations: Optional[List[Fraction]] = None) -> str:
+    """The concat demuxer's list; ``duration`` lines pin where each piece starts.
+
+    ffmpeg 5.1 (prod) otherwise starts the next piece at the previous one's
+    container duration, which MP4 rounds to milliseconds - a 0.7 ms gap at
+    every join and a frame rate like 3840000/128017.
+    """
+    lines = []
+    for index, path in enumerate(paths):
+        lines.append("file '" + path.name.replace("'", "'\\''") + "'\n")
+        if durations is not None:
+            lines.append(f"duration {float(durations[index]):.9f}\n")
+    return "".join(lines)
+
+
+def video_only_command(piece: Path, output: Path) -> List[str]:
+    """The piece's picture alone: a sound track (SaveVideo adds one when its
+    input had sound) would set the piece's length and the joined clip's start."""
+    return [video_input.FFMPEG_BIN, "-v", "error", "-y", "-i", str(piece),
+            "-map", "0:v:0", "-c", "copy", "-an", "-sn", "-dn", "-f", "mp4", str(output)]
 
 
 def concat_command(list_file: Path, output: Path) -> List[str]:
@@ -335,16 +353,42 @@ async def assemble(task_id: str, plan: Dict[str, Any], output: Path) -> Dict[str
         raise UpscaleError("upscale_segment_failed", f"missing enlarged pieces: {missing[:5]}")
     joined = folder / "joined.mp4"
     list_file = folder / "concat.txt"
-    list_file.write_text(concat_list(pieces), encoding="utf-8")
+    bare: List[Path] = []
+    durations: List[Fraction] = []
+    rate: Optional[Fraction] = None
     try:
+        for index, piece in enumerate(pieces):
+            target = folder / f"v_{index:04d}.mp4"
+            bare.append(target)
+            await video_input._run_process(*video_only_command(piece, target),
+                                           timeout=video_input.REMUX_TIMEOUT_SECONDS)
+            video = video_input._first_stream(await video_input.probe_media(target), "video") or {}
+            rate = (video_input._parse_rate(video.get("avg_frame_rate"))
+                    or video_input._parse_rate(video.get("r_frame_rate")))
+            if not rate:
+                raise VideoInputError(f"piece {index} has no readable frame rate")
+            frames_here, _, _ = await packet_count(target)
+            durations.append(Fraction(frames_here) / rate)
+        list_file.write_text(concat_list(bare, durations), encoding="utf-8")
         await video_input._run_process(*concat_command(list_file, joined),
                                        timeout=video_input.REMUX_TIMEOUT_SECONDS)
         frames, width, height = await packet_count(joined)
+        joined_video = video_input._first_stream(await video_input.probe_media(joined), "video") or {}
+        joined_seconds = float(joined_video.get("duration") or 0)
     except VideoInputError as exc:
         raise UpscaleError("video_concat_failed", str(exc)[-400:]) from None
+    finally:
+        for target in bare:
+            target.unlink(missing_ok=True)
     if frames != int(plan["frames_int"]):
         raise UpscaleError("video_concat_failed",
                            f"joined clip has {frames} frames; the source has {plan['frames_int']}")
+    expected_seconds = float(sum(durations))
+    if rate and abs(joined_seconds - expected_seconds) > 0.5 / float(rate):
+        # A gap or an overlap at a join: the timestamps are not continuous.
+        raise UpscaleError("video_concat_failed",
+                           f"joined clip lasts {joined_seconds:.4f} s; its pieces add up to "
+                           f"{expected_seconds:.4f} s")
     try:
         meta = await video_input.remux_source_audio(joined, source_path(task_id), output)
         final_frames, _, _ = await packet_count(output)

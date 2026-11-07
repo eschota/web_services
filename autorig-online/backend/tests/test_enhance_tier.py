@@ -31,7 +31,7 @@ class TierTests(unittest.TestCase):
     def setUp(self):
         self.sent = []
 
-        async def fake_run(service, payload, wait_seconds, produces="image"):
+        async def fake_run(service, payload, wait_seconds, produces="image", **_kwargs):
             self.sent.append((service, dict(payload)))
             return {"success_bool": True, "task_id_string": "t1", "image_url_string": "u", "video_url_string": "v"}
 
