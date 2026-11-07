@@ -462,6 +462,21 @@ async def _build_snapshot() -> Dict[str, object]:
         summary["measured_bool"] = bool(durations.get(service_id))
         services[service_id] = summary
 
+    # Media edit (2026-11-07): which AI nodes run ffmpeg jobs and how many slots are free.
+    media_edit: Dict[str, object] = {}
+    try:
+        import media_edit_api
+
+        async with httpx.AsyncClient() as client:
+            media_edit = await media_edit_api.fleet_object(client)
+        per_node = media_edit.get("nodes_object") or {}
+        for node in nodes:
+            info = per_node.get(str(node.get("id") or "")) if isinstance(per_node, dict) else None
+            if isinstance(info, dict):
+                node["media_edit"] = {key: info.get(key) for key in (
+                    "capable", "parallel", "running", "pending", "free_slots", "nvenc")}
+    except Exception:
+        logger.exception("Could not read the media-edit capacity")
     online = [n for n in nodes if n.get("online")]
     busy = [n for n in online if n.get("busy")]
     queue = _queue_summary(list(render.get("tasks") or []),
@@ -489,6 +504,7 @@ async def _build_snapshot() -> Dict[str, object]:
         "capacity_object": capacity,
         "queue_object": queue,
         "tiers_object": _tiers_config(),
+        "media_edit_object": media_edit,
         "server_time_unix_int": int(time.time()),
         "snapshot_ttl_seconds_float": SNAPSHOT_TTL_SECONDS,
     }

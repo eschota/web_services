@@ -265,7 +265,9 @@ async def api_upscale2x_docs():
         "status_string": "ok", "method_string": "POST", "url_string": "/api/upscale2x",
         "required_fields_array": ["image_url (picture or clip) or image_base64 or video_url"],
         "model_string": UPSCALE_X2_MODEL, "factor_int": 2,
-        "note_string": "Output = input x2. A clip is enlarged frame by frame at 24 fps (up to 16 s).",
+        "note_string": ("Output = input x2. A clip is enlarged frame by frame at its own frame "
+                        "rate (up to 16.4 s and 393 frames: 13.1 s at 30 fps, 6.5 s at 60 fps) "
+                        "and keeps its original audio track unchanged."),
         "server_time_unix_int": int(time.time()),
     }
 

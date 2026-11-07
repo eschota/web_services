@@ -18,7 +18,8 @@ import socket
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from fractions import Fraction
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -89,6 +90,74 @@ def _validated_url(value: str) -> str:
     return url
 
 
+# A clip's own frame rate is accepted for Upscale 2x inside this range.
+MIN_SOURCE_FPS = 1
+MAX_SOURCE_FPS = 120
+
+
+def _parse_rate(value: Any) -> Optional[Fraction]:
+    text = str(value or "").strip()
+    if not text or text in {"0/0", "N/A"}:
+        return None
+    try:
+        rate = Fraction(text)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return rate if rate > 0 else None
+
+
+def rate_text(rate: Fraction) -> str:
+    """An ffmpeg rate argument: ``30`` or the exact ``30000/1001``."""
+    rate = Fraction(rate)
+    if rate.denominator == 1:
+        return str(rate.numerator)
+    return f"{rate.numerator}/{rate.denominator}"
+
+
+def source_frame_rate(stream: Dict[str, Any]) -> Fraction:
+    """The clip's frame rate as an exact rational (30000/1001 stays 30000/1001).
+
+    ``r_frame_rate`` is the nominal rate and is exact; it wins when it agrees
+    with the measured ``avg_frame_rate`` (within 0.5 %). A variable-rate phone
+    clip whose nominal rate is a timebase artefact (90000/1) falls back to the
+    measured average, rounded to a /1001 grid.
+    """
+    real = _parse_rate(stream.get("r_frame_rate"))
+    average = _parse_rate(stream.get("avg_frame_rate"))
+    if real and average and abs(real - average) <= average * Fraction(5, 1000):
+        rate = real
+    elif average:
+        rate = average.limit_denominator(1001)
+    elif real:
+        rate = real
+    else:
+        raise VideoInputError("cannot read the clip's frame rate")
+    if not (MIN_SOURCE_FPS <= rate <= MAX_SOURCE_FPS):
+        raise VideoInputError(
+            f"the clip's frame rate {float(rate):.3f} fps is outside "
+            f"{MIN_SOURCE_FPS}..{MAX_SOURCE_FPS} fps")
+    return rate
+
+
+def source_frame_count(stream: Dict[str, Any], format_duration: float, rate: Fraction) -> int:
+    """How many frames the clip has at ``rate``: its own count when the container says."""
+    try:
+        counted = int(stream.get("nb_frames") or 0)
+    except (TypeError, ValueError):
+        counted = 0
+    if counted > 0:
+        return counted
+    try:
+        duration = float(stream.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    duration = duration if duration > 0 else float(format_duration or 0)
+    if duration <= 0:
+        raise VideoInputError("control input has invalid duration")
+    # 1 ms of slack: 10.0 s at 30 fps is 300 frames, not 301.
+    return max(1, int(math.ceil(duration * float(rate) - 1e-3)))
+
+
 def _validated_frame_count(frame_count: int, fps: int) -> Tuple[int, int]:
     if isinstance(frame_count, bool) or not isinstance(frame_count, int):
         raise VideoInputError("frame_count must be an integer")
@@ -128,7 +197,7 @@ async def _probe(path: Path, *, count_frames: bool = False) -> Dict[str, Any]:
     argv = [
         FFPROBE_BIN,
         "-v", "error",
-        "-show_entries", "format=format_name,duration:format_tags=comment:stream=codec_type,codec_name,pix_fmt,width,height,nb_read_frames",
+        "-show_entries", "format=format_name,duration:format_tags=comment:stream=codec_type,codec_name,pix_fmt,width,height,nb_read_frames,nb_frames,avg_frame_rate,r_frame_rate,duration",
         "-of", "json",
     ]
     if count_frames:
@@ -369,6 +438,8 @@ async def download_prepare_video(
     *,
     allow_shorter: bool = False,
     keep_audio: bool = False,
+    source_fps: bool = False,
+    keep_source_at: Optional[Path] = None,
 ) -> Tuple[str, bytes]:
     """Download and normalize a trusted control video.
 
@@ -378,9 +449,16 @@ async def download_prepare_video(
     hold the final source frame when needed to satisfy the inclusive 8k+1 frame
     contract. Reference extraction may set ``allow_shorter`` to retain a real
     shorter duration without inventing repeated storyboard frames.
+
+    ``source_fps`` (Upscale 2x) keeps the clip's own frame rate instead of 24:
+    ``frame_count`` is then only the ceiling, the clip's real frame count is
+    used, and a clip with more frames than the ceiling is refused, never cut.
+    ``keep_source_at`` receives a copy of the downloaded original, so the
+    caller can mux its untouched audio back into the finished render.
     """
     admitted_url = _validated_url(url)
     frame_count, fps = _validated_frame_count(frame_count, fps)
+    rate = Fraction(fps)
     temp_root = (config.RENDER_DIR / ".video-input-temp").resolve()
     temp_root.mkdir(parents=True, exist_ok=True)
     work_dir = Path(tempfile.mkdtemp(prefix="control-", dir=temp_root)).resolve()
@@ -394,17 +472,27 @@ async def download_prepare_video(
     try:
         await _download(client, admitted_url, source)
         source_probe = await _probe(source)
-        _validate_source_probe(source_probe)
+        source_stream = _validate_source_probe(source_probe)
         source_duration = float((source_probe.get("format") or {}).get("duration") or 0)
         if keep_audio and source_duration > MAX_DURATION_SECONDS + 0.05:
             # An enlargement is the whole clip or nothing: never a silent trim.
             raise VideoInputError(
                 f"the clip is {source_duration:.1f} s; Upscale 2x takes clips up to "
                 f"{MAX_DURATION_SECONDS} s - split it first")
-        available_frames = max(1, int(math.floor(source_duration * fps + 1e-6)))
+        if source_fps:
+            rate = source_frame_rate(source_stream)
+            needed = source_frame_count(source_stream, source_duration, rate)
+            if needed > frame_count:
+                # Same rule as the duration cap: the whole clip or nothing.
+                raise VideoInputError(
+                    f"the clip has {needed} frames ({source_duration:.1f} s at "
+                    f"{float(rate):.3g} fps); Upscale 2x takes up to {frame_count} frames "
+                    f"({frame_count / float(rate):.1f} s at this frame rate) - split it first")
+            frame_count = needed
+        available_frames = max(1, int(math.floor(source_duration * float(rate) + 1e-6)))
         held_tail_frames = 0 if allow_shorter else max(0, frame_count - available_frames)
         video_filter = (
-            f"fps={fps},"
+            f"fps={rate_text(rate)},"
             "scale=w='min(2048,iw)':h='min(2048,ih)':"
             "force_original_aspect_ratio=decrease:force_divisible_by=2"
         )
@@ -412,7 +500,7 @@ async def download_prepare_video(
             # ``-frames:v`` cannot create an inclusive final frame. Hold the
             # actual last frame before applying that cap; never loop the clip.
             video_filter += (
-                f",tpad=stop_mode=clone:stop_duration={frame_count / fps:.6f}"
+                f",tpad=stop_mode=clone:stop_duration={frame_count / float(rate):.6f}"
             )
         comment = (
             f"AutoRig normalized control; held final frame {held_tail_frames} "
@@ -465,6 +553,12 @@ async def download_prepare_video(
             raise VideoInputError(
                 f"prepared reference video has invalid frame count {decoded_frames}"
             )
+        if keep_source_at is not None:
+            keep_source_at = Path(keep_source_at)
+            keep_source_at.parent.mkdir(parents=True, exist_ok=True)
+            part = keep_source_at.with_name(keep_source_at.name + ".part")
+            shutil.copyfile(source, part)
+            os.replace(part, keep_source_at)
         return filename, output.read_bytes()
     finally:
         # ``work_dir`` came from mkdtemp under ``temp_root`` and was checked
@@ -573,3 +667,182 @@ async def download_prepare_prefix(
         return filename, output.read_bytes()
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ------------------------------------------------------------- audio remux
+#
+# Upscale 2x (2026-11-07): ComfyUI's SaveVideo re-encodes the sound it was
+# handed (AAC mono, ~69 kbps). The finished render therefore gets the ORIGINAL
+# clip's first audio stream back, copied packet for packet, next to the
+# rendered picture (also copied).
+
+# Audio codecs ffmpeg muxes into MP4 by stream copy and browsers play.
+MP4_COPYABLE_AUDIO = frozenset({"aac", "mp3", "ac3", "eac3", "alac", "opus"})
+FALLBACK_AUDIO_BITRATE = 320_000
+REMUX_TIMEOUT_SECONDS = 300.0
+
+
+async def probe_media(path: Path) -> Dict[str, Any]:
+    """ffprobe JSON with what a remux and ``output_meta`` need."""
+    raw = await _run_process(
+        FFPROBE_BIN, "-v", "error",
+        "-show_entries",
+        "format=format_name,duration,bit_rate:stream=index,codec_type,codec_name,"
+        "width,height,avg_frame_rate,r_frame_rate,duration,nb_frames,channels,"
+        "channel_layout,sample_rate,bit_rate",
+        "-of", "json", str(path))
+    try:
+        result = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise VideoInputError("ffprobe returned invalid JSON") from exc
+    if not isinstance(result, dict):
+        raise VideoInputError("ffprobe returned a non-object result")
+    return result
+
+
+def _first_stream(probe: Dict[str, Any], kind: str) -> Optional[Dict[str, Any]]:
+    for row in probe.get("streams") or []:
+        if isinstance(row, dict) and row.get("codec_type") == kind:
+            return row
+    return None
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def audio_meta(stream: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """``{codec, channels, sample_rate, bit_rate}`` of an audio stream, or None."""
+    if not stream:
+        return None
+    return {
+        "codec": str(stream.get("codec_name") or "") or None,
+        "channels": _int_or_none(stream.get("channels")),
+        "sample_rate": _int_or_none(stream.get("sample_rate")),
+        "bit_rate": _int_or_none(stream.get("bit_rate")),
+    }
+
+
+def _video_duration(video: Dict[str, Any], probe: Dict[str, Any]) -> float:
+    try:
+        seconds = float(video.get("duration") or 0)
+    except (TypeError, ValueError):
+        seconds = 0.0
+    if seconds > 0:
+        return seconds
+    frames = _int_or_none(video.get("nb_frames"))
+    rate = _parse_rate(video.get("avg_frame_rate")) or _parse_rate(video.get("r_frame_rate"))
+    if frames and rate:
+        return float(frames / rate)
+    try:
+        return max(0.0, float((probe.get("format") or {}).get("duration") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def media_meta(probe: Dict[str, Any]) -> Dict[str, Any]:
+    """``{w, h, fps, fps_string, duration, audio}`` of a finished clip."""
+    video = _first_stream(probe, "video")
+    if video is None:
+        raise VideoInputError("the finished clip has no video stream")
+    rate = _parse_rate(video.get("avg_frame_rate")) or _parse_rate(video.get("r_frame_rate"))
+    return {
+        "w": _int_or_none(video.get("width")),
+        "h": _int_or_none(video.get("height")),
+        "fps": round(float(rate), 3) if rate else None,
+        "fps_string": rate_text(rate) if rate else "",
+        "duration": round(_video_duration(video, probe), 3),
+        "audio": audio_meta(_first_stream(probe, "audio")),
+    }
+
+
+def build_remux_command(
+    rendered: Path,
+    source: Path,
+    output: Path,
+    *,
+    source_audio: Optional[Dict[str, Any]],
+    duration: float,
+    force_reencode: bool = False,
+) -> Tuple[List[str], str]:
+    """The ffmpeg argv and the audio mode: ``none``, ``copy`` or ``aac``.
+
+    Picture: the rendered video stream, copied. Sound: the source's first
+    audio stream, copied when MP4 takes the codec as is, otherwise AAC at the
+    source's channels and sample rate. Cut to the rendered picture's length.
+    """
+    argv: List[str] = [
+        FFMPEG_BIN, "-v", "error", "-y",
+        "-i", str(rendered),
+        "-i", str(source),
+        "-map", "0:v:0",
+        "-c:v", "copy",
+    ]
+    if not source_audio:
+        mode = "none"
+        argv += ["-an"]
+    else:
+        codec = str(source_audio.get("codec") or "").lower()
+        if codec in MP4_COPYABLE_AUDIO and not force_reencode:
+            mode = "copy"
+            argv += ["-map", "1:a:0?", "-c:a", "copy"]
+        else:
+            mode = "aac"
+            bit_rate = source_audio.get("bit_rate") or FALLBACK_AUDIO_BITRATE
+            bit_rate = min(int(bit_rate), FALLBACK_AUDIO_BITRATE)
+            argv += ["-map", "1:a:0?", "-c:a", "aac", "-b:a", str(bit_rate)]
+            if source_audio.get("channels"):
+                argv += ["-ac", str(int(source_audio["channels"]))]
+            if source_audio.get("sample_rate"):
+                argv += ["-ar", str(int(source_audio["sample_rate"]))]
+    if duration > 0:
+        argv += ["-t", f"{duration:.6f}"]
+    argv += ["-movflags", "+faststart", "-f", "mp4", str(output)]
+    return argv, mode
+
+
+_AUDIO_SOURCE = {"none": "none", "copy": "original", "aac": "original_reencoded_aac"}
+
+
+async def remux_source_audio(rendered: Path, source: Path, output: Path) -> Dict[str, Any]:
+    """Write ``output``: the rendered picture with the source clip's own sound.
+
+    Returns ``output_meta`` for the finished clip: ``{w, h, fps, fps_string,
+    duration, audio, audio_source}`` plus ``audio_note`` when the sound had to
+    be re-encoded. A source without sound gives a clip without sound.
+    """
+    rendered_probe = await probe_media(rendered)
+    video = _first_stream(rendered_probe, "video")
+    if video is None:
+        raise VideoInputError("the rendered clip has no video stream")
+    duration = _video_duration(video, rendered_probe)
+    source_audio = audio_meta(_first_stream(await probe_media(source), "audio"))
+    argv, mode = build_remux_command(
+        rendered, source, output, source_audio=source_audio, duration=duration)
+    note = ""
+    try:
+        await _run_process(*argv, timeout=REMUX_TIMEOUT_SECONDS)
+    except VideoInputError as exc:
+        if mode != "copy":
+            raise
+        # The codec name looked copyable but the muxer refused this stream.
+        argv, mode = build_remux_command(
+            rendered, source, output, source_audio=source_audio, duration=duration,
+            force_reencode=True)
+        note = f"stream copy refused ({str(exc)[-200:]}); "
+        await _run_process(*argv, timeout=REMUX_TIMEOUT_SECONDS)
+    meta = media_meta(await probe_media(output))
+    meta["audio_source"] = _AUDIO_SOURCE[mode]
+    if mode == "aac":
+        bit_rate = min(int(source_audio.get("bit_rate") or FALLBACK_AUDIO_BITRATE),
+                       FALLBACK_AUDIO_BITRATE)
+        meta["audio_note"] = (
+            f"{note}source audio {source_audio.get('codec') or 'unknown'} cannot be copied "
+            f"into MP4; re-encoded to AAC {bit_rate // 1000} kbps keeping "
+            f"{source_audio.get('channels') or '?'} channel(s) at "
+            f"{source_audio.get('sample_rate') or '?'} Hz")
+    return meta

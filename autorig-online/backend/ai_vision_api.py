@@ -36,6 +36,10 @@ router = APIRouter()
 async def api_render_task_status(task_id: str):
     """Actual queue state and assigned worker, independent of output-file timing."""
     import re
+    if str(task_id).startswith("me."):
+        # Media edit (2026-11-07): ffmpeg jobs on the ai-nodes, ids "me.<node>.<id>" (media_edit_api).
+        import media_edit_api
+        return await media_edit_api.status_response(task_id)
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", task_id):
         raise HTTPException(status_code=400, detail="Invalid render task id")
     async with httpx.AsyncClient() as client:
@@ -69,7 +73,9 @@ async def api_render_task_status(task_id: str):
             "restart_resumes_int": int(row.get("restart_resumes_int") or 0),
             "notice_string": str(row.get("notice_string") or ""),
             # Scheduling tier (2026-11-06): mplus > autorig > generation > background.
-            "tier_string": str(row.get("tier_string") or "")}
+            "tier_string": str(row.get("tier_string") or ""),
+            # What the delivered file is (upscale2x video, 2026-11-07): {w,h,fps,duration,audio}; {} if unknown.
+            "output_meta": row.get("output_meta") if isinstance(row.get("output_meta"), dict) else {}}
     try:
         import user_language
         if result["notice_string"] and not result["finished_bool"]:

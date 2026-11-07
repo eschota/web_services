@@ -54,7 +54,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional, Tuple
 
-VERSION = "ai-node-20261107-reload"
+VERSION = "ai-node-20261107-media-edit"
 API_PREFIX = "/api-converter-glb"
 WORKLOAD_AI_VISION = "ai_vision"
 
@@ -213,6 +213,20 @@ DEFAULT_CONFIG: Dict[str, object] = {
     "request_timeout_seconds": DEFAULT_REQUEST_TIMEOUT_SECONDS,
     "task_retention_seconds": 6 * 3600,
     "allow_private_image_urls": False,
+    # Media edit (2026-11-07, M+ similars on Renderfin): ffmpeg jobs next to the model, CPU + NVENC only (no model
+    # lock, no VRAM check). Offered only after the startup selftest (2 s synthetic clip) passed.
+    "media_edit_enabled": True,
+    "media_edit_parallel": 2,
+    "media_edit_max_tasks": 16,
+    "ffmpeg_exe": "",                     # empty = %LOCALAPPDATA%\Freestock\tools\bin\ffmpeg.exe, then PATH
+    "ffprobe_exe": "",                    # empty = next to ffmpeg, then PATH, else `ffmpeg -i` is parsed
+    "media_edit_work_dir": "media-edit-work",
+    "media_edit_timeout_seconds": 2 * 3600,
+    "media_edit_max_source_bytes": 4 * 1024 ** 3,
+    "media_edit_output_keep_seconds": 6 * 3600,
+    "media_edit_nvenc": True,
+    "media_edit_selftest_on_start": True,
+    "media_edit_allow_private_urls": False,   # test only
     "log_file": "ai-node.log",
     "log_level": "INFO",
 }
@@ -310,6 +324,21 @@ class Config:
         self.request_timeout_seconds = int(merged["request_timeout_seconds"])
         self.task_retention_seconds = int(merged["task_retention_seconds"])
         self.allow_private_image_urls = bool(merged["allow_private_image_urls"])
+        self.media_edit_enabled = bool(merged.get("media_edit_enabled", True))
+        self.media_edit_parallel = max(1, min(8, int(merged.get("media_edit_parallel") or 2)))
+        self.media_edit_max_tasks = max(self.media_edit_parallel, int(merged.get("media_edit_max_tasks") or 16))
+        self.ffmpeg_exe = self._path(merged["ffmpeg_exe"]) if merged.get("ffmpeg_exe") else ""
+        self.ffprobe_exe = self._path(merged["ffprobe_exe"]) if merged.get("ffprobe_exe") else ""
+        self.media_edit_work_dir = self._path(merged.get("media_edit_work_dir") or "media-edit-work")
+        self.media_edit_timeout_seconds = max(60.0, float(merged.get("media_edit_timeout_seconds")
+                                                          or MEDIA_EDIT_TIMEOUT_SECONDS))
+        self.media_edit_max_source_bytes = max(1, int(merged.get("media_edit_max_source_bytes")
+                                                      or MEDIA_EDIT_MAX_SOURCE_BYTES))
+        self.media_edit_output_keep_seconds = max(60.0, float(merged.get("media_edit_output_keep_seconds")
+                                                              or 6 * 3600))
+        self.media_edit_nvenc = bool(merged.get("media_edit_nvenc", True))
+        self.media_edit_selftest_on_start = bool(merged.get("media_edit_selftest_on_start", True))
+        self.media_edit_allow_private_urls = bool(merged.get("media_edit_allow_private_urls"))
         self.log_file = self._path(merged["log_file"]) if merged.get("log_file") else ""
         self.log_level = str(merged.get("log_level") or "INFO").upper()
 
@@ -1338,6 +1367,1265 @@ class AiTask:
         }
 
 
+# ----------------------------------------------------------------- media edit
+# M+ "similars" (flip / rotate / crop / vertical smart crop / speed / frame) on the farm (2026-11-07, design
+# "Симиляры и апскейл M+ на Renderfin", phase B). The ffmpeg logic is a port of Freestock's media-edit executor
+# (freestock_task_queue_plugin/manager.py: _raster_filters ~L6611, _video_filters ~L7026, smart crop ~L6953,
+# encoders ~L7908, _execute_video_task ~L8018, cut frame ~L7142). ffmpeg is CPU work (plus NVENC): it never takes
+# the model lock, runs next to llama-server, at most `media_edit_parallel` at a time.
+WORKLOAD_MEDIA_EDIT = "media_edit"
+MEDIA_EDIT_MAX_SOURCE_BYTES = 4 * 1024 ** 3
+MEDIA_EDIT_TIMEOUT_SECONDS = 2 * 3600
+MEDIA_EDIT_MAX_BODY_BYTES = 256 * 1024
+MEDIA_EDIT_MAX_ANCHORS = 240
+MEDIA_EDIT_MAX_SIDE = 16384
+# Freestock VIDEO_MINTERPOLATE_MAX_SOURCE_BYTES_INT: motion interpolation only for sources up to this size.
+MINTERPOLATE_MAX_SOURCE_BYTES = 512 * 1024 * 1024
+IMAGE_CONTAINERS = ("jpg", "png")
+VIDEO_CONTAINERS = ("mp4", "mov")
+MEDIA_EDIT_TIER_RANK = {"mplus": 0, "autorig": 1}
+# Freestock _ffmpeg_error_is_legacy_h264_nvenc_fallback, plus the session-limit / init errors of consumer cards.
+NVENC_FALLBACK_MARKERS = (
+    "10 bit encode not supported",
+    "No capable devices found",
+    "No NVENC capable devices found",
+    "Cannot load nvcuda.dll",
+    "Driver does not support the required nvenc API version.",
+    "Cannot load libcuda.so",
+    "Unrecognized option 'rc:v'",
+    "Error splitting the argument list: Option not found",
+    "Unknown encoder 'h264_nvenc'",
+    "Frame Dimension less than the minimum supported value.",
+    "OpenEncodeSessionEx failed",
+    "InitializeEncoder failed",
+    "Error while opening encoder",
+)
+CONTENT_TYPES = {"jpg": "image/jpeg", "png": "image/png", "mp4": "video/mp4", "mov": "video/quicktime"}
+
+
+class MediaCancelled(NodeError):
+    """The backend cancelled the task (or the node is shutting down)."""
+
+
+def _finite(value: object, name: str) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise RequestError(f"{name} must be a number") from None
+    if number != number or number in (float("inf"), float("-inf")):
+        raise RequestError(f"{name} must be finite")
+    return number
+
+
+def _int_field(source: Dict[str, object], key: str, name: str, low: int, high: int) -> int:
+    if key not in source:
+        raise RequestError(f"{name}.{key} is required")
+    value = _finite(source.get(key), f"{name}.{key}")
+    if value != int(value):
+        raise RequestError(f"{name}.{key} must be a whole number")
+    value = int(value)
+    if value < low or value > high:
+        raise RequestError(f"{name}.{key} must be between {low} and {high}")
+    return value
+
+
+def parse_media_edit_request(payload: object) -> Dict[str, object]:
+    """Validate a media-edit request (contract: backend /api/media-edit) into a normalized spec.
+
+    The backend validates the same contract before it calls a node; the node checks again because it is the
+    one running ffmpeg on what it is told.
+    """
+    if not isinstance(payload, dict):
+        raise RequestError("JSON object required")
+    source_url = str(payload.get("source_url") or "").strip()
+    if not source_url:
+        raise RequestError("source_url is required")
+    if len(source_url) > 4096:
+        raise RequestError("source_url is too long")
+    kind = str(payload.get("media_kind") or "").strip().lower()
+    if kind not in ("image", "video"):
+        raise RequestError("media_kind must be image or video")
+    op = payload.get("operation") or {}
+    if not isinstance(op, dict):
+        raise RequestError("operation must be an object")
+    known = {"crop", "scale", "rotate_rad", "rotation_relative_to", "hflip", "vflip", "speed",
+             "cut_frame_at_seconds", "smartcrop"}
+    unknown = sorted(set(op) - known)
+    if unknown:
+        raise RequestError(f"operation has unknown fields: {', '.join(unknown)}")
+    spec: Dict[str, object] = {"source_url": source_url, "media_kind": kind}
+
+    crop = op.get("crop")
+    if crop is not None:
+        if not isinstance(crop, dict):
+            raise RequestError("operation.crop must be an object {w,h,x,y}")
+        spec["crop"] = {"w": _int_field(crop, "w", "crop", 2, MEDIA_EDIT_MAX_SIDE),
+                        "h": _int_field(crop, "h", "crop", 2, MEDIA_EDIT_MAX_SIDE),
+                        "x": _int_field(crop, "x", "crop", 0, MEDIA_EDIT_MAX_SIDE) if "x" in crop else 0,
+                        "y": _int_field(crop, "y", "crop", 0, MEDIA_EDIT_MAX_SIDE) if "y" in crop else 0}
+    scale = op.get("scale")
+    if scale is not None:
+        if not isinstance(scale, dict):
+            raise RequestError("operation.scale must be an object {w,h}")
+        spec["scale"] = {"w": _int_field(scale, "w", "scale", 2, MEDIA_EDIT_MAX_SIDE),
+                         "h": _int_field(scale, "h", "scale", 2, MEDIA_EDIT_MAX_SIDE)}
+    rotate = op.get("rotate_rad")
+    if rotate is not None:
+        rotate = _finite(rotate, "operation.rotate_rad")
+        if abs(rotate) > 2 * 3.141592653589793 + 1e-6:
+            raise RequestError("operation.rotate_rad is in radians (|value| <= 2*pi)")
+        spec["rotate_rad"] = rotate
+    relative = str(op.get("rotation_relative_to") or "display").strip().lower()
+    if relative not in ("display", "stored"):
+        raise RequestError("operation.rotation_relative_to must be display or stored")
+    spec["rotation_relative_to"] = relative
+    for flag in ("hflip", "vflip"):
+        value = op.get(flag, False)
+        if not isinstance(value, bool):
+            raise RequestError(f"operation.{flag} must be true or false")
+        spec[flag] = value
+
+    speed = op.get("speed")
+    spec["speed"], spec["interpolate"] = 1.0, False
+    if speed is not None:
+        if kind != "video":
+            raise RequestError("operation.speed is for video")
+        if not isinstance(speed, dict):
+            raise RequestError("operation.speed must be an object {factor, interpolate}")
+        factor = _finite(speed.get("factor", 1.0), "operation.speed.factor")
+        if factor < 0.1 or factor > 8.0:
+            raise RequestError("operation.speed.factor must be between 0.1 and 8")
+        interpolate = speed.get("interpolate", False)
+        if not isinstance(interpolate, bool):
+            raise RequestError("operation.speed.interpolate must be true or false")
+        spec["speed"], spec["interpolate"] = factor, interpolate
+
+    cut = op.get("cut_frame_at_seconds")
+    spec["cut_frame_at"] = None
+    if cut is not None:
+        if kind != "video":
+            raise RequestError("operation.cut_frame_at_seconds is for video")
+        cut = _finite(cut, "operation.cut_frame_at_seconds")
+        if cut < 0 or cut > 86400:
+            raise RequestError("operation.cut_frame_at_seconds must be between 0 and 86400")
+        spec["cut_frame_at"] = cut
+
+    smart = op.get("smartcrop")
+    if smart is not None:
+        if not isinstance(smart, dict):
+            raise RequestError("operation.smartcrop must be an object")
+        if "crop" in spec:
+            raise RequestError("operation.crop and operation.smartcrop exclude each other")
+        mode = str(smart.get("mode") or "anchor_camera").strip().lower()
+        if mode not in ("anchor_camera", "center"):
+            raise RequestError("operation.smartcrop.mode must be anchor_camera or center")
+        aspect = _finite(smart.get("target_aspect", 9.0 / 16.0), "operation.smartcrop.target_aspect")
+        if aspect < 0.1 or aspect > 10:
+            raise RequestError("operation.smartcrop.target_aspect must be between 0.1 and 10 (w/h)")
+        units = str(smart.get("units") or "norm").strip().lower()
+        if units not in ("norm", "px"):
+            raise RequestError("operation.smartcrop.units must be norm or px")
+        anchors_raw = smart.get("anchors") or []
+        if not isinstance(anchors_raw, list):
+            raise RequestError("operation.smartcrop.anchors must be a list")
+        if len(anchors_raw) > MEDIA_EDIT_MAX_ANCHORS:
+            raise RequestError(f"operation.smartcrop.anchors: at most {MEDIA_EDIT_MAX_ANCHORS}")
+        anchors: List[Tuple[float, float, float]] = []
+        if mode == "anchor_camera":
+            for index, anchor in enumerate(anchors_raw):
+                if not isinstance(anchor, dict):
+                    raise RequestError(f"operation.smartcrop.anchors[{index}] must be an object {{t,x,y}}")
+                t = _finite(anchor.get("t", 0.0), f"anchors[{index}].t")
+                x = _finite(anchor.get("x"), f"anchors[{index}].x")
+                y = _finite(anchor.get("y"), f"anchors[{index}].y")
+                if t < 0:
+                    raise RequestError(f"anchors[{index}].t must be >= 0")
+                if units == "norm" and not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+                    raise RequestError(f"anchors[{index}]: x and y are 0..1 of the frame (units=norm)")
+                if units == "px" and (x < 0 or y < 0):
+                    raise RequestError(f"anchors[{index}]: x and y must be >= 0")
+                anchors.append((t, x, y))
+            anchors.sort(key=lambda item: item[0])
+        spec["smartcrop"] = {"target_aspect": aspect, "units": units, "anchors": anchors}
+
+    output = payload.get("output") or {}
+    if not isinstance(output, dict):
+        raise RequestError("output must be an object")
+    container = str(output.get("container") or "auto").strip().lower()
+    container = {"jpeg": "jpg"}.get(container, container)
+    codec = str(output.get("codec") or "auto").strip().lower()
+    keep_audio = output.get("keep_audio", False)
+    if not isinstance(keep_audio, bool):
+        raise RequestError("output.keep_audio must be true or false")
+    if codec not in ("auto", "h264", "prores"):
+        raise RequestError("output.codec must be auto, h264 or prores")
+    still = kind == "image" or spec["cut_frame_at"] is not None
+    if still:
+        if container not in ("auto",) + IMAGE_CONTAINERS:
+            raise RequestError("output.container for a picture must be jpg or png")
+        if codec != "auto":
+            raise RequestError("output.codec is for video output")
+    else:
+        if container not in ("auto",) + VIDEO_CONTAINERS:
+            raise RequestError("output.container for video must be mp4 or mov (jpg/png need cut_frame_at_seconds)")
+        if codec == "prores" and container == "mp4":
+            raise RequestError("ProRes goes into mov")
+    spec.update(container=container, codec=codec, keep_audio=bool(keep_audio) and not still,
+                client_ref=str(payload.get("client_ref") or "")[:200],
+                tier=str(payload.get("tier") or "").strip().lower()[:32],
+                backend_task_id=str(payload.get("backend_task_id") or "")[:120])
+    return spec
+
+
+def validate_media_source_url(url: str, *, allow_private: bool = False) -> None:
+    """https only (any public host); the SSRF guard of the image path for the rest."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme.lower() != "https" and not allow_private:
+        raise RequestError("source_url must be https")
+    try:
+        validate_public_image_url(url, allow_private=allow_private)
+    except RequestError as exc:
+        raise RequestError(str(exc).replace("image_url", "source_url")) from None
+
+
+class _MediaRedirect(urllib.request.HTTPRedirectHandler):
+    def __init__(self, allow_private: bool):
+        super().__init__()
+        self.allow_private = allow_private
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        validate_media_source_url(newurl, allow_private=self.allow_private)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _source_suffix(url: str, content_type: str) -> str:
+    path = urllib.parse.urlparse(url).path.lower()
+    for ext in (".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".jpg", ".jpeg", ".png", ".webp", ".tif",
+                ".tiff", ".bmp", ".gif"):
+        if path.endswith(ext):
+            return ext
+    by_type = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "image/jpeg": ".jpg",
+               "image/png": ".png", "image/webp": ".webp", "image/tiff": ".tif", "video/x-matroska": ".mkv"}
+    return by_type.get(content_type, ".bin")
+
+
+def download_media_source(url: str, work_dir: str, *, max_bytes: int, cancel: threading.Event,
+                          deadline: float, on_progress: Optional[Callable[[float], None]] = None,
+                          allow_private: bool = False) -> Tuple[str, int]:
+    """Stream the source to work_dir/source.<ext>; (path, bytes). Never logs the URL (it may carry a key)."""
+    try:
+        validate_media_source_url(url, allow_private=allow_private)
+    except RequestError as exc:
+        raise NodeError(f"source_download_failed: {exc}") from None
+    opener = urllib.request.build_opener(_MediaRedirect(allow_private))
+    request_obj = urllib.request.Request(url, headers={"User-Agent": "AutoRig-MediaEdit/1"})
+    try:
+        response = opener.open(request_obj, timeout=120)
+    except (urllib.error.URLError, OSError, RequestError, ValueError) as exc:
+        code = getattr(exc, "code", "")
+        raise NodeError(f"source_download_failed: {('HTTP %s' % code) if code else exc}") from None
+    with response:
+        content_type = (response.headers.get_content_type() or "").strip().lower()
+        try:
+            total = int(response.headers.get("Content-Length") or 0)
+        except ValueError:
+            total = 0
+        if total > max_bytes:
+            raise NodeError(f"source_too_large: {total} bytes > {max_bytes}")
+        path = os.path.join(work_dir, "source" + _source_suffix(url, content_type))
+        done = 0
+        with open(path, "wb") as handle:
+            while True:
+                if cancel.is_set():
+                    raise MediaCancelled("cancelled")
+                if time.time() > deadline:
+                    raise NodeError("timeout: the source download took too long")
+                try:
+                    chunk = response.read(1024 * 1024)
+                except (OSError, ValueError) as exc:
+                    raise NodeError(f"source_download_failed: {exc}") from None
+                if not chunk:
+                    break
+                done += len(chunk)
+                if done > max_bytes:
+                    raise NodeError(f"source_too_large: more than {max_bytes} bytes")
+                handle.write(chunk)
+                if on_progress and total:
+                    on_progress(min(1.0, done / total))
+    if done == 0:
+        raise NodeError("source_download_empty")
+    if total and done < total:
+        raise NodeError(f"source_download_failed: got {done} of {total} bytes")
+    return path, done
+
+
+# ---- ffmpeg discovery and probing
+def find_ffmpeg(configured: str = "", configured_probe: str = "") -> Tuple[str, str]:
+    """(ffmpeg, ffprobe or ''): config, the Freestock node's bundled ffmpeg, then PATH."""
+    import glob
+    import shutil
+    exe = ".exe" if IS_WINDOWS else ""
+    def candidates():
+        if configured:
+            yield configured
+            return
+        local = os.environ.get("LOCALAPPDATA") or ""
+        roots = [os.path.join(local, "Freestock")] if local else []
+        if IS_WINDOWS:
+            roots += [r for r in sorted(glob.glob(r"C:\Users\*\AppData\Local\Freestock")) if r not in roots]
+        for root in roots:
+            yield os.path.join(root, "tools", "bin", "ffmpeg" + exe)
+        yield shutil.which("ffmpeg") or ""
+        for root in roots:      # a deeper bundle, searched only when nothing above exists
+            yield from sorted(glob.glob(os.path.join(root, "WEBSERVER", "**", "ffmpeg" + exe), recursive=True))
+
+    ffmpeg = next((c for c in candidates() if c and os.path.isfile(c)), "")
+    probe = ""
+    if configured_probe and os.path.isfile(configured_probe):
+        probe = configured_probe
+    elif ffmpeg:
+        sibling = os.path.join(os.path.dirname(ffmpeg), "ffprobe" + exe)
+        probe = sibling if os.path.isfile(sibling) else (shutil.which("ffprobe") or "")
+    return ffmpeg, probe
+
+
+def _rate(value: object) -> float:
+    text = str(value or "").strip()
+    if "/" in text:
+        num, _, den = text.partition("/")
+        try:
+            return 0.0 if float(den) == 0 else float(num) / float(den)
+        except ValueError:
+            return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def _probe_from_ffprobe(data: Dict[str, object]) -> Dict[str, object]:
+    streams = [s for s in (data.get("streams") or []) if isinstance(s, dict)]
+    fmt = data.get("format") if isinstance(data.get("format"), dict) else {}
+    video = next((s for s in streams if str(s.get("codec_type")) == "video"), {})
+    audio = next((s for s in streams if str(s.get("codec_type")) == "audio"), {})
+    # Freestock _source_rotation_radians_from_probe_payload: side data rotations summed, else the rotate tag.
+    rotation = None
+    for side in video.get("side_data_list") or []:
+        if isinstance(side, dict) and "rotation" in side:
+            try:
+                rotation = (rotation or 0.0) + float(side["rotation"])
+            except (TypeError, ValueError):
+                pass
+    if rotation is None:
+        for tags in (video.get("tags"), fmt.get("tags")):
+            if isinstance(tags, dict) and "rotate" in tags:
+                try:
+                    rotation = float(tags["rotate"])
+                except (TypeError, ValueError):
+                    pass
+                break
+    duration = 0.0
+    for value in (video.get("duration"), fmt.get("duration")):
+        try:
+            duration = float(value or 0)
+        except (TypeError, ValueError):
+            duration = 0.0
+        if duration > 0:
+            break
+    bit_rate = ""
+    for value in (video.get("bit_rate"),):
+        try:
+            if float(value or 0) > 0:
+                bit_rate = str(int(float(value)))
+        except (TypeError, ValueError):
+            pass
+    fps = _rate(video.get("avg_frame_rate")) or _rate(video.get("r_frame_rate"))
+    return {
+        "codec": str(video.get("codec_name") or "").lower(),
+        "codec_tag": str(video.get("codec_tag_string") or "").lower(),
+        "pix_fmt": str(video.get("pix_fmt") or ""),
+        "width": int(video.get("width") or 0),
+        "height": int(video.get("height") or 0),
+        "fps": round(fps, 4),
+        "duration": duration,
+        "bit_rate": bit_rate,
+        "rotation_deg": float(rotation or 0.0),
+        "has_video": bool(video),
+        "has_audio": bool(audio),
+        "audio_codec": str(audio.get("codec_name") or ""),
+        "format_name": str(fmt.get("format_name") or ""),
+    }
+
+
+def _probe_from_banner(text: str) -> Dict[str, object]:
+    """`ffmpeg -i` output for a box without ffprobe (Freestock's bundle ships only ffmpeg.exe)."""
+    info: Dict[str, object] = {"codec": "", "codec_tag": "", "pix_fmt": "", "width": 0, "height": 0, "fps": 0.0,
+                               "duration": 0.0, "bit_rate": "", "rotation_deg": 0.0, "has_video": False,
+                               "has_audio": False, "audio_codec": "", "format_name": ""}
+    match = re.search(r"Input #0, ([^,]+(?:,[^,\s]+)*), from", text)
+    if match:
+        info["format_name"] = match.group(1).strip()
+    match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", text)
+    if match:
+        info["duration"] = int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
+    for line in text.splitlines():
+        if "Video:" in line and not info["has_video"]:
+            info["has_video"] = True
+            rest = line.split("Video:", 1)[1].strip()
+            info["codec"] = rest.split()[0].strip(",").lower() if rest else ""
+            tag = re.search(r"\(([0-9A-Za-z]{4}) / 0x[0-9A-Fa-f]+\)", rest)
+            if tag:
+                info["codec_tag"] = tag.group(1).lower()
+            size = re.search(r"\b(\d{2,5})x(\d{2,5})\b", rest)
+            if size:
+                info["width"], info["height"] = int(size.group(1)), int(size.group(2))
+            pix = re.search(r"\b(yuv\w+|rgb\w+|bgr\w+|gray\w*|nv12|p010\w*)\b", rest)
+            if pix:
+                info["pix_fmt"] = pix.group(1)
+            fps = re.search(r"([\d.]+) fps", rest)
+            if fps:
+                info["fps"] = float(fps.group(1))
+            rate = re.search(r"(\d+) kb/s", rest)
+            if rate:
+                info["bit_rate"] = str(int(rate.group(1)) * 1000)
+        elif "Audio:" in line and not info["has_audio"]:
+            info["has_audio"] = True
+            rest = line.split("Audio:", 1)[1].strip()
+            info["audio_codec"] = rest.split()[0].strip(",").lower() if rest else ""
+        rot = re.search(r"rotation of (-?[\d.]+) degrees", line)
+        if rot:
+            info["rotation_deg"] = float(rot.group(1))
+    return info
+
+
+def probe_media(ffmpeg: str, ffprobe: str, path: str) -> Dict[str, object]:
+    if ffprobe:
+        try:
+            done = subprocess.run([ffprobe, "-hide_banner", "-v", "quiet", "-print_format", "json",
+                                   "-show_streams", "-show_format", path], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=60, creationflags=CREATE_NO_WINDOW)
+            if done.returncode == 0:
+                data = json.loads(done.stdout or "{}")
+                if isinstance(data, dict):
+                    return _probe_from_ffprobe(data)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    try:
+        done = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", path], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=60, creationflags=CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise NodeError(f"probe_failed: {exc}") from None
+    return _probe_from_banner(done.stderr or "")
+
+
+def display_size(info: Dict[str, object]) -> Tuple[int, int]:
+    """The frame size the filters see: ffmpeg autorotates, so a quarter-turn source swaps its sides."""
+    width, height = int(info.get("width") or 0), int(info.get("height") or 0)
+    if round(abs(float(info.get("rotation_deg") or 0.0))) % 180 == 90:
+        return height, width
+    return width, height
+
+
+# ---- filters (Freestock port)
+def _fmt(value: float) -> str:
+    """Freestock _smartcrop_fmt_float."""
+    if abs(value - round(value)) < 0.000001:
+        return str(int(round(value)))
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def _smartcrop_rect(width: int, height: int, aspect: float, center: Optional[Tuple[float, float]]) -> Dict[str, float]:
+    """Freestock _smartcrop_rect: the largest target-aspect window, centred on the subject, inside the frame."""
+    source_aspect = float(width) / float(height)
+    cx = center[0] if center else width / 2.0
+    cy = center[1] if center else height / 2.0
+    if source_aspect >= aspect:
+        h = float(height)
+        w = min(float(width), h * aspect)
+        return {"x": min(max(cx - w / 2.0, 0.0), max(0.0, width - w)), "y": 0.0, "w": w, "h": h}
+    w = float(width)
+    h = min(float(height), w / aspect)
+    return {"x": 0.0, "y": min(max(cy - h / 2.0, 0.0), max(0.0, height - h)), "w": w, "h": h}
+
+
+def _smooth_segment(v0: float, v1: float, t0: float, t1: float) -> str:
+    """Freestock _smartcrop_smooth_expr between two anchors: smoothstep from v0 at t0 to v1 at t1."""
+    delta = v1 - v0
+    if abs(delta) < 0.000001:
+        return _fmt(v0)
+    span = max(0.001, t1 - t0)
+    p = f"min(max((t-{_fmt(t0)})/{_fmt(span)}\\,0)\\,1)"
+    return f"{_fmt(v0)}+{_fmt(delta)}*({p}*{p}*(3-2*{p}))"
+
+
+def _piecewise(points: List[Tuple[float, float]]) -> str:
+    if not points:
+        return "0"
+    if len(points) == 1 or all(abs(v - points[0][1]) < 0.000001 for _, v in points):
+        return _fmt(points[0][1])
+    expr = _fmt(points[-1][1])
+    for index in range(len(points) - 2, -1, -1):
+        t0, v0 = points[index]
+        t1, v1 = points[index + 1]
+        expr = f"if(lt(t\\,{_fmt(t1)})\\,{_smooth_segment(v0, v1, t0, t1)}\\,{expr})"
+    return expr
+
+
+def smartcrop_rects(smart: Dict[str, object], width: int, height: int) -> List[Tuple[float, Dict[str, float]]]:
+    """(t, rect) per anchor in source pixels; one centred rect when there are no anchors."""
+    aspect = float(smart.get("target_aspect") or 9.0 / 16.0)
+    anchors = list(smart.get("anchors") or [])
+    if not anchors:
+        return [(0.0, _smartcrop_rect(width, height, aspect, None))]
+    norm = str(smart.get("units") or "norm") == "norm"
+    rects = []
+    for t, x, y in anchors:
+        center = (x * width, y * height) if norm else (min(float(x), width), min(float(y), height))
+        rects.append((float(t), _smartcrop_rect(width, height, aspect, center)))
+    return rects
+
+
+def smartcrop_filter(smart: Dict[str, object], width: int, height: int, at: Optional[float] = None) -> str:
+    """crop=w:h:x(t):y(t). Freestock eased between two Detectron anchors (start/end); here between any number
+    the caller computed, in the source timeline (the crop runs before any speed change). With `at` (a cut
+    frame) the window is fixed where it is at that moment."""
+    if width <= 0 or height <= 0:
+        raise NodeError("smartcrop: the source size is unknown")
+    rects = smartcrop_rects(smart, width, height)
+    w = max(2, int(round(rects[0][1]["w"])) // 2 * 2)
+    h = max(2, int(round(rects[0][1]["h"])) // 2 * 2)
+    xs = [(t, min(r["x"], float(width - w))) for t, r in rects]
+    ys = [(t, min(r["y"], float(height - h))) for t, r in rects]
+    if at is not None:
+        x_expr = _fmt(_value_at(xs, at))
+        y_expr = _fmt(_value_at(ys, at))
+    else:
+        x_expr, y_expr = _piecewise(xs), _piecewise(ys)
+    return f"crop={w}:{h}:{x_expr}:{y_expr}"
+
+
+def _value_at(points: List[Tuple[float, float]], at: float) -> float:
+    """The eased value of _piecewise at time `at` (for a cut frame)."""
+    if at <= points[0][0] or len(points) == 1:
+        return points[0][1]
+    for (t0, v0), (t1, v1) in zip(points, points[1:]):
+        if at < t1:
+            p = min(max((at - t0) / max(0.001, t1 - t0), 0.0), 1.0)
+            return v0 + (v1 - v0) * p * p * (3 - 2 * p)
+    return points[-1][1]
+
+
+def _rotation_filters(radians: float) -> List[str]:
+    """Clockwise rotation (ffmpeg's rotate convention). Quarter turns are exact transposes (Freestock used
+    rotate=…:ow=rotw:oh=roth for every angle, which resamples and can leave a 1 px border); any other angle
+    keeps Freestock's rotate filter."""
+    import math
+    turn = radians / (math.pi / 2)
+    nearest = round(turn)
+    if abs(turn - nearest) < 0.0005:
+        quarter = int(nearest) % 4
+        return {0: [], 1: ["transpose=clock"], 2: ["hflip", "vflip"], 3: ["transpose=cclock"]}[quarter]
+    text = f"{radians:.10f}".rstrip("0").rstrip(".")
+    return [f"rotate={text}:ow=rotw({text}):oh=roth({text})"]
+
+
+def _normalized(radians: float) -> float:
+    import math
+    while radians > math.pi:
+        radians -= 2 * math.pi
+    while radians < -math.pi:
+        radians += 2 * math.pi
+    return radians
+
+
+def effective_rotation(spec: Dict[str, object], info: Dict[str, object]) -> float:
+    """rotate_rad as asked. rotation_relative_to=stored is Freestock's video rule (_video_filters): the
+    source's own rotation metadata is subtracted, for callers that computed the angle on the stored frame."""
+    import math
+    if spec.get("rotate_rad") is None:
+        return 0.0
+    radians = float(spec["rotate_rad"])
+    if spec.get("media_kind") == "video" and spec.get("rotation_relative_to") == "stored":
+        radians = _normalized(radians - math.radians(float(info.get("rotation_deg") or 0.0)))
+    return radians
+
+
+def media_filters(spec: Dict[str, object], info: Dict[str, object], *, source_bytes: int = 0,
+                  at: Optional[float] = None) -> List[str]:
+    """The -vf chain. Order: crop / smart crop on the source frame, scale, flips, rotation, then speed
+    (setpts, optional minterpolate). Freestock put setpts first; cropping first keeps smart-crop anchor times
+    on the source timeline and interpolates fewer pixels."""
+    width, height = display_size(info)
+    filters: List[str] = []
+    if spec.get("smartcrop") is not None:
+        filters.append(smartcrop_filter(spec["smartcrop"], width, height, at))  # type: ignore[arg-type]
+    elif spec.get("crop"):
+        crop = spec["crop"]  # type: ignore[assignment]
+        w, h = int(crop["w"]), int(crop["h"])  # type: ignore[index]
+        x, y = int(crop["x"]), int(crop["y"])  # type: ignore[index]
+        if width and height and (x + w > width or y + h > height):
+            raise NodeError(f"crop {w}x{h}+{x}+{y} is outside the {width}x{height} frame")
+        filters.append(f"crop={w - (w % 2)}:{h - (h % 2)}:{x}:{y}")
+    if spec.get("scale"):
+        scale = spec["scale"]  # type: ignore[assignment]
+        filters.append(f"scale={max(2, int(scale['w']) // 2 * 2)}:{max(2, int(scale['h']) // 2 * 2)}")  # type: ignore[index]
+    if spec.get("hflip"):
+        filters.append("hflip")
+    if spec.get("vflip"):
+        filters.append("vflip")
+    filters += _rotation_filters(effective_rotation(spec, info))
+    speed = float(spec.get("speed") or 1.0)
+    if at is None and spec.get("media_kind") == "video" and abs(speed - 1.0) > 0.001:
+        filters.append(f"setpts={1.0 / speed:.6f}*PTS")
+        if spec.get("interpolate") and minterpolate_allowed(info, source_bytes):
+            fps = float(info.get("fps") or 0.0)
+            target = max(fps, fps * speed) if fps > 0 else 60.0
+            filters.append(f"minterpolate='mi_mode=mci:mc_mode=aobmc:vsbmc=1:fps={target:g}'")
+    return filters
+
+
+def minterpolate_allowed(info: Dict[str, object], source_bytes: int) -> bool:
+    """Freestock _video_minterpolate_allowed_bool: <= 512 MB, <= 30 fps, <= 4K."""
+    if source_bytes > MINTERPOLATE_MAX_SOURCE_BYTES:
+        return False
+    if float(info.get("fps") or 0.0) > 30.001:
+        return False
+    if int(info.get("width") or 0) * int(info.get("height") or 0) > 3840 * 2160:
+        return False
+    return True
+
+
+def output_frame_rate(spec: Dict[str, object], info: Dict[str, object]) -> float:
+    """Freestock _source_video_output_frame_rate_float: a 30 fps clip at x2 is written at 60 fps."""
+    speed = float(spec.get("speed") or 1.0)
+    fps = float(info.get("fps") or 0.0)
+    if 29.9 <= fps <= 30.0 and abs(speed - 2.0) <= 0.001:
+        return max(fps, fps * speed)
+    return 0.0
+
+
+def audio_filters(speed: float) -> List[str]:
+    """Freestock _audio_filters: atempo chain (each step 0.5..2)."""
+    if speed <= 0 or abs(speed - 1.0) <= 0.001:
+        return []
+    parts: List[str] = []
+    remaining = speed
+    while remaining > 2.0:
+        parts.append("atempo=2.0")
+        remaining /= 2.0
+    while remaining < 0.5:
+        parts.append("atempo=0.5")
+        remaining /= 0.5
+    parts.append(f"atempo={remaining:.6f}")
+    return parts
+
+
+# ---- encoders (Freestock port)
+PRORES_PROFILE_BY_TAG = {"apco": 0, "ocpa": 0, "apcs": 1, "scpa": 1, "apcn": 2, "ncpa": 2, "apch": 3,
+                         "hcpa": 3, "ap4h": 4, "h4pa": 4, "ap4x": 5}
+
+
+def prores_args(info: Dict[str, object]) -> List[str]:
+    """Freestock _legacy_prores_output_args: prores_ks q4 in the source's profile, 10-bit 4:2:2 or 4:4:4."""
+    profile = PRORES_PROFILE_BY_TAG.get(str(info.get("codec_tag") or ""), 3)
+    pix_fmt = "yuv422p10le" if profile <= 3 else "yuv444p10le"
+    return ["-c:v", "prores_ks", "-qscale:v", "4", "-pix_fmt", pix_fmt, "-profile:v", str(profile)]
+
+
+def nvenc_args(info: Dict[str, object]) -> List[str]:
+    """Freestock _legacy_h264_nvenc_output_args: p7 hq, CBR at the source bitrate when known."""
+    args = ["-c:v", "h264_nvenc", "-preset:v", "p7", "-tune:v", "hq"]
+    if info.get("bit_rate"):
+        args += ["-rc:v", "cbr", "-b:v", str(info["bit_rate"])]
+    return args
+
+
+def x264_args(info: Dict[str, object]) -> List[str]:
+    """Freestock _legacy_h264_fallback_output_args (encoder "h264" = libx264): slow, film, source bitrate."""
+    args = ["-c:v", "libx264", "-preset:v", "slow", "-tune:v", "film"]
+    if info.get("bit_rate"):
+        args += ["-b:v", str(info["bit_rate"])]
+    return args
+
+
+def resolve_container(spec: Dict[str, object], info: Dict[str, object], source_path: str) -> str:
+    container = str(spec.get("container") or "auto")
+    if container != "auto":
+        return container
+    if spec.get("media_kind") == "image":
+        return "png" if str(info.get("codec") or "") in ("png", "tiff", "bmp") else "jpg"
+    if spec.get("cut_frame_at") is not None:
+        return "jpg"
+    if spec.get("codec") == "prores" or (spec.get("codec") == "auto" and info.get("codec") == "prores"):
+        return "mov"
+    return "mov" if source_path.lower().endswith(".mov") else "mp4"
+
+
+def build_media_commands(ffmpeg: str, spec: Dict[str, object], info: Dict[str, object], source_path: str,
+                         output_path: str, *, source_bytes: int = 0,
+                         use_nvenc: bool = True) -> Tuple[List[str], Optional[List[str]], str]:
+    """(command, libx264 fallback or None, encoder label) for one task."""
+    head = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"]
+    container = os.path.splitext(output_path)[1].lstrip(".").lower()
+    if spec.get("media_kind") == "image":
+        # Freestock _execute_raster_task.
+        filters = media_filters(spec, info)
+        command = head + ["-i", source_path]
+        if filters:
+            command += ["-vf", ",".join(filters)]
+        command += ["-frames:v", "1"]
+        if container == "jpg":
+            command += ["-q:v", "2"]
+        command += ["-update", "1", output_path]
+        return command, None, "image"
+    at = spec.get("cut_frame_at")
+    if at is not None:
+        # Freestock _legacy_cutframe_jpeg_command: seek before the input, one mjpeg q2 frame.
+        filters = media_filters(spec, info, at=float(at))  # type: ignore[arg-type]
+        command = head + ["-ss", _fmt(float(at)), "-i", source_path]  # type: ignore[arg-type]
+        if filters:
+            command += ["-vf", ",".join(filters)]
+        if container == "jpg":
+            command += ["-c:v", "mjpeg", "-f", "image2", "-fps_mode", "passthrough", "-qscale:v", "2"]
+        command += ["-update", "1", "-frames:v", "1", "-an", output_path]
+        return command, None, "frame"
+    filters = media_filters(spec, info, source_bytes=source_bytes)
+    command = head + ["-i", source_path, "-map", "0:v:0"]
+    if spec.get("keep_audio") and info.get("has_audio"):
+        command += ["-map", "0:a:0?"]
+    if filters:
+        command += ["-vf", ",".join(filters)]
+    prores = spec.get("codec") == "prores" or (spec.get("codec") == "auto" and info.get("codec") == "prores")
+    if prores:
+        codec_args, fallback_args, label = prores_args(info), None, "prores_ks"
+    elif use_nvenc:
+        codec_args, fallback_args, label = nvenc_args(info), x264_args(info), "h264_nvenc"
+    else:
+        codec_args, fallback_args, label = x264_args(info), None, "libx264"
+    tail: List[str] = []
+    rate = output_frame_rate(spec, info)
+    if rate > 0:
+        tail += ["-r", f"{rate:g}"]
+    if spec.get("keep_audio") and info.get("has_audio"):
+        speed_filters = audio_filters(float(spec.get("speed") or 1.0))
+        tail += (["-af", ",".join(speed_filters)] if speed_filters else ["-c:a", "copy"])
+    else:
+        tail += ["-an"]
+    if container == "mp4":
+        tail += ["-movflags", "+faststart"]
+    tail += [output_path]
+    fallback = (command + fallback_args + tail) if fallback_args else None
+    return command + codec_args + tail, fallback, label
+
+
+def expected_output_seconds(spec: Dict[str, object], info: Dict[str, object]) -> float:
+    if spec.get("media_kind") != "video" or spec.get("cut_frame_at") is not None:
+        return 0.0
+    return float(info.get("duration") or 0.0) / max(0.1, float(spec.get("speed") or 1.0))
+
+
+def run_ffmpeg(command: List[str], *, expected_seconds: float, cancel: threading.Event, deadline: float,
+               on_progress: Optional[Callable[[float], None]] = None,
+               on_process: Optional[Callable[[Optional[subprocess.Popen]], None]] = None) -> str:
+    """Run ffmpeg with -progress pipe:1, report the fraction done; raise NodeError with the stderr tail."""
+    import collections
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   stdin=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+    except OSError as exc:
+        raise NodeError(f"ffmpeg_not_startable: {exc}") from None
+    if on_process:
+        on_process(process)
+    tail: "collections.deque[str]" = collections.deque(maxlen=60)
+
+    def read_stderr() -> None:
+        for raw in iter(process.stderr.readline, b""):  # type: ignore[union-attr]
+            tail.append(raw.decode("utf-8", "replace").rstrip())
+
+    reader = threading.Thread(target=read_stderr, daemon=True, name="ffmpeg-stderr")
+    reader.start()
+
+    def watchdog() -> None:
+        while process.poll() is None:
+            if cancel.is_set() or time.time() > deadline:
+                _kill_process_tree(process)
+                return
+            time.sleep(0.5)
+
+    threading.Thread(target=watchdog, daemon=True, name="ffmpeg-watchdog").start()
+    try:
+        for raw in iter(process.stdout.readline, b""):  # type: ignore[union-attr]
+            line = raw.decode("ascii", "replace").strip()
+            if line.startswith(("out_time_us=", "out_time_ms=")) and expected_seconds > 0 and on_progress:
+                try:
+                    micro = int(line.split("=", 1)[1])
+                except ValueError:
+                    continue
+                on_progress(min(1.0, max(0.0, micro / 1e6 / expected_seconds)))
+        process.wait()
+    finally:
+        if on_process:
+            on_process(None)
+    reader.join(timeout=5)
+    if cancel.is_set():
+        raise MediaCancelled("cancelled")
+    if time.time() > deadline and process.returncode != 0:
+        raise NodeError("timeout: ffmpeg ran past the task limit")
+    text = "\n".join(tail)
+    if process.returncode != 0:
+        raise NodeError("ffmpeg_failed: " + (text[-1500:] if text else f"exit {process.returncode}"))
+    return text
+
+
+def _kill_process_tree(process: subprocess.Popen) -> None:
+    """ffmpeg (and whatever wrapper started it) - a killed wrapper alone would leave the pipe open."""
+    try:
+        if IS_WINDOWS:
+            _kill_pid(process.pid)
+        process.kill()
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def nvenc_fallback_wanted(error: str) -> bool:
+    return any(marker in error for marker in NVENC_FALLBACK_MARKERS)
+
+
+class MediaTask:
+    """One media-edit job: download, ffmpeg, output file kept until the backend fetched it."""
+
+    def __init__(self, spec: Dict[str, object]):
+        self.task_id = str(uuid.uuid4())
+        self.spec = spec
+        self.status = "Pending"
+        self.stage = "queued"
+        self.progress = 0.0
+        self.created_at = time.time()
+        self.started_at: Optional[float] = None
+        self.completed_at: Optional[float] = None
+        self.error = ""
+        self.encoder = ""
+        self.output_path = ""
+        self.output_meta: Dict[str, object] = {}
+        self.source_meta: Dict[str, object] = {}
+        self.source_bytes = 0
+        self.released = False
+        self.cancel = threading.Event()
+        self.process: Optional[subprocess.Popen] = None
+        self.work_dir = ""
+        self.workload_class = WORKLOAD_MEDIA_EDIT
+
+    def active(self) -> bool:
+        return self.status in ("Pending", "Processing")
+
+    def rank(self) -> Tuple[int, float]:
+        return (MEDIA_EDIT_TIER_RANK.get(str(self.spec.get("tier") or ""), 2), self.created_at)
+
+    def to_dict(self) -> Dict[str, object]:
+        now = time.time()
+        return {
+            "task_id": self.task_id,
+            "workload_class": WORKLOAD_MEDIA_EDIT,
+            "status": self.status,
+            "stage": self.stage,
+            "progress": round(self.progress, 1),
+            "media_kind": self.spec.get("media_kind"),
+            "tier": self.spec.get("tier") or "",
+            "client_ref": self.spec.get("client_ref") or "",
+            "backend_task_id": self.spec.get("backend_task_id") or "",
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "elapsed_seconds": (round(max(0.0, (self.completed_at or now) - self.started_at), 2)
+                                if self.started_at else 0.0),
+            "error": self.error,
+            "encoder": self.encoder,
+            "output_ready": bool(self.status == "Completed" and self.output_path and not self.released
+                                 and os.path.isfile(self.output_path)),
+            "output_name": os.path.basename(self.output_path) if self.output_path else "",
+            "output_meta": dict(self.output_meta),
+            "source_meta": dict(self.source_meta),
+        }
+
+
+def execute_media_task(task: MediaTask, *, ffmpeg: str, ffprobe: str, max_source_bytes: int,
+                       timeout_seconds: float, allow_private: bool, use_nvenc: bool,
+                       local_source: str = "") -> None:
+    """Run one task in task.work_dir (exists). Fills output_path/meta; raises NodeError / MediaCancelled."""
+    spec = task.spec
+    deadline = (task.started_at or time.time()) + timeout_seconds
+
+    def set_progress(low: float, high: float) -> Callable[[float], None]:
+        def update(fraction: float) -> None:
+            task.progress = max(task.progress, low + (high - low) * fraction)
+        return update
+
+    if local_source:
+        source_path, size = local_source, os.path.getsize(local_source)
+    else:
+        task.stage = "downloading"
+        source_path, size = download_media_source(
+            str(spec["source_url"]), task.work_dir, max_bytes=max_source_bytes, cancel=task.cancel,
+            deadline=deadline, on_progress=set_progress(0.0, 20.0), allow_private=allow_private)
+    task.source_bytes = size
+    task.progress = max(task.progress, 20.0)
+    task.stage = "probing"
+    info = probe_media(ffmpeg, ffprobe, source_path)
+    width, height = display_size(info)
+    task.source_meta = {"w": width, "h": height, "duration": round(float(info.get("duration") or 0.0), 3),
+                        "fps": info.get("fps"), "codec": info.get("codec"), "bytes": size,
+                        "audio": bool(info.get("has_audio")), "rotation_deg": info.get("rotation_deg")}
+    if spec.get("media_kind") == "video" and not info.get("has_video"):
+        raise NodeError("source_not_video: ffmpeg found no video stream")
+    if not width or not height:
+        raise NodeError("source_unreadable: ffmpeg could not read the picture size")
+    at = spec.get("cut_frame_at")
+    if at is not None and float(info.get("duration") or 0) and float(at) > float(info["duration"]):  # type: ignore[arg-type]
+        raise NodeError(f"cut_frame_beyond_end: {at} s > {info['duration']} s")
+    container = resolve_container(spec, info, source_path)
+    output_path = os.path.join(task.work_dir, "result." + container)
+    command, fallback, label = build_media_commands(ffmpeg, spec, info, source_path, output_path,
+                                                    source_bytes=size, use_nvenc=use_nvenc)
+    task.stage = "encoding"
+    task.encoder = label
+    expected = expected_output_seconds(spec, info)
+
+    def keep_process(process: Optional[subprocess.Popen]) -> None:
+        task.process = process
+
+    try:
+        run_ffmpeg(command, expected_seconds=expected, cancel=task.cancel, deadline=deadline,
+                   on_progress=set_progress(20.0, 99.0), on_process=keep_process)
+    except MediaCancelled:
+        raise
+    except NodeError as exc:
+        if fallback is None or not nvenc_fallback_wanted(str(exc)):
+            raise
+        logger.warning("Media task %s: NVENC refused (%s); encoding with libx264", task.task_id,
+                       str(exc).splitlines()[-1][:160] if str(exc) else "")
+        task.encoder = "libx264 (nvenc fallback)"
+        run_ffmpeg(fallback, expected_seconds=expected, cancel=task.cancel, deadline=deadline,
+                   on_progress=set_progress(20.0, 99.0), on_process=keep_process)
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+        raise NodeError("ffmpeg_no_output: ffmpeg finished without writing a file")
+    task.stage = "finishing"
+    out = probe_media(ffmpeg, ffprobe, output_path)
+    out_w, out_h = display_size(out)
+    task.output_path = output_path
+    task.output_meta = {"w": out_w, "h": out_h, "duration": round(float(out.get("duration") or 0.0), 3)
+                        if spec.get("media_kind") == "video" and at is None else 0.0,
+                        "bytes": os.path.getsize(output_path),
+                        "fps": out.get("fps") if spec.get("media_kind") == "video" and at is None else 0,
+                        "codec": out.get("codec"), "container": container,
+                        "audio": bool(out.get("has_audio"))}
+
+
+def make_selftest_clip(ffmpeg: str, path: str) -> None:
+    """2 s 640x360 30 fps clip with a tone (libx264, else mpeg4) - lavfi, no files needed."""
+    base = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=2",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2"]
+    for codec in (["-c:v", "libx264", "-pix_fmt", "yuv420p", "-b:v", "1500k"], ["-c:v", "mpeg4", "-b:v", "1500k"]):
+        done = subprocess.run(base + codec + ["-c:a", "aac", "-shortest", path], capture_output=True,
+                              timeout=120, creationflags=CREATE_NO_WINDOW)
+        if done.returncode == 0 and os.path.isfile(path) and os.path.getsize(path) > 0:
+            return
+    raise NodeError("selftest: ffmpeg could not generate the synthetic clip: "
+                    + (done.stderr or b"").decode("utf-8", "replace")[-400:])
+
+
+def run_media_selftest(ffmpeg: str, ffprobe: str, work_root: str, use_nvenc: bool = True) -> Dict[str, object]:
+    """2-second synthetic clip through flip + crop + speed x2 (+ a cut frame): validates ffmpeg and NVENC."""
+    import shutil
+    started = time.time()
+    result: Dict[str, object] = {"ok": False, "at": started, "ffmpeg": ffmpeg, "ffprobe": ffprobe,
+                                 "nvenc": False, "encoder": "", "seconds": 0.0, "error": "", "version": ""}
+    if not ffmpeg:
+        result["error"] = "ffmpeg not found (config ffmpeg_exe, the Freestock bundle or PATH)"
+        return result
+    work = os.path.join(work_root, "selftest-" + uuid.uuid4().hex[:8])
+    os.makedirs(work, exist_ok=True)
+    try:
+        version = subprocess.run([ffmpeg, "-hide_banner", "-version"], capture_output=True, text=True,
+                                 timeout=30, creationflags=CREATE_NO_WINDOW)
+        result["version"] = (version.stdout or "").splitlines()[0][:120] if version.stdout else ""
+        source = os.path.join(work, "synthetic.mp4")
+        make_selftest_clip(ffmpeg, source)
+        spec = parse_media_edit_request({
+            "source_url": "https://selftest.invalid/synthetic.mp4", "media_kind": "video",
+            "operation": {"hflip": True, "crop": {"w": 320, "h": 360, "x": 160, "y": 0},
+                          "speed": {"factor": 2.0, "interpolate": True}},
+            "output": {"container": "mp4"}})
+        task = MediaTask(spec)
+        task.work_dir = work
+        task.started_at = time.time()
+        execute_media_task(task, ffmpeg=ffmpeg, ffprobe=ffprobe, max_source_bytes=MEDIA_EDIT_MAX_SOURCE_BYTES,
+                           timeout_seconds=300, allow_private=True, use_nvenc=use_nvenc, local_source=source)
+        meta = task.output_meta
+        problems = []
+        if (meta.get("w"), meta.get("h")) != (320, 360):
+            problems.append(f"size {meta.get('w')}x{meta.get('h')} != 320x360")
+        if abs(float(meta.get("duration") or 0) - 1.0) > 0.3:
+            problems.append(f"duration {meta.get('duration')} s != ~1 s")
+        if abs(float(meta.get("fps") or 0) - 60.0) > 0.5:
+            problems.append(f"fps {meta.get('fps')} != 60")
+        result["encoder"] = task.encoder
+        result["nvenc"] = task.encoder == "h264_nvenc"
+        result["output_meta"] = meta
+        frame = MediaTask(parse_media_edit_request({
+            "source_url": "https://selftest.invalid/synthetic.mp4", "media_kind": "video",
+            "operation": {"cut_frame_at_seconds": 1.0, "rotate_rad": 1.5707963}, "output": {"container": "jpg"}}))
+        frame.work_dir = os.path.join(work, "frame")
+        os.makedirs(frame.work_dir, exist_ok=True)
+        frame.started_at = time.time()
+        execute_media_task(frame, ffmpeg=ffmpeg, ffprobe=ffprobe, max_source_bytes=MEDIA_EDIT_MAX_SOURCE_BYTES,
+                           timeout_seconds=120, allow_private=True, use_nvenc=use_nvenc, local_source=source)
+        if (frame.output_meta.get("w"), frame.output_meta.get("h")) != (360, 640):
+            problems.append(f"frame {frame.output_meta.get('w')}x{frame.output_meta.get('h')} != 360x640")
+        result["ok"] = not problems
+        result["error"] = "; ".join(problems)
+    except Exception as exc:  # noqa: BLE001 - reported, never raised
+        result["error"] = str(exc)[-600:]
+    finally:
+        result["seconds"] = round(time.time() - started, 2)
+        shutil.rmtree(work, ignore_errors=True)
+    return result
+
+
+class MediaEditor:
+    """The node's media-edit queue: `parallel` ffmpeg jobs at a time, M+ first, outputs kept until released."""
+
+    def __init__(self, cfg: "Config"):
+        self.cfg = cfg
+        self.tasks: Dict[str, MediaTask] = {}
+        self.lock = threading.RLock()
+        self.wake = threading.Condition(self.lock)
+        self.stopping = threading.Event()
+        self.ffmpeg, self.ffprobe = find_ffmpeg(cfg.ffmpeg_exe, cfg.ffprobe_exe)
+        self.selftest: Dict[str, object] = {}
+        self.selftest_running = False
+        self.completed = 0
+        self.failed = 0
+        self.work_root = cfg.media_edit_work_dir
+
+    # ---------------------------------------------------------- lifecycle
+    def start(self) -> None:
+        import shutil
+        os.makedirs(self.work_root, exist_ok=True)
+        # Leftovers of a previous run: nothing can ask for them any more.
+        for name in os.listdir(self.work_root):
+            shutil.rmtree(os.path.join(self.work_root, name), ignore_errors=True)
+        for index in range(self.cfg.media_edit_parallel):
+            threading.Thread(target=self.worker_loop, name=f"media-worker-{index}", daemon=True).start()
+        if self.cfg.media_edit_selftest_on_start:
+            threading.Thread(target=self.run_selftest, name="media-selftest", daemon=True).start()
+
+    def capable(self) -> bool:
+        return bool(self.cfg.media_edit_enabled and self.ffmpeg and self.selftest.get("ok"))
+
+    def run_selftest(self) -> Dict[str, object]:
+        with self.lock:
+            if self.selftest_running:
+                return dict(self.selftest, running=True)
+            self.selftest_running = True
+        try:
+            if not self.ffmpeg:
+                self.ffmpeg, self.ffprobe = find_ffmpeg(self.cfg.ffmpeg_exe, self.cfg.ffprobe_exe)
+            result = run_media_selftest(self.ffmpeg, self.ffprobe, self.work_root, self.cfg.media_edit_nvenc)
+            if result.get("ok"):
+                logger.info("media-edit selftest passed in %.1f s (encoder %s, ffmpeg %s)", result["seconds"],
+                            result["encoder"], self.ffmpeg)
+            else:
+                logger.warning("media-edit selftest FAILED in %.1f s: %s (ffmpeg %s); media_edit not offered",
+                               result["seconds"], result["error"], self.ffmpeg or "not found")
+            with self.lock:
+                self.selftest = result
+            return dict(result)
+        finally:
+            with self.lock:
+                self.selftest_running = False
+
+    def shutdown(self) -> None:
+        self.stopping.set()
+        with self.lock:
+            for task in self.tasks.values():
+                task.cancel.set()
+            self.wake.notify_all()
+
+    # ------------------------------------------------------------- submit
+    def submit(self, payload: object) -> Tuple[int, Dict[str, object]]:
+        if not self.cfg.media_edit_enabled:
+            return 503, {"error": "media_edit_disabled", "message": "media_edit_enabled is false on this node"}
+        try:
+            spec = parse_media_edit_request(payload)
+            validate_media_source_url(str(spec["source_url"]), allow_private=self.cfg.media_edit_allow_private_urls)
+        except RequestError as exc:
+            return 400, {"error": "invalid_request", "message": str(exc)}
+        if not self.capable():
+            return 503, {"error": "media_edit_unavailable", "retryable": True,
+                         "message": "ffmpeg selftest has not passed on this node: "
+                                    + str(self.selftest.get("error") or "not run yet")}
+        with self.lock:
+            active = sum(1 for t in self.tasks.values() if t.active())
+            if active >= self.cfg.media_edit_max_tasks:
+                return 503, {"error": "media_edit_queue_full", "retryable": True,
+                             "message": f"{active} media-edit task(s) already accepted on this node"}
+            task = MediaTask(spec)
+            self.tasks[task.task_id] = task
+            self.wake.notify()
+        logger.info("Accepted media-edit task %s (%s, tier %s, ref %s)", task.task_id, spec["media_kind"],
+                    spec.get("tier") or "-", spec.get("client_ref") or "-")
+        return 202, {"task_id": task.task_id, "status": "Pending", "workload_class": WORKLOAD_MEDIA_EDIT}
+
+    def status(self, task_id: str) -> Optional[Dict[str, object]]:
+        with self.lock:
+            task = self.tasks.get(task_id)
+            if task is None:
+                return None
+            body = task.to_dict()
+            if task.status == "Pending":
+                waiting = sorted((t for t in self.tasks.values() if t.status == "Pending"), key=MediaTask.rank)
+                body["queue_position"] = 1 + waiting.index(task)
+            return body
+
+    def cancel(self, task_id: str) -> Optional[Dict[str, object]]:
+        with self.lock:
+            task = self.tasks.get(task_id)
+            if task is None:
+                return None
+            if task.status == "Pending":
+                task.status, task.stage, task.error = "Cancelled", "cancelled", "cancelled"
+                task.completed_at = time.time()
+            elif task.status == "Processing":
+                task.cancel.set()
+                process = task.process
+                if process is not None:
+                    _kill_process_tree(process)
+            return task.to_dict()
+
+    def output_file(self, task_id: str) -> Optional[str]:
+        with self.lock:
+            task = self.tasks.get(task_id)
+            if task and task.status == "Completed" and not task.released and os.path.isfile(task.output_path):
+                return task.output_path
+        return None
+
+    def release(self, task_id: str) -> bool:
+        import shutil
+        with self.lock:
+            task = self.tasks.get(task_id)
+            if task is None or task.active():
+                return False
+            task.released = True
+            work = task.work_dir
+        if work:
+            shutil.rmtree(work, ignore_errors=True)
+        return True
+
+    # ------------------------------------------------------------- worker
+    def _next(self) -> Optional[MediaTask]:
+        with self.lock:
+            while not self.stopping.is_set():
+                waiting = [t for t in self.tasks.values() if t.status == "Pending"]
+                if waiting:
+                    task = min(waiting, key=MediaTask.rank)
+                    task.status, task.stage, task.started_at = "Processing", "starting", time.time()
+                    return task
+                self.wake.wait(timeout=1.0)
+        return None
+
+    def worker_loop(self) -> None:
+        import shutil
+        while not self.stopping.is_set():
+            task = self._next()
+            if task is None:
+                return
+            task.work_dir = os.path.join(self.work_root, task.task_id)
+            try:
+                os.makedirs(task.work_dir, exist_ok=True)
+                execute_media_task(task, ffmpeg=self.ffmpeg, ffprobe=self.ffprobe,
+                                   max_source_bytes=self.cfg.media_edit_max_source_bytes,
+                                   timeout_seconds=self.cfg.media_edit_timeout_seconds,
+                                   allow_private=self.cfg.media_edit_allow_private_urls,
+                                   use_nvenc=self.cfg.media_edit_nvenc)
+                # Only the result stays: a 4 GB source is not kept while the backend fetches the output.
+                for name in os.listdir(task.work_dir):
+                    path = os.path.join(task.work_dir, name)
+                    if path != task.output_path:
+                        if os.path.isdir(path):
+                            shutil.rmtree(path, ignore_errors=True)
+                        else:
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
+                with self.lock:
+                    task.status, task.stage, task.progress = "Completed", "done", 100.0
+                    task.completed_at = time.time()
+                    self.completed += 1
+                logger.info("Media task %s completed in %.1f s (%s, %s bytes)", task.task_id,
+                            task.completed_at - (task.started_at or task.completed_at), task.encoder,
+                            task.output_meta.get("bytes"))
+            except MediaCancelled:
+                with self.lock:
+                    task.status, task.stage, task.error = "Cancelled", "cancelled", "cancelled"
+                    task.completed_at = time.time()
+                shutil.rmtree(task.work_dir, ignore_errors=True)
+                logger.info("Media task %s cancelled", task.task_id)
+            except Exception as exc:  # noqa: BLE001 - every failure fails the task
+                with self.lock:
+                    task.status, task.stage = "Failed", "failed"
+                    task.error = str(exc)[-1800:] or exc.__class__.__name__
+                    task.completed_at = time.time()
+                    self.failed += 1
+                shutil.rmtree(task.work_dir, ignore_errors=True)
+                logger.warning("Media task %s failed: %s", task.task_id, str(exc).splitlines()[0][:300]
+                               if str(exc) else exc.__class__.__name__)
+            finally:
+                task.process = None
+
+    def prune(self) -> None:
+        """Outputs nobody fetched go after media_edit_output_keep_seconds; finished records after 6 h."""
+        import shutil
+        now = time.time()
+        drop = []
+        with self.lock:
+            for task in self.tasks.values():
+                if task.active() or not task.completed_at:
+                    continue
+                if not task.released and now - task.completed_at > self.cfg.media_edit_output_keep_seconds:
+                    task.released = True
+                    if task.work_dir:
+                        shutil.rmtree(task.work_dir, ignore_errors=True)
+                if now - task.completed_at > max(self.cfg.task_retention_seconds,
+                                                 self.cfg.media_edit_output_keep_seconds):
+                    drop.append(task.task_id)
+            for task_id in drop:
+                self.tasks.pop(task_id, None)
+
+    def summary(self) -> Dict[str, object]:
+        with self.lock:
+            running = [t for t in self.tasks.values() if t.status == "Processing"]
+            pending = [t for t in self.tasks.values() if t.status == "Pending"]
+            selftest = {k: v for k, v in self.selftest.items() if k != "output_meta"}
+            return {
+                "enabled": bool(self.cfg.media_edit_enabled),
+                "capable": self.capable(),
+                "parallel": self.cfg.media_edit_parallel,
+                "running": len(running),
+                "pending": len(pending),
+                "free_slots": max(0, self.cfg.media_edit_parallel - len(running)),
+                "max_tasks": self.cfg.media_edit_max_tasks,
+                "completed": self.completed,
+                "failed": self.failed,
+                "ffmpeg": self.ffmpeg,
+                "ffprobe": self.ffprobe,
+                "nvenc": bool(self.selftest.get("nvenc")),
+                "selftest": selftest,
+                "selftest_running": self.selftest_running,
+                "tasks": [t.to_dict() for t in sorted(running + pending, key=MediaTask.rank)][:20],
+            }
+
+
 # ----------------------------------------------------------------------- node
 class Node:
     def __init__(self, cfg: Config):
@@ -1364,6 +2652,7 @@ class Node:
         self._comfy_freed_at = 0.0
         self._gate_wanted = False              # set by _ensure_model: waiting for ComfyUI to drain, or loading
         self._last_use = -1e9
+        self.media = MediaEditor(cfg)           # ffmpeg jobs (2026-11-07): own queue, no model lock
 
     # --------------------------------------------------------------- token
     def token(self) -> str:
@@ -1874,6 +3163,7 @@ class Node:
                 gate = not game and ((wanted and self._gate_wanted) or self.llama.in_use() or recent or warm)
                 self.hold_lease(wanted or self.llama.running() or warm, gate=gate)
                 self._prune()
+                self.media.prune()
             except Exception:  # noqa: BLE001 - the monitor must keep running
                 logger.exception("Monitor pass failed")
             self.stopping.wait(self.cfg.comfy_poll_seconds)
@@ -1930,6 +3220,8 @@ class Node:
             "comfy_running": int(comfy.get("running") or 0),
             "comfy_pending": int(comfy.get("pending") or 0),
             "accepting_ai_vision": accepting,
+            "accepting_media_edit": self.media.capable(),
+            "capabilities": ["ai_vision"] + (["media_edit"] if self.media.capable() else []),
             "accepting_autorig": False,
             "accepting_hunyuan": False,
             # Same shape as BonsaiAdapter.status() (60101f4, lines 275-299).
@@ -1958,6 +3250,9 @@ class Node:
             },
             "processing_tasks": [t.brief() for t in processing],
             "pending_tasks": [t.brief() for t in pending],
+            # Kept apart from tasks_summary / processing_tasks: ffmpeg does not hold the GPU, so it must not make
+            # the backend's Vision picker think the model is busy.
+            "media_edit": self.media.summary(),
             "ai_node": {
                 "blocker": blocked[0] if blocked else "",
                 "blocker_message": blocked[1] if blocked else "",
@@ -1992,6 +3287,7 @@ class Node:
 
     def shutdown(self) -> None:
         self.stopping.set()
+        self.media.shutdown()
         self.llama.stop("ai_node shutting down")
         self.hold_lease(False)
 
@@ -2059,6 +3355,10 @@ class Handler(BaseHTTPRequestHandler):
                 if self._authorized():
                     self._send(200, self.node.server_status())
                 return
+            if path.startswith(API_PREFIX + "/media-edit") or path == API_PREFIX + "/media-edit-selftest":
+                if self._authorized():
+                    self._media_get(path)
+                return
             for prefix in (API_PREFIX + "/ai-vision/status/", API_PREFIX + "/text2text/status/"):
                 if path.startswith(prefix):
                     if not self._authorized():
@@ -2096,6 +3396,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, dict(self.node.request_reload(str(payload.get("reason") or "")[:80]),
                                      version=VERSION))
                 return
+            if path.startswith(API_PREFIX + "/media-edit"):
+                if self._authorized():
+                    self._media_post(path)
+                return
             if path not in modes:
                 self._send(404, {"error": "not_found"})
                 return
@@ -2120,6 +3424,84 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             logger.exception("POST %s failed", path)
             self._send(500, {"error": "internal_error", "message": str(exc)})
+
+
+    # ---------------------------------------------------------- media edit
+    def _media_get(self, path: str) -> None:
+        media = self.node.media
+        if path == API_PREFIX + "/media-edit-selftest":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            if query.get("run") == ["1"] or not media.selftest:
+                self._send(200, dict(media.run_selftest(), version=VERSION))
+            else:
+                self._send(200, dict(media.selftest, version=VERSION, running=media.selftest_running))
+            return
+        status_prefix = API_PREFIX + "/media-edit/status/"
+        output_prefix = API_PREFIX + "/media-edit/output/"
+        if path.startswith(status_prefix):
+            body = media.status(path[len(status_prefix):])
+            if body is None:
+                self._send(404, {"error": "Task not found"})
+            else:
+                self._send(200, body)
+            return
+        if path.startswith(output_prefix):
+            file_path = media.output_file(path[len(output_prefix):])
+            if not file_path:
+                self._send(404, {"error": "output_not_available"})
+                return
+            ext = os.path.splitext(file_path)[1].lstrip(".").lower()
+            size = os.path.getsize(file_path)
+            self.send_response(200)
+            self.send_header("Content-Type", CONTENT_TYPES.get(ext, "application/octet-stream"))
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", f'attachment; filename="result.{ext}"')
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with open(file_path, "rb") as handle:
+                while True:
+                    chunk = handle.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+            return
+        if path == API_PREFIX + "/media-edit":
+            self._send(200, media.summary())
+            return
+        self._send(404, {"error": "not_found"})
+
+    def _media_post(self, path: str) -> None:
+        media = self.node.media
+        if path == API_PREFIX + "/media-edit-selftest":
+            self._send(200, dict(media.run_selftest(), version=VERSION))
+            return
+        for prefix, action in ((API_PREFIX + "/media-edit/cancel/", media.cancel),
+                               (API_PREFIX + "/media-edit/release/", media.release)):
+            if path.startswith(prefix):
+                result = action(path[len(prefix):])
+                if result is None or result is False:
+                    self._send(404, {"error": "Task not found"})
+                else:
+                    self._send(200, result if isinstance(result, dict) else {"released": True})
+                return
+        if path != API_PREFIX + "/media-edit":
+            self._send(404, {"error": "not_found"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if length < 0 or length > MEDIA_EDIT_MAX_BODY_BYTES:
+            self._send(413, {"error": "invalid_request", "message": "request body too large or unsized"})
+            return
+        raw = self.rfile.read(length) if length else b""
+        try:
+            payload = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeDecodeError, ValueError):
+            self._send(400, {"error": "invalid_request", "message": "body is not JSON"})
+            return
+        code, body = media.submit(payload)
+        self._send(code, body)
 
 
 # ----------------------------------------------------------------------- main
@@ -2158,6 +3540,9 @@ def run_check(cfg: Config) -> int:
         "vram": node.refresh_vram(),
         "llama_port_busy": node.llama._port_open(),
         "launch_argv": node.llama.launch_argv(),
+        "media_edit": {"enabled": cfg.media_edit_enabled, "ffmpeg": node.media.ffmpeg,
+                       "ffprobe": node.media.ffprobe, "parallel": cfg.media_edit_parallel,
+                       "work_dir": cfg.media_edit_work_dir},
     }
     if len(cfg.profiles) > 1:
         primary = cfg.model_id
@@ -2203,6 +3588,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     for index in range(cfg.parallel_tasks):
         threading.Thread(target=node.worker_loop, name=f"ai-worker-{index}", daemon=True).start()
+    try:
+        node.media.start()
+    except OSError as exc:
+        logger.error("media-edit not started (work dir %s): %s", cfg.media_edit_work_dir, exc)
     threading.Thread(target=node.monitor_loop, name="ai-monitor", daemon=True).start()
     serve = threading.Thread(target=server.serve_forever, name="http", daemon=True)
     serve.start()

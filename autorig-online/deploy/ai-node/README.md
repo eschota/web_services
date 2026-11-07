@@ -478,3 +478,28 @@ service holds 18 MB. Suspected: a burst landing while llama generates oversubscr
 answering `????` until it restarts. Not reproduced in a 33-minute watch (11 probes fine, bursts did not overlap a
 generation). At 03:53 local Freestock rose to 4.85 GB and llama-server's dedicated memory dropped 7873 -> 5777 MB
 (~2.1 GB evicted to shared memory) for about a minute: the eviction is real, the "????" was not caught that time.
+
+## Media edit: ffmpeg jobs for M+ similars (2026-11-07, `ai-node-20261107-media-edit`)
+
+The backend's `POST /api/media-edit` (`backend/media_edit_api.py`) sends M+ "similars" (flip, rotate, crop, vertical
+smart crop, speed, one frame) to the ai-nodes. The ffmpeg logic is a port of Freestock's media-edit executor
+(`freestock_task_queue_plugin/manager.py`: filters, smart-crop expression, ProRes / `h264_nvenc` p7 CBR at the source
+bitrate with a libx264 fallback, 30 fps x2 written at 60 fps, minterpolate rules, audio dropped unless `keep_audio`).
+It is CPU + NVENC work: no model lock, no VRAM check, next to llama-server, `media_edit_parallel` (2) at a time,
+`media_edit_max_tasks` (16) accepted, M+ (tier `mplus`) first. Media tasks are kept out of `tasks_summary` /
+`processing_tasks`, so the Vision picker does not see the model as busy; `server-status` reports them under
+`media_edit` and adds `media_edit` to `capabilities` only after the selftest passed.
+
+| Endpoint (`/api-converter-glb`, Bearer) | |
+|---|---|
+| `POST /media-edit` | the backend's request + `tier`; `202 {task_id}`, `400 invalid_request`, `503 media_edit_unavailable / media_edit_queue_full` |
+| `GET /media-edit/status/{id}` | `{status Pending/Processing/Completed/Failed/Cancelled, stage, progress, output_ready, output_meta {w,h,duration,bytes,fps,codec,container,audio}, source_meta, encoder, error}` |
+| `GET /media-edit/output/{id}` | the result file; `POST /media-edit/release/{id}` deletes it, `POST /media-edit/cancel/{id}` kills ffmpeg |
+| `GET /media-edit-selftest` (`?run=1`), `POST` | the startup check: a 2 s lavfi clip through hflip + crop + speed x2 (+ a rotated cut frame); `ok`, `encoder`, `nvenc`, `seconds` |
+
+Config: `ffmpeg_exe` / `ffprobe_exe` (empty = `%LOCALAPPDATA%\Freestock\tools\bin\ffmpeg.exe`, then PATH; without
+ffprobe `ffmpeg -i` is parsed), `media_edit_work_dir` (`media-edit-work`, wiped at start), `media_edit_timeout_seconds`
+(7200), `media_edit_max_source_bytes` (4 GB), `media_edit_output_keep_seconds` (6 h if the backend never fetched it),
+`media_edit_nvenc` (true), `media_edit_enabled` (true). The source is downloaded by the node: https only, public hosts
+(the image SSRF guard), redirects re-checked. Tests: `python -m unittest test_media_edit` (fake ffmpeg for progress /
+NVENC fallback / cancel, the real ffmpeg for flip / rotate / 9:16 smart crop / x2 / frame, HTTP end to end).

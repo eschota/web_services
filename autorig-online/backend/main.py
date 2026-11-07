@@ -239,6 +239,7 @@ from ai_controlnet_api import router as ai_controlnet_router
 from ai_model_catalogue import router as ai_model_catalogue_router
 from ai_services import router as ai_services_router
 from ai_vision_api import router as ai_vision_router
+from media_edit_api import router as media_edit_router
 from namecheap_remote_api import router as namecheap_remote_router
 from animal_animation_library import (
     ANIMAL_CLIP_IDS,
@@ -1294,6 +1295,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         app.state.vision_warmer = None
         print(f"[Vision] warm-up not started: {type(exc).__name__}: {exc}")
+    # 2026-11-07 media edit (M+ similars on the ai-nodes): publish finished results, purge after 24 h.
+    try:
+        import media_edit_api as _media_edit_api
+
+        app.state.media_edit_watcher = _media_edit_api.start_watcher()
+    except Exception as exc:
+        app.state.media_edit_watcher = None
+        print(f"[MediaEdit] watcher not started: {type(exc).__name__}: {exc}")
     # V3 task runtime (2026-10-10): durable outbox -> Motion Transfer /api/mt/v3.
     # Restart-safe: unsettled bindings are re-enqueued, lost projections replayed.
     app.state.v3_runtime = None
@@ -1417,6 +1426,7 @@ app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)
 app.include_router(ai_vision_router)
+app.include_router(media_edit_router)
 app.include_router(farm_llm_router)
 app.include_router(namecheap_remote_router)
 

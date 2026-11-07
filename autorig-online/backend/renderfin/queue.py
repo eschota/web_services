@@ -7,6 +7,7 @@ import io
 import json
 import math
 import os
+import shutil
 import time
 import uuid
 from pathlib import Path, PurePosixPath
@@ -487,6 +488,34 @@ CREATE INDEX IF NOT EXISTS idx_render_tasks_status ON render_tasks(status);
 """
 
 
+UPSCALE_VIDEO_TYPE = "upscale_video_x2"
+UPSCALE_VIDEO_WORKFLOW = "upscale_video_x2.json"
+
+
+def _upscale_sources_root() -> Path:
+    return config.TMP_DIR / "upscale-sources"
+
+
+def _upscale_source_path(task_id: str) -> Path:
+    """Where the downloaded original of an Upscale 2x clip waits for its render.
+
+    Its sound is muxed back into the finished clip; the directory is removed
+    when the task ends (done, error, cancel) and swept for orphans.
+    """
+    name = Path(str(task_id or "")).name
+    if not name or name != str(task_id) or name.startswith("."):
+        raise ValueError(f"unsafe task id for a source directory: {task_id!r}")
+    return _upscale_sources_root() / name / "source"
+
+
+def _drop_upscale_source(task_id: str) -> None:
+    try:
+        folder = _upscale_source_path(task_id).parent
+    except ValueError:
+        return
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 def _jpeg_sibling(png_path: Path) -> None:
     """Write a quality-85 JPEG next to a PNG artifact (C# parity)."""
     try:
@@ -668,6 +697,7 @@ class RenderQueue:
         if self._client is None:
             self._client = httpx.AsyncClient(follow_redirects=True)
         await self._resurrect()
+        self._sweep_upscale_sources()
         await self._reconcile_terminal_leases()
         if config.WIPE_QUEUE_ON_START:
             try:
@@ -1045,6 +1075,7 @@ class RenderQueue:
         task.artifact_sha256 = ""
         task.output_path = ""
         task.extra_outputs = {}
+        task.output_meta = None
         await self._persist(task)
         print(f"[Renderfin][Queue] task {task.id} resumed after a restart "
               f"({task.restart_resumes}/{config.RESTART_RESUME_MAX}, was on {box or '-'}: {freed})")
@@ -1233,6 +1264,62 @@ class RenderQueue:
 
     # ---------- persistence ----------
 
+    def _sweep_upscale_sources(self) -> int:
+        """Remove kept Upscale 2x originals whose task is no longer queued or running."""
+        root = _upscale_sources_root()
+        if not root.is_dir():
+            return 0
+        live = {
+            task.id for task in self._tasks.values()
+            if task.status in (TASK_PENDING, TASK_RENDERING)
+        }
+        removed = 0
+        for folder in root.iterdir():
+            if folder.name in live:
+                continue
+            shutil.rmtree(folder, ignore_errors=True) if folder.is_dir() else folder.unlink(missing_ok=True)
+            removed += 1
+        if removed:
+            print(f"[Renderfin][Queue] swept {removed} orphaned upscale source(s)")
+        return removed
+
+    async def _finalize_upscale_video(self, task: RenderTask) -> None:
+        """Give the enlarged clip the source's own sound, then describe it.
+
+        ComfyUI re-encodes the audio it was handed (AAC mono); the source's
+        first audio stream is copied back unchanged next to the copied picture
+        (ffmpeg -c:v copy -c:a copy, cut to the picture's length). The kept
+        original is used, or the clip is fetched again if it is gone. A remux
+        that fails keeps the paid render and says so in ``output_meta``.
+        """
+        from . import video_input
+
+        out_path = Path(task.output_path)
+        remuxed = out_path.with_name(f".{task.id}.remux{task.output_ext or '.mp4'}")
+        try:
+            source = _upscale_source_path(task.id)
+            if not source.is_file():
+                source.parent.mkdir(parents=True, exist_ok=True)
+                assert self._client is not None
+                await video_input.download_source_video(
+                    self._client, str(task.prompt.control_video_url or ""), source)
+            meta = await video_input.remux_source_audio(out_path, source, remuxed)
+            _atomic_fsync_bytes(out_path, remuxed.read_bytes())
+            task.output_meta = meta
+        except Exception as exc:
+            meta: Dict[str, Any] = {}
+            try:
+                meta = video_input.media_meta(await video_input.probe_media(out_path))
+            except Exception:
+                meta = {}
+            meta["audio_source"] = "render"
+            meta["audio_note"] = f"original audio not restored: {str(exc)[:300]}"
+            task.output_meta = meta
+            print(f"[Renderfin][Queue] upscale audio remux failed for {task.id}: {exc}")
+        finally:
+            remuxed.unlink(missing_ok=True)
+            _drop_upscale_source(task.id)
+
     async def _persist(self, task: RenderTask) -> None:
         if self._db is None:
             return
@@ -1272,6 +1359,8 @@ class RenderQueue:
             await self._refresh_servers()
         if self._tick_count % 10 == 1:
             await self._reconcile_terminal_leases()
+        if self._tick_count % 600 == 0:
+            self._sweep_upscale_sources()
         now = time.time()
         if now - self._last_dispatch >= config.DISPATCH_INTERVAL_SECONDS:
             # dispatch in parallel: keep going while there are pending tasks
@@ -1753,6 +1842,7 @@ class RenderQueue:
         victim.artifact_sha256 = ""
         victim.output_path = ""
         victim.extra_outputs = {}
+        victim.output_meta = None
         await self._persist(victim)
         return freed
 
@@ -2179,6 +2269,7 @@ class RenderQueue:
             task.artifact_sha256 = ""
             task.output_path = ""
             task.extra_outputs = {}
+            task.output_meta = None
             task.managed_comfy_artifact_spool_state = ""
             task.managed_comfy_artifact_relative_path_string = ""
             task.managed_comfy_artifact_size_int = 0
@@ -2447,12 +2538,17 @@ class RenderQueue:
             )
         if control_url:
             from .video_input import download_prepare_video
+            upscale_clip = workflow_file == UPSCALE_VIDEO_WORKFLOW
             name, data = await download_prepare_video(
                 self._client, control_url, prompt.frame_count,
                 # An enlargement keeps the clip's own length; no held tail.
-                allow_shorter=workflow_file == "upscale_video_x2.json",
+                allow_shorter=upscale_clip,
                 # The enlarged clip keeps its sound (CreateVideo takes it from LoadVideo).
-                keep_audio=workflow_file == "upscale_video_x2.json")
+                keep_audio=upscale_clip,
+                # ...and its own frame rate; frame_count is then the ceiling.
+                source_fps=upscale_clip,
+                # The original waits for the render: its audio is muxed back.
+                keep_source_at=_upscale_source_path(task.id) if upscale_clip else None)
             control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)
@@ -3627,6 +3723,9 @@ class RenderQueue:
         task.output_path = str(out_path)
         if task.output_ext == ".png":
             _jpeg_sibling(out_path)
+        if ptype == UPSCALE_VIDEO_TYPE:
+            # Before Done: the published clip carries the source's own sound.
+            await self._finalize_upscale_video(task)
 
         if ptype in ("t_pose", "t_poses"):
             assert iso_data is not None
@@ -4025,6 +4124,7 @@ class RenderQueue:
             task.error = error[:1000]
             task.finished_at = time.time()
             await self._persist(task)
+            _drop_upscale_source(task.id)
             await self._release_workload(task, outcome="preempted")
             print(f"[Renderfin][Queue] task {task.id} FAILED after exact preempt: {error[:200]}")
             return
@@ -4033,6 +4133,7 @@ class RenderQueue:
         task.error = error[:1000]
         task.finished_at = time.time()
         await self._persist(task)
+        _drop_upscale_source(task.id)
         if self._client is not None:
             await self._release_workload(task, outcome="released")
         print(f"[Renderfin][Queue] task {task.id} FAILED: {error[:200]}")

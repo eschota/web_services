@@ -274,6 +274,10 @@ class RenderTask(BaseModel):
     # box. At RENDERFIN_TIER_PREEMPT_MAX_PER_TASK it is never preempted again
     # and goes first in its tier.
     preemptions: int = 0
+    # Upscale 2x (2026-11-07): what the finished clip is - {w, h, fps,
+    # fps_string, duration, audio: {codec, channels, sample_rate, bit_rate} or
+    # None, audio_source, audio_note?}. Persisted with the row.
+    output_meta: Optional[Dict[str, Any]] = None
 
     def public_dict(self) -> Dict[str, Any]:
         from . import priority
@@ -291,6 +295,7 @@ class RenderTask(BaseModel):
             "output_url": self.output_url,
             "output_url_string": self.output_url,
             "extra_outputs": self.extra_outputs,
+            "output_meta": self.output_meta,
             "error": self.error,
             "error_string": self.error,
             "user_name": self.prompt.user_name,
