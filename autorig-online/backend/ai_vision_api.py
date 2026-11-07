@@ -75,7 +75,13 @@ async def api_render_task_status(task_id: str):
             # Scheduling tier (2026-11-06): mplus > autorig > generation > background.
             "tier_string": str(row.get("tier_string") or ""),
             # What the delivered file is (upscale2x video, 2026-11-07): {w,h,fps,duration,audio}; {} if unknown.
-            "output_meta": row.get("output_meta") if isinstance(row.get("output_meta"), dict) else {}}
+            "output_meta": row.get("output_meta") if isinstance(row.get("output_meta"), dict) else {},
+            # Upscale 2x in segments (2026-11-07): where a long clip is.
+            "segments_int": int(row.get("segments_int") or 0),
+            "segments_done_int": int(row.get("segments_done_int") or 0),
+            "segment_index_int": int(row.get("segment_index_int") or 0),
+            "progress_float": float(row.get("progress_float") or 0),
+            "stage_string": str(row.get("stage_string") or "")}
     try:
         import user_language
         if result["notice_string"] and not result["finished_bool"]:

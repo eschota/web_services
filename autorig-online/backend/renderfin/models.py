@@ -278,6 +278,20 @@ class RenderTask(BaseModel):
     # fps_string, duration, audio: {codec, channels, sample_rate, bit_rate} or
     # None, audio_source, audio_note?}. Persisted with the row.
     output_meta: Optional[Dict[str, Any]] = None
+    # Upscale 2x of a clip in segments (renderfin.upscale_video): the admitted
+    # clip's plan, how many pieces it has, how many are enlarged, and what the
+    # task is doing now ("splitting the clip", "upscaling segment 3/12", ...).
+    upscale_plan: Optional[Dict[str, Any]] = None
+    segments_int: int = 0
+    segments_done_int: int = 0
+    stage_string: str = ""
+
+    def progress_float(self) -> float:
+        if self.status == TASK_DONE:
+            return 1.0
+        if self.segments_int > 0:
+            return round(min(1.0, self.segments_done_int / self.segments_int), 4)
+        return 0.0
 
     def public_dict(self) -> Dict[str, Any]:
         from . import priority
@@ -296,6 +310,14 @@ class RenderTask(BaseModel):
             "output_url_string": self.output_url,
             "extra_outputs": self.extra_outputs,
             "output_meta": self.output_meta,
+            "segments_int": int(self.segments_int or 0),
+            "segments_done_int": int(self.segments_done_int or 0),
+            # 1-based piece being enlarged now; 0 when none is.
+            "segment_index_int": (
+                min(self.segments_done_int + 1, self.segments_int)
+                if self.segments_int and self.status in (TASK_PENDING, TASK_RENDERING) else 0),
+            "progress_float": self.progress_float(),
+            "stage_string": self.stage_string or "",
             "error": self.error,
             "error_string": self.error,
             "user_name": self.prompt.user_name,

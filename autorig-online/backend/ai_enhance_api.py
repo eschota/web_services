@@ -138,19 +138,30 @@ async def _resolve_source(client: httpx.AsyncClient, image_url: Optional[str],
 
 
 async def _run(service: str, payload: Dict[str, object], wait_seconds: Optional[float],
-               *, produces: str = "image") -> Dict[str, object]:
+               *, produces: str = "image",
+               submit_timeout: float = SUBMIT_TIMEOUT_SECONDS) -> Dict[str, object]:
     """Submit one renderfin job and answer in the shape /api/controlnet uses."""
     async with httpx.AsyncClient() as client:
         try:
             payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
             response = await client.post(RENDERFIN_BASE + "/api-render", json=payload,
-                                         timeout=SUBMIT_TIMEOUT_SECONDS)
+                                         timeout=submit_timeout)
         except Exception:
             logger.exception("Renderfin did not accept an enhancement request")
             raise HTTPException(status_code=502, detail={
                 "error_string": "enhance_service_unreachable",
                 "message_string": "The image farm did not answer",
             }) from None
+        if response.status_code == 422:
+            # Renderfin refused the input itself (Upscale 2x: video_too_long,
+            # video_too_large, unsupported_codec, video_unavailable): pass the
+            # coded reason on unchanged.
+            try:
+                refused = (response.json() or {}).get("detail")
+            except Exception:
+                refused = None
+            if isinstance(refused, dict) and refused.get("error_string"):
+                raise HTTPException(status_code=422, detail=refused)
         if response.status_code not in (200, 202):
             raise HTTPException(status_code=502, detail={
                 "error_string": "enhance_service_rejected",
@@ -273,6 +284,7 @@ async def _uncached_upscale(body: UpscaleRequest, tier: str = ""):
 # The fast x2 model, on every image box since 2026-09-26 (f5, f15, Raptor).
 UPSCALE_X2_MODEL = "RealESRGAN_x2.pth"
 VIDEO_SUFFIXES = (".mp4", ".webm", ".mov", ".m4v")
+VIDEO_SUBMIT_TIMEOUT_SECONDS = 240.0
 
 
 class Upscale2xRequest(BaseModel):
@@ -289,8 +301,10 @@ async def api_upscale2x_docs():
         "required_fields_array": ["image_url (picture or clip) or image_base64 or video_url"],
         "model_string": UPSCALE_X2_MODEL, "factor_int": 2,
         "note_string": ("Output = input x2. A clip is enlarged frame by frame at its own frame "
-                        "rate (up to 16.4 s and 393 frames: 13.1 s at 30 fps, 6.5 s at 60 fps) "
-                        "and keeps its original audio track unchanged."),
+                        "rate, in segments, and keeps its original audio track bit for bit. "
+                        "Limits: 60 s and 1800 frames, 200 MB, long side 2048 px; audio "
+                        "aac/mp3/ac3/eac3/alac/opus. Refusals: HTTP 422 with error_string "
+                        "video_too_long, video_too_large, unsupported_codec or video_unavailable."),
         "server_time_unix_int": int(time.time()),
     }
 
@@ -301,7 +315,7 @@ async def api_upscale2x(request: Request, body: Upscale2xRequest):
     tier = _request_tier(request)
     return await ai_request_cache.run_cached(
         "upscale2x", body.model_dump(exclude_none=True),
-        lambda: _uncached_upscale2x(body, tier), namespace=CACHE_NAMESPACE + "-x2")
+        lambda: _uncached_upscale2x(body, tier), namespace=CACHE_NAMESPACE + "-x2-seg")  # 2026-11-07: own fps, original audio, segments
 
 
 def _is_video_url(url: str) -> bool:
@@ -323,12 +337,14 @@ async def _uncached_upscale2x(body: Upscale2xRequest, tier: str = ""):
             # neither, so it carries a label the workflow never reads.
             "prompt": "upscale 2x",
             "control_video_url": clip,
-            # 8k+1 ceiling of the clip loader; a shorter clip keeps its length.
+            # Not used by the segmented clip path (renderfin.upscale_video plans it).
             "frame_count": 393,
             "upscale_model": UPSCALE_X2_MODEL,
             "main_size_width": 1920, "main_size_height": 1080,
         }
-        answer = await _run("upscale2x", _with_tier(payload, tier), body.wait_seconds, produces="video")
+        # Renderfin downloads (<= 200 MB) and probes the clip before it answers.
+        answer = await _run("upscale2x", _with_tier(payload, tier), body.wait_seconds, produces="video",
+                            submit_timeout=VIDEO_SUBMIT_TIMEOUT_SECONDS)
     else:
         async with httpx.AsyncClient() as client:
             source = await _resolve_source(client, body.image_url, body.image_base64)

@@ -676,9 +676,10 @@ async def download_prepare_prefix(
 # clip's first audio stream back, copied packet for packet, next to the
 # rendered picture (also copied).
 
-# Audio codecs ffmpeg muxes into MP4 by stream copy and browsers play.
+# Audio codecs ffmpeg muxes into MP4 by stream copy and browsers play. Any
+# other codec is refused before rendering (stock video keeps its sound
+# bit-exact; there is no re-encode fallback since 2026-11-07).
 MP4_COPYABLE_AUDIO = frozenset({"aac", "mp3", "ac3", "eac3", "alac", "opus"})
-FALLBACK_AUDIO_BITRATE = 320_000
 REMUX_TIMEOUT_SECONDS = 300.0
 
 
@@ -767,13 +768,12 @@ def build_remux_command(
     *,
     source_audio: Optional[Dict[str, Any]],
     duration: float,
-    force_reencode: bool = False,
 ) -> Tuple[List[str], str]:
-    """The ffmpeg argv and the audio mode: ``none``, ``copy`` or ``aac``.
+    """The ffmpeg argv and the audio mode: ``none`` or ``copy``.
 
     Picture: the rendered video stream, copied. Sound: the source's first
-    audio stream, copied when MP4 takes the codec as is, otherwise AAC at the
-    source's channels and sample rate. Cut to the rendered picture's length.
+    audio stream, copied packet for packet. Cut to the rendered picture's
+    length. A codec MP4 cannot carry by copy is refused, never re-encoded.
     """
     argv: List[str] = [
         FFMPEG_BIN, "-v", "error", "-y",
@@ -787,33 +787,37 @@ def build_remux_command(
         argv += ["-an"]
     else:
         codec = str(source_audio.get("codec") or "").lower()
-        if codec in MP4_COPYABLE_AUDIO and not force_reencode:
-            mode = "copy"
-            argv += ["-map", "1:a:0?", "-c:a", "copy"]
-        else:
-            mode = "aac"
-            bit_rate = source_audio.get("bit_rate") or FALLBACK_AUDIO_BITRATE
-            bit_rate = min(int(bit_rate), FALLBACK_AUDIO_BITRATE)
-            argv += ["-map", "1:a:0?", "-c:a", "aac", "-b:a", str(bit_rate)]
-            if source_audio.get("channels"):
-                argv += ["-ac", str(int(source_audio["channels"]))]
-            if source_audio.get("sample_rate"):
-                argv += ["-ar", str(int(source_audio["sample_rate"]))]
+        if codec not in MP4_COPYABLE_AUDIO:
+            raise VideoInputError(
+                f"source audio {codec or 'unknown'} cannot be copied into MP4 unchanged")
+        mode = "copy"
+        argv += ["-map", "1:a:0", "-c:a", "copy"]
     if duration > 0:
         argv += ["-t", f"{duration:.6f}"]
-    argv += ["-movflags", "+faststart", "-f", "mp4", str(output)]
+    # ComfyUI writes its whole workflow into the container tags; the
+    # delivered clip carries none of it.
+    argv += ["-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", str(output)]
     return argv, mode
 
 
-_AUDIO_SOURCE = {"none": "none", "copy": "original", "aac": "original_reencoded_aac"}
+_AUDIO_SOURCE = {"none": "none", "copy": "original"}
+
+
+async def audio_packets(path: Path) -> bytes:
+    """The first audio stream's packets, concatenated, as stored (no decode)."""
+    return await _run_process(
+        FFMPEG_BIN, "-v", "error", "-i", str(path), "-map", "0:a:0", "-c", "copy",
+        "-f", "data", "-", timeout=REMUX_TIMEOUT_SECONDS)
 
 
 async def remux_source_audio(rendered: Path, source: Path, output: Path) -> Dict[str, Any]:
     """Write ``output``: the rendered picture with the source clip's own sound.
 
     Returns ``output_meta`` for the finished clip: ``{w, h, fps, fps_string,
-    duration, audio, audio_source}`` plus ``audio_note`` when the sound had to
-    be re-encoded. A source without sound gives a clip without sound.
+    duration, audio, audio_source}``. A source without sound gives a clip
+    without sound. The copied audio is checked against the source: its
+    packets must be the source's own, byte for byte (a prefix of them when the
+    picture is a fraction of a frame shorter than the sound).
     """
     rendered_probe = await probe_media(rendered)
     video = _first_stream(rendered_probe, "video")
@@ -823,26 +827,20 @@ async def remux_source_audio(rendered: Path, source: Path, output: Path) -> Dict
     source_audio = audio_meta(_first_stream(await probe_media(source), "audio"))
     argv, mode = build_remux_command(
         rendered, source, output, source_audio=source_audio, duration=duration)
-    note = ""
-    try:
-        await _run_process(*argv, timeout=REMUX_TIMEOUT_SECONDS)
-    except VideoInputError as exc:
-        if mode != "copy":
-            raise
-        # The codec name looked copyable but the muxer refused this stream.
-        argv, mode = build_remux_command(
-            rendered, source, output, source_audio=source_audio, duration=duration,
-            force_reencode=True)
-        note = f"stream copy refused ({str(exc)[-200:]}); "
-        await _run_process(*argv, timeout=REMUX_TIMEOUT_SECONDS)
+    await _run_process(*argv, timeout=REMUX_TIMEOUT_SECONDS)
     meta = media_meta(await probe_media(output))
+    if mode == "copy":
+        if not meta.get("audio"):
+            raise VideoInputError("the finished clip lost its audio stream")
+        copied, original = await audio_packets(output), await audio_packets(source)
+        if not copied or not original.startswith(copied):
+            raise VideoInputError("the finished clip's audio is not the source's own packets")
+        for key in ("codec", "channels", "sample_rate"):
+            if meta["audio"].get(key) != source_audio.get(key):
+                raise VideoInputError(
+                    f"the finished clip's audio {key} {meta['audio'].get(key)} differs "
+                    f"from the source's {source_audio.get(key)}")
+    elif meta.get("audio"):
+        raise VideoInputError("the finished clip has audio the source does not")
     meta["audio_source"] = _AUDIO_SOURCE[mode]
-    if mode == "aac":
-        bit_rate = min(int(source_audio.get("bit_rate") or FALLBACK_AUDIO_BITRATE),
-                       FALLBACK_AUDIO_BITRATE)
-        meta["audio_note"] = (
-            f"{note}source audio {source_audio.get('codec') or 'unknown'} cannot be copied "
-            f"into MP4; re-encoded to AAC {bit_rate // 1000} kbps keeping "
-            f"{source_audio.get('channels') or '?'} channel(s) at "
-            f"{source_audio.get('sample_rate') or '?'} Hz")
     return meta

@@ -329,8 +329,57 @@ async def api_render_post(request: Request) -> Dict[str, Any]:
     # without the M+ key (the site's own loopback calls are trusted).
     from . import priority
     prompt.priority_class = priority.sanitize_priority_class(prompt.priority_class, request.headers)
+    if (prompt.type or "").strip().lower() == "upscale_video_x2":
+        return await _enqueue_upscale_video(request, prompt)
     task = await _queue(request).enqueue(prompt)
     return {"output_url": task.output_url, "task_id": task.id}
+
+
+async def _enqueue_upscale_video(request: Request, prompt: RenderPrompt) -> Dict[str, Any]:
+    """Upscale 2x of a clip: admit it now, so a clip that cannot be done is
+    refused here (HTTP 422, ``detail.error_string``: video_too_long,
+    video_too_large, unsupported_codec, video_unavailable) instead of failing
+    in the queue. The clip is then split into pieces off the request."""
+    import shutil
+
+    import httpx
+
+    from . import upscale_video
+
+    queue = _queue(request)
+    staging = upscale_video.staging_root() / uuid.uuid4().hex
+    staged = staging / "source"
+    client = getattr(queue, "_client", None)
+    own = client is None
+    if own:
+        client = httpx.AsyncClient()
+    try:
+        try:
+            plan = await upscale_video.admit(client, prompt.control_video_url, staged)
+        except upscale_video.UpscaleError as exc:
+            raise HTTPException(status_code=422, detail={
+                "error_string": exc.code, "message_string": str(exc)[len(exc.code) + 2:],
+            }) from None
+
+        def attach(task) -> None:
+            target = upscale_video.source_path(task.id)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(staged), str(target))
+            task.upscale_plan = plan
+            task.segments_int = int(plan["segments_int"])
+            task.stage_string = "splitting the clip into segments"
+
+        task = await queue.enqueue(prompt, prepare=attach)
+        if hasattr(queue, "_ensure_upscale_split"):
+            queue._ensure_upscale_split(task)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+        if own:
+            await client.aclose()
+    return {"output_url": task.output_url, "task_id": task.id,
+            "segments_int": task.segments_int,
+            "frames_estimate_int": int(plan.get("frames_estimate_int") or 0),
+            "fps_string": plan.get("fps_string", "")}
 
 
 @router.api_route("/api-render-get-task-by-url", methods=["GET", "POST"])

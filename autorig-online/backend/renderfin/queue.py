@@ -17,6 +17,8 @@ import aiosqlite
 import httpx
 
 from . import (
+    upscale_video,
+    video_input,
     comfy_adapter,
     config,
     errors,
@@ -499,13 +501,14 @@ def _upscale_sources_root() -> Path:
 def _upscale_source_path(task_id: str) -> Path:
     """Where the downloaded original of an Upscale 2x clip waits for its render.
 
-    Its sound is muxed back into the finished clip; the directory is removed
-    when the task ends (done, error, cancel) and swept for orphans.
+    The directory also holds the clip's pieces before and after ComfyUI
+    (renderfin.upscale_video); its sound is muxed back into the finished clip.
+    It is removed when the task ends (done, error, cancel) and swept for
+    orphans.
     """
-    name = Path(str(task_id or "")).name
-    if not name or name != str(task_id) or name.startswith("."):
-        raise ValueError(f"unsafe task id for a source directory: {task_id!r}")
-    return _upscale_sources_root() / name / "source"
+    from . import upscale_video
+
+    return upscale_video.source_path(task_id)
 
 
 def _drop_upscale_source(task_id: str) -> None:
@@ -683,6 +686,8 @@ class RenderQueue:
         self._restart_poll_seconds = 5.0
         self._background: set = set()
         self._cancelling: set = set()
+        # task id -> the job splitting its clip into pieces (Upscale 2x)
+        self._upscale_splits: Dict[str, asyncio.Task] = {}
 
     # ---------- lifecycle ----------
 
@@ -729,6 +734,9 @@ class RenderQueue:
         for job in list(self._background):
             job.cancel()
         self._background.clear()
+        for job in list(self._upscale_splits.values()):
+            job.cancel()
+        self._upscale_splits.clear()
         if self._pump_task:
             self._pump_task.cancel()
             try:
@@ -812,6 +820,7 @@ class RenderQueue:
         *,
         queue_class: str = "interactive",
         logical_owner_task_id: str = "",
+        prepare: Optional[Any] = None,
     ) -> RenderTask:
         token = routing.scheduling_token(prompt)
         workflow_file, forced = routing.resolve_workflow_file(prompt)
@@ -842,6 +851,10 @@ class RenderQueue:
         task.output_url = (
             f"{config.PUBLIC_BASE_URL}/render/{prompt.user_name}/{task.id}{ext}"
         )
+        if prepare is not None:
+            # Before the task is visible to the pump (Upscale 2x moves its
+            # admitted clip in and attaches the plan here).
+            prepare(task)
         self._tasks[task.id] = task
         await self._persist(task)
         # A node rendered again from another Render press (another tab, a
@@ -1267,58 +1280,178 @@ class RenderQueue:
     def _sweep_upscale_sources(self) -> int:
         """Remove kept Upscale 2x originals whose task is no longer queued or running."""
         root = _upscale_sources_root()
-        if not root.is_dir():
-            return 0
         live = {
             task.id for task in self._tasks.values()
             if task.status in (TASK_PENDING, TASK_RENDERING)
         }
         removed = 0
-        for folder in root.iterdir():
+        for folder in (root.iterdir() if root.is_dir() else []):
             if folder.name in live:
                 continue
             shutil.rmtree(folder, ignore_errors=True) if folder.is_dir() else folder.unlink(missing_ok=True)
             removed += 1
+        try:
+            from . import upscale_video
+
+            removed += upscale_video.sweep_aged()
+        except Exception as exc:
+            print(f"[Renderfin][Queue] upscale sweep failed: {exc}")
         if removed:
-            print(f"[Renderfin][Queue] swept {removed} orphaned upscale source(s)")
+            print(f"[Renderfin][Queue] swept {removed} orphaned upscale file(s)")
         return removed
 
-    async def _finalize_upscale_video(self, task: RenderTask) -> None:
-        """Give the enlarged clip the source's own sound, then describe it.
+    # ---------- Upscale 2x of a clip, in segments (2026-11-07) ----------
 
-        ComfyUI re-encodes the audio it was handed (AAC mono); the source's
-        first audio stream is copied back unchanged next to the copied picture
-        (ffmpeg -c:v copy -c:a copy, cut to the picture's length). The kept
-        original is used, or the clip is fetched again if it is gone. A remux
-        that fails keeps the paid render and says so in ``output_meta``.
-        """
-        from . import video_input
+    @staticmethod
+    def _upscale_waiting_for_split(task: RenderTask) -> bool:
+        if (task.prompt.type or "").strip().lower() != UPSCALE_VIDEO_TYPE:
+            return False
+        return not (task.upscale_plan or {}).get("ready_bool")
 
-        out_path = Path(task.output_path)
-        remuxed = out_path.with_name(f".{task.id}.remux{task.output_ext or '.mp4'}")
+    def _ensure_upscale_split(self, task: RenderTask) -> None:
+        job = self._upscale_splits.get(task.id)
+        if job is not None and not job.done():
+            return
+        self._upscale_splits[task.id] = asyncio.create_task(self._split_upscale(task))
+
+    async def _split_upscale(self, task: RenderTask) -> None:
+        """Admit (if not yet) and cut the clip into pieces, off the pump."""
+        from . import upscale_video
+
         try:
-            source = _upscale_source_path(task.id)
-            if not source.is_file():
-                source.parent.mkdir(parents=True, exist_ok=True)
+            if task.upscale_plan is None:
+                # Queued by a caller that did not admit the clip itself.
+                task.stage_string = "checking the clip"
                 assert self._client is not None
-                await video_input.download_source_video(
-                    self._client, str(task.prompt.control_video_url or ""), source)
-            meta = await video_input.remux_source_audio(out_path, source, remuxed)
-            _atomic_fsync_bytes(out_path, remuxed.read_bytes())
-            task.output_meta = meta
+                task.upscale_plan = await upscale_video.admit(
+                    self._client, str(task.prompt.control_video_url or ""),
+                    upscale_video.source_path(task.id))
+                task.segments_int = int(task.upscale_plan["segments_int"])
+            task.stage_string = "splitting the clip into segments"
+            plan = await upscale_video.split(task.id, task.upscale_plan)
+            if task.status != TASK_PENDING:
+                return  # cancelled meanwhile; its directory is swept
+            task.upscale_plan = plan
+            task.segments_int = int(plan["segments_int"])
+            task.segments_done_int = 0
+            task.stage_string = f"queued: {task.segments_int} segment(s)"
+            await self._persist(task)
+            print(f"[Renderfin][Queue] upscale {task.id}: {plan['frames_int']} frames at "
+                  f"{plan['fps_string']} fps in {task.segments_int} segment(s) of "
+                  f"{plan['frames_per_segment_int']}")
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            meta: Dict[str, Any] = {}
-            try:
-                meta = video_input.media_meta(await video_input.probe_media(out_path))
-            except Exception:
-                meta = {}
-            meta["audio_source"] = "render"
-            meta["audio_note"] = f"original audio not restored: {str(exc)[:300]}"
-            task.output_meta = meta
-            print(f"[Renderfin][Queue] upscale audio remux failed for {task.id}: {exc}")
+            if task.status == TASK_PENDING:
+                error = str(exc) if isinstance(exc, upscale_video.UpscaleError) \
+                    else f"upscale_segment_failed: {exc}"
+                await self._fail(task, error)
         finally:
-            remuxed.unlink(missing_ok=True)
-            _drop_upscale_source(task.id)
+            self._upscale_splits.pop(task.id, None)
+
+    async def _finish_upscale_piece(
+        self, task: RenderTask, server: RenderServer, data: bytes, out_path: Path
+    ) -> bool:
+        """Keep one enlarged piece; True once the whole clip is at ``out_path``.
+
+        Before the last piece: the next one goes straight to the same box (or
+        back to the queue when that fails). After it: the pieces are joined
+        and given the source's own sound. A failure there fails the task; the
+        rendered picture stays in the diagnostics folder, never at the output
+        URL.
+        """
+        from . import upscale_video
+
+        plan = task.upscale_plan
+        if not plan or not plan.get("ready_bool"):
+            # A single-prompt render queued by an older release: one piece.
+            plan = None
+        index = int(task.segments_done_int or 0)
+        try:
+            if plan is None:
+                upscale_video.work_dir(task.id).mkdir(parents=True, exist_ok=True)
+                (upscale_video.work_dir(task.id) / "joined.mp4").write_bytes(data)
+            else:
+                await upscale_video.store_output(task.id, plan, index, data)
+        except upscale_video.UpscaleError as exc:
+            await self._fail(task, str(exc))
+            return False
+        if plan is not None and index + 1 < int(plan["segments_int"]):
+            await self._next_upscale_piece(task, server, index + 1)
+            return False
+        task.segments_done_int = int(plan["segments_int"]) if plan else 1
+        task.segments_int = task.segments_int or 1
+        task.stage_string = "joining segments and muxing the original audio"
+        final = upscale_video.work_dir(task.id) / "final.mp4"
+        try:
+            if plan is None:
+                source = upscale_video.source_path(task.id)
+                if not source.is_file():
+                    raise upscale_video.UpscaleError(
+                        "audio_remux_failed", "the source clip is no longer on the server")
+                try:
+                    meta = await video_input.remux_source_audio(
+                        upscale_video.work_dir(task.id) / "joined.mp4", source, final)
+                except video_input.VideoInputError as exc:
+                    raise upscale_video.UpscaleError("audio_remux_failed", str(exc)[-400:]) from None
+                meta.update({"segments_int": 1})
+            else:
+                meta = await upscale_video.assemble(task.id, plan, final)
+            _atomic_fsync_bytes(out_path, final.read_bytes())
+        except Exception as exc:
+            kept = upscale_video.keep_for_diagnostics(task.id)
+            error = str(exc) if isinstance(exc, upscale_video.UpscaleError) \
+                else f"audio_remux_failed: {exc}"
+            print(f"[Renderfin][Queue] upscale {task.id} failed at the end ({error[:200]}); "
+                  f"rendered picture kept in {kept}")
+            await self._fail(task, error)
+            return False
+        task.output_path = str(out_path)
+        task.output_meta = meta
+        task.stage_string = "done"
+        _drop_upscale_source(task.id)
+        return True
+
+    async def _next_upscale_piece(self, task: RenderTask, server: RenderServer, index: int) -> None:
+        """Close the finished piece's prompt and submit piece ``index``."""
+        from . import upscale_video
+
+        if task.workload_lease_id and task.managed_prompt:
+            try:
+                await workload_lease.host_comfy_control(
+                    self._client, server=server, action="complete",
+                    prompt_id=task.comfy_prompt_id, logical_task_id=task.id,
+                    lease_id=task.workload_lease_id, request_id=task.workload_request_id,
+                    artifact_sha256=task.artifact_sha256)
+            except Exception as exc:
+                print(f"[Renderfin][Queue] piece prompt completion for {task.id} deferred: {exc}")
+        # The finished prompt's lease is released as completed. The task stays
+        # Rendering (the pump never dispatches it twice) with a fresh identity
+        # and no prompt id: a restart from here re-queues it at this piece.
+        if task.workload_lease_id:
+            await self._release_workload(task, outcome="completed")
+        old_prompt_id = str(task.comfy_prompt_id or "")
+        if old_prompt_id and old_prompt_id not in task.retired_comfy_prompt_ids:
+            task.retired_comfy_prompt_ids.append(old_prompt_id)
+        task.comfy_prompt_id = ""
+        task.started_at = 0
+        task.artifact_sha256 = ""
+        task.workload_request_id = f"rf_{uuid.uuid4().hex}"
+        task.workload_lease_id = ""
+        task.workload_lease_state = "waiting"
+        task.managed_prompt = False
+        task.host_comfy_registered = False
+        task.segments_done_int = index
+        task.stage_string = f"upscaling segment {index + 1}/{task.segments_int}"
+        await self._persist(task)
+        try:
+            await self._ensure_workload_lease(task, server)
+            await self._submit_task(task, server)
+        except upscale_video.UpscaleError as exc:
+            await self._fail(task, str(exc))
+        except Exception as exc:
+            print(f"[Renderfin][Queue] piece {index + 1} of {task.id} back to the queue: {exc}")
+            await self._release_workload(task, outcome="released", retry=True)
 
     async def _persist(self, task: RenderTask) -> None:
         if self._db is None:
@@ -2068,6 +2201,9 @@ class RenderQueue:
         stalls: Dict[str, Tuple[str, str, int]],
     ) -> bool:
         for task in pending:
+            if self._upscale_waiting_for_split(task):
+                self._ensure_upscale_split(task)
+                continue
             too_big = self._too_large_for_farm(task)
             if too_big:
                 # No box that runs this workflow can hold it: say so now
@@ -2089,6 +2225,11 @@ class RenderQueue:
                 await self._ensure_workload_lease(task, server)
                 await self._submit_task(task, server)
                 return True
+            except upscale_video.UpscaleError as exc:
+                # Upscale 2x: the clip, not the box; the code leads the error.
+                await self._release_workload(task, outcome="released", retry=True)
+                await self._fail(task, str(exc))
+                continue
             except comfy_adapter.ComfyCapacityWait as exc:
                 # The render node atomically switched to Hunyuan after our
                 # queue probe. Keep the render pending without charging a
@@ -2536,19 +2677,21 @@ class RenderQueue:
             raise comfy_adapter.ComfyRequestError(
                 "A video control workflow requires its driving video"
             )
-        if control_url:
+        if control_url and workflow_file == UPSCALE_VIDEO_WORKFLOW:
+            # One piece of the admitted clip (renderfin.upscale_video): its own
+            # frame rate, no sound - the source's audio is muxed back at the end.
+            from . import upscale_video
+            if self._upscale_waiting_for_split(task):
+                raise upscale_video.UpscaleError(
+                    "upscale_segment_failed", "the clip is not split into segments yet")
+            index = int(task.segments_done_int or 0)
+            name, data = upscale_video.read_input(task.id, index)
+            task.stage_string = f"upscaling segment {index + 1}/{task.segments_int}"
+            control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
+        elif control_url:
             from .video_input import download_prepare_video
-            upscale_clip = workflow_file == UPSCALE_VIDEO_WORKFLOW
             name, data = await download_prepare_video(
-                self._client, control_url, prompt.frame_count,
-                # An enlargement keeps the clip's own length; no held tail.
-                allow_shorter=upscale_clip,
-                # The enlarged clip keeps its sound (CreateVideo takes it from LoadVideo).
-                keep_audio=upscale_clip,
-                # ...and its own frame rate; frame_count is then the ceiling.
-                source_fps=upscale_clip,
-                # The original waits for the render: its audio is muxed back.
-                keep_source_at=_upscale_source_path(task.id) if upscale_clip else None)
+                self._client, control_url, prompt.frame_count)
             control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)
@@ -3719,13 +3862,16 @@ class RenderQueue:
             )
 
         out_path = user_dir / f"{task.id}{task.output_ext}"
-        _atomic_fsync_bytes(out_path, data)
-        task.output_path = str(out_path)
+        if ptype == UPSCALE_VIDEO_TYPE:
+            # A piece of the clip; the output URL gets the whole clip, with the
+            # source's own sound, only after the last one.
+            if not await self._finish_upscale_piece(task, server, data, out_path):
+                return
+        else:
+            _atomic_fsync_bytes(out_path, data)
+            task.output_path = str(out_path)
         if task.output_ext == ".png":
             _jpeg_sibling(out_path)
-        if ptype == UPSCALE_VIDEO_TYPE:
-            # Before Done: the published clip carries the source's own sound.
-            await self._finalize_upscale_video(task)
 
         if ptype in ("t_pose", "t_poses"):
             assert iso_data is not None

@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from renderfin import config, video_input
-from renderfin.models import RenderPrompt, RenderServer, RenderTask, TASK_DONE, TASK_PENDING
+from renderfin.models import RenderPrompt, RenderTask, TASK_DONE, TASK_PENDING
 from renderfin.queue import (
     RenderQueue,
     _drop_upscale_source,
@@ -167,36 +167,25 @@ class RemuxCommandTests(unittest.TestCase):
         line = " ".join(argv)
         self.assertIn("-i r.mp4 -i s.mp4", line)
         self.assertIn("-map 0:v:0 -c:v copy", line)
-        self.assertIn("-map 1:a:0? -c:a copy", line)
+        self.assertIn("-map 1:a:0 -c:a copy", line)
         self.assertIn("-t 10.000000", line)
         self.assertIn("-movflags +faststart", line)
         self.assertEqual(argv[-1], "o.mp4")
+
+    def test_audio_mp4_cannot_carry_unchanged_is_refused_not_reencoded(self):
+        for codec in ("pcm_s16le", "vorbis", "flac"):
+            with self.assertRaises(video_input.VideoInputError):
+                self.build({"codec": codec, "channels": 2, "sample_rate": 48000, "bit_rate": None})
+
+    def test_comfy_metadata_is_dropped(self):
+        argv, _ = self.build(AAC_STEREO)
+        self.assertIn("-map_metadata -1", " ".join(argv))
 
     def test_source_without_audio_gives_silent_output(self):
         argv, mode = self.build(None)
         self.assertEqual(mode, "none")
         self.assertIn("-an", argv)
         self.assertNotIn("1:a:0?", argv)
-
-    def test_pcm_falls_back_to_aac_keeping_layout(self):
-        argv, mode = self.build({"codec": "pcm_s16le", "channels": 2, "sample_rate": 44100,
-                                 "bit_rate": 1411200})
-        self.assertEqual(mode, "aac")
-        line = " ".join(argv)
-        self.assertIn("-c:a aac -b:a 320000 -ac 2 -ar 44100", line)
-
-    def test_fallback_uses_source_bitrate_when_lower(self):
-        argv, _ = self.build({"codec": "vorbis", "channels": 1, "sample_rate": 22050,
-                              "bit_rate": 96000})
-        self.assertIn("-b:a 96000", " ".join(argv))
-        argv, _ = self.build({"codec": "pcm_s24le", "channels": 6, "sample_rate": 48000,
-                              "bit_rate": None})
-        self.assertIn("-b:a 320000 -ac 6 -ar 48000", " ".join(argv))
-
-    def test_forced_reencode_of_a_copyable_codec(self):
-        _, mode = self.build(AAC_STEREO, force_reencode=True)
-        self.assertEqual(mode, "aac")
-
 
 class OutputMetaTests(unittest.TestCase):
     def test_media_meta_shape(self):
@@ -253,122 +242,6 @@ def _upscale_task():
 
 
 class QueueHookTests(unittest.TestCase):
-    def test_submit_asks_for_source_fps_and_keeps_the_original(self):
-        captured = {}
-
-        class Stop(Exception):
-            pass
-
-        async def fake_prepare(client, url, frame_count, fps=24, **kwargs):
-            captured.update(kwargs, url=url, frame_count=frame_count, fps=fps)
-            raise Stop()
-
-        async def scenario():
-            with _QueueEnv():
-                queue = RenderQueue(registry=None, client=object())
-                task = _upscale_task()
-                server = RenderServer(render_server_name="box", render_server_url="http://127.0.0.1:9")
-                with patch.object(video_input, "download_prepare_video", fake_prepare):
-                    with self.assertRaises(Stop):
-                        await queue._submit_task(task, server)
-                return task
-
-        task = asyncio.run(scenario())
-        self.assertEqual(captured["url"], CLIP_URL)
-        self.assertEqual(captured["frame_count"], 393)
-        self.assertTrue(captured["source_fps"])
-        self.assertTrue(captured["keep_audio"])
-        self.assertTrue(captured["allow_shorter"])
-        self.assertEqual(Path(captured["keep_source_at"]).parent.name, task.id)
-
-    def test_finalize_remuxes_records_meta_and_cleans_up(self):
-        async def fake_remux(rendered, source, output):
-            self.assertEqual(source.read_bytes(), b"original")
-            output.write_bytes(b"remuxed")
-            return {"w": 4, "h": 4, "fps": 30.0, "duration": 1.0, "audio": None,
-                    "audio_source": "none"}
-
-        async def scenario():
-            with _QueueEnv() as env:
-                queue = RenderQueue(registry=None, client=object())
-                task = _upscale_task()
-                source = _upscale_source_path(task.id)
-                source.parent.mkdir(parents=True)
-                source.write_bytes(b"original")
-                out = env.root / "render" / "u" / f"{task.id}.mp4"
-                out.parent.mkdir(parents=True)
-                out.write_bytes(b"rendered")
-                task.output_path = str(out)
-                with patch.object(video_input, "remux_source_audio", fake_remux):
-                    await queue._finalize_upscale_video(task)
-                leftovers = [p.name for p in out.parent.iterdir()]
-                return task, out.read_bytes(), source.parent.exists(), leftovers
-
-        task, data, source_left, leftovers = asyncio.run(scenario())
-        self.assertEqual(data, b"remuxed")
-        self.assertEqual(task.output_meta["audio_source"], "none")
-        self.assertFalse(source_left)
-        self.assertEqual(leftovers, [f"{task.id}.mp4"])
-
-    def test_failed_remux_keeps_the_render_and_says_so(self):
-        async def broken_remux(rendered, source, output):
-            raise video_input.VideoInputError("ffmpeg failed")
-
-        async def fake_probe(path):
-            return {"streams": [{"codec_type": "video", "width": 4, "height": 4,
-                                 "avg_frame_rate": "30/1", "duration": "1.0"}]}
-
-        async def scenario():
-            with _QueueEnv() as env:
-                queue = RenderQueue(registry=None, client=object())
-                task = _upscale_task()
-                source = _upscale_source_path(task.id)
-                source.parent.mkdir(parents=True)
-                source.write_bytes(b"original")
-                out = env.root / "render" / "u" / f"{task.id}.mp4"
-                out.parent.mkdir(parents=True)
-                out.write_bytes(b"rendered")
-                task.output_path = str(out)
-                with patch.object(video_input, "remux_source_audio", broken_remux), \
-                        patch.object(video_input, "probe_media", fake_probe):
-                    await queue._finalize_upscale_video(task)
-                return task, out.read_bytes(), source.parent.exists()
-
-        task, data, source_left = asyncio.run(scenario())
-        self.assertEqual(data, b"rendered")
-        self.assertEqual(task.output_meta["audio_source"], "render")
-        self.assertIn("original audio not restored", task.output_meta["audio_note"])
-        self.assertEqual(task.output_meta["fps"], 30.0)
-        self.assertFalse(source_left)
-
-    def test_missing_kept_source_is_fetched_again(self):
-        fetched = []
-
-        async def fake_fetch(client, url, target):
-            fetched.append(url)
-            target.write_bytes(b"refetched")
-            return {}
-
-        async def fake_remux(rendered, source, output):
-            output.write_bytes(source.read_bytes())
-            return {"audio_source": "original"}
-
-        async def scenario():
-            with _QueueEnv() as env:
-                queue = RenderQueue(registry=None, client=object())
-                task = _upscale_task()
-                out = env.root / "render" / "u" / f"{task.id}.mp4"
-                out.parent.mkdir(parents=True)
-                out.write_bytes(b"rendered")
-                task.output_path = str(out)
-                with patch.object(video_input, "download_source_video", fake_fetch), \
-                        patch.object(video_input, "remux_source_audio", fake_remux):
-                    await queue._finalize_upscale_video(task)
-                return out.read_bytes()
-
-        self.assertEqual(asyncio.run(scenario()), b"refetched")
-        self.assertEqual(fetched, [CLIP_URL])
-
     def test_sweep_and_error_remove_orphans_only(self):
         async def scenario():
             with _QueueEnv():
@@ -473,6 +346,14 @@ class RealFfmpegRemuxTests(unittest.TestCase):
     def test_rendered_mono_reencode_is_replaced_by_the_original_track(self):
         self.check_remux(self.render(with_audio=True))
 
+    def test_pcm_mov_source_is_refused(self):
+        mov = self.dir / "source.mov"
+        _ffmpeg("-i", str(self.source), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+                "-c:a", "pcm_s16le", str(mov))
+        with self.assertRaises(video_input.VideoInputError):
+            asyncio.run(video_input.remux_source_audio(
+                self.render(with_audio=False), mov, self.dir / "out_pcm.mp4"))
+
     def test_silent_source_gives_silent_output(self):
         silent = self.dir / "silent.mp4"
         _ffmpeg("-i", str(self.source), "-map", "0:v", "-c", "copy", str(silent))
@@ -482,19 +363,6 @@ class RealFfmpegRemuxTests(unittest.TestCase):
         self.assertNotIn("audio", _ffprobe(output))
         self.assertIsNone(meta["audio"])
         self.assertEqual(meta["audio_source"], "none")
-
-    def test_pcm_mov_source_is_reencoded_to_aac_keeping_layout(self):
-        mov = self.dir / "source.mov"
-        _ffmpeg("-i", str(self.source), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
-                "-c:a", "pcm_s16le", str(mov))
-        output = self.dir / "out_pcm.mp4"
-        meta = asyncio.run(video_input.remux_source_audio(self.render(with_audio=False), mov, output))
-        audio = _ffprobe(output)["audio"]
-        self.assertEqual(audio["codec_name"], "aac")
-        self.assertEqual((audio["channels"], audio["sample_rate"]), (2, "48000"))
-        self.assertEqual(meta["audio_source"], "original_reencoded_aac")
-        self.assertIn("pcm_s16le", meta["audio_note"])
-        self.assertIn("320 kbps", meta["audio_note"])
 
     def test_prepare_keeps_30fps_and_full_length(self):
         async def scenario():
