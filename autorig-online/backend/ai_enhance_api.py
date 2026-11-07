@@ -25,7 +25,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 import ai_graph_context
@@ -40,6 +40,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 RENDERFIN_BASE = os.getenv("RENDERFIN_INTERNAL_URL", "http://127.0.0.1:8210").rstrip("/")
+
+
+def _request_tier(request: Optional[Request]) -> str:
+    """The tier the caller may claim (2026-11-07): M+ sends X-Autorig-Priority: mplus + X-Priority-Key, the
+    same rule as /api/vision. Only "mplus" is passed on; it ranks the job ahead of generation on the image boxes."""
+    if request is None:
+        return ""
+    try:
+        from ai_vision_api import _request_tier as vision_tier
+        return vision_tier(request)
+    except Exception:
+        logger.exception("priority headers not read")
+        return ""
+
+
+def _with_tier(payload: Dict[str, object], tier: str) -> Dict[str, object]:
+    """Renderfin reads priority_class from the body; an internal call (no proxy headers) is trusted as is."""
+    if tier == "mplus":
+        payload["priority_class"] = "mplus"
+    return payload
 
 # Mirrors renderfin.routing.ENHANCE_MAX_SIDE. The backend and renderfin are
 # separate processes, so this is stated rather than imported; the renderfin
@@ -201,14 +221,17 @@ async def api_upscale_docs():
 
 
 @router.post("/api/upscale")
-async def api_upscale(body: UpscaleRequest):
+async def api_upscale(request: Request, body: UpscaleRequest):
     import ai_request_cache
+    # The tier is not part of the cache key: a cached answer is the same picture, and the job it names keeps
+    # the tier it was queued with.
+    tier = _request_tier(request)
     return await ai_request_cache.run_cached(
         "upscale", body.model_dump(exclude_none=True),
-        lambda: _uncached_upscale(body), namespace=CACHE_NAMESPACE)
+        lambda: _uncached_upscale(body, tier), namespace=CACHE_NAMESPACE)
 
 
-async def _uncached_upscale(body: UpscaleRequest):
+async def _uncached_upscale(body: UpscaleRequest, tier: str = ""):
     mode = str(body.mode or "fast").strip().lower()
     if mode not in ("fast", "refine"):
         raise HTTPException(status_code=400, detail={
@@ -242,7 +265,7 @@ async def _uncached_upscale(body: UpscaleRequest):
         payload["prompt"] = str(body.prompt or "").strip()
         # Low enough that the subject is kept and only its texture is redrawn.
         payload["creativity"] = 0.35
-    return await _run("upscale", payload, body.wait_seconds)
+    return await _run("upscale", _with_tier(payload, tier), body.wait_seconds)
 
 
 # ---------------------------------------------------------------- upscale 2x
@@ -273,11 +296,12 @@ async def api_upscale2x_docs():
 
 
 @router.post("/api/upscale2x")
-async def api_upscale2x(body: Upscale2xRequest):
+async def api_upscale2x(request: Request, body: Upscale2xRequest):
     import ai_request_cache
+    tier = _request_tier(request)
     return await ai_request_cache.run_cached(
         "upscale2x", body.model_dump(exclude_none=True),
-        lambda: _uncached_upscale2x(body), namespace=CACHE_NAMESPACE + "-x2")
+        lambda: _uncached_upscale2x(body, tier), namespace=CACHE_NAMESPACE + "-x2")
 
 
 def _is_video_url(url: str) -> bool:
@@ -285,7 +309,7 @@ def _is_video_url(url: str) -> bool:
     return path.endswith(VIDEO_SUFFIXES)
 
 
-async def _uncached_upscale2x(body: Upscale2xRequest):
+async def _uncached_upscale2x(body: Upscale2xRequest, tier: str = ""):
     clip = str(body.video_url or "").strip()
     if not clip and _is_video_url(str(body.image_url or "")):
         clip = str(body.image_url).strip()
@@ -304,7 +328,7 @@ async def _uncached_upscale2x(body: Upscale2xRequest):
             "upscale_model": UPSCALE_X2_MODEL,
             "main_size_width": 1920, "main_size_height": 1080,
         }
-        answer = await _run("upscale2x", payload, body.wait_seconds, produces="video")
+        answer = await _run("upscale2x", _with_tier(payload, tier), body.wait_seconds, produces="video")
     else:
         async with httpx.AsyncClient() as client:
             source = await _resolve_source(client, body.image_url, body.image_base64)
@@ -315,7 +339,7 @@ async def _uncached_upscale2x(body: Upscale2xRequest):
             "main_size_width": width, "main_size_height": height,
             "upscale_model": UPSCALE_X2_MODEL,
         }
-        answer = await _run("upscale2x", payload, body.wait_seconds)
+        answer = await _run("upscale2x", _with_tier(payload, tier), body.wait_seconds)
     answer["output_url_string"] = answer.get("video_url_string") or answer.get("image_url_string") or ""
     return answer
 

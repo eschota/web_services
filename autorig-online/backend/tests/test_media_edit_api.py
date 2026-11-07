@@ -458,6 +458,8 @@ class FleetTests(Base):
         self.assertTrue(out["nodes_object"]["f13-ai"]["capable"])
         self.assertFalse(out["nodes_object"]["f2-ai"]["capable"])
         self.assertFalse(out["nodes_object"]["worker-4090-ai"]["capable"])
+        self.assertTrue(out["nodes_object"]["worker-4090-ai"]["online"])        # old node: online, not capable
+        self.assertFalse(out["nodes_object"]["f2-ai"]["online"])
 
 
 class EndpointTests(Base):

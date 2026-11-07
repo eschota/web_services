@@ -418,7 +418,10 @@ async def _probe(client: httpx.AsyncClient, worker: Dict[str, object]) -> Option
         response = await client.get(ai_vision_api._ai_base(worker) + "/server-status",
                                     headers={"Authorization": f"Bearer {worker['token']}"}, timeout=5.0)
         if response.status_code == 200:
-            info = media_info(response.json() or {})
+            payload = response.json() or {}
+            # A node that answers but predates media edit is online, just not capable.
+            info = media_info(payload) or {"capable": False, "legacy": True,
+                                           "version": str(payload.get("server_version") or "")}
     except Exception:
         info = None
     _PROBES[key] = (time.monotonic(), info)
