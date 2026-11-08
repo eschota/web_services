@@ -460,6 +460,98 @@ class AdvanceTests(Base):
         self.assertIsNone(me._record("me.f13-ai.n1"))
 
 
+class DownloadRetryTests(Base):
+    """2026-11-08: a node-side source_download_failed is retried once on another box."""
+
+    def submit_one(self, handler):
+        self.transport(handler)
+        payload = {"source_url": "https://storage.example.com/download/k?sig=x", "media_kind": "image",
+                   "operation": {"hflip": True}, "client_ref": "mplus:b:i:flip"}
+        return run(me.submit(me.parse_media_edit_request(payload), payload, "mplus"))
+
+    def test_failed_download_moves_to_another_node_once(self):
+        posts = []
+
+        def handler(request):
+            host = request.url.host
+            if request.url.path.endswith("/server-status"):
+                load = {"n13": 0, "n2": 1, "n4090": 1}[host]
+                return httpx.Response(200, json={"media_edit": media_block(running=load)})
+            if request.method == "POST" and request.url.path.endswith("/media-edit"):
+                posts.append(host)
+                body = json.loads(request.content)
+                self.assertEqual(body["source_url"], "https://storage.example.com/download/k?sig=x")
+                return httpx.Response(202, json={"task_id": "t-" + host})
+            if "/status/t-n13" in request.url.path:
+                return httpx.Response(200, json={"status": "Failed", "download_attempts": 4,
+                                                 "error": "source_download_failed: <urlopen error [WinError "
+                                                          "10060] timed out> (attempt 4 of 4)"})
+            if "/status/" in request.url.path:
+                return httpx.Response(200, json={"status": "Processing", "stage": "encoding", "progress": 50})
+            return httpx.Response(404)
+
+        answer = self.submit_one(handler)
+        task_id = answer["task_id_string"]
+        self.assertEqual(answer["node_string"], "f13-ai")
+        record = me._record(task_id)
+        self.assertIn("sig=x", json.dumps(record["retry_body"]))
+        out = run(me.status_response(task_id))
+        self.assertEqual(out["status_string"], "queued")              # not failed: moved
+        self.assertNotEqual(out["node_string"], "f13-ai")
+        self.assertEqual(out["retried_from_node_string"], "f13-ai")
+        self.assertEqual(out["task_id_string"], task_id)               # the client keeps its id
+        self.assertEqual(posts[0], "n13")
+        self.assertEqual(len(posts), 2)
+        self.assertEqual(run(me.status_response(task_id))["status_string"], "rendering")
+
+    def test_second_download_failure_is_reported(self):
+        def handler(request):
+            if request.url.path.endswith("/server-status"):
+                return httpx.Response(200, json={"media_edit": media_block()})
+            if request.method == "POST":
+                return httpx.Response(202, json={"task_id": "t-" + request.url.host})
+            return httpx.Response(200, json={"status": "Failed", "download_attempts": 4,
+                                             "error": "source_download_failed: timed out (attempt 4 of 4)"})
+
+        task_id = self.submit_one(handler)["task_id_string"]
+        first = run(me.status_response(task_id))
+        self.assertEqual(first["status_string"], "queued")
+        final = run(me.status_response(task_id))
+        self.assertEqual(final["status_string"], "failed")
+        self.assertTrue(final["error_string"].startswith("source_download_failed"))
+        self.assertEqual(final["download_attempts_int"], 4)
+        self.assertIsNone(me._record(task_id).get("retry_body"))      # the URL is gone with the task
+        on_disk = (me.DATA_DIR / "tasks" / (task_id + ".json")).read_text()
+        self.assertNotIn("sig=x", on_disk)
+
+    def test_other_failures_are_not_retried(self):
+        def handler(request):
+            if request.url.path.endswith("/server-status"):
+                return httpx.Response(200, json={"media_edit": media_block()})
+            if request.method == "POST":
+                return httpx.Response(202, json={"task_id": "t-" + request.url.host})
+            return httpx.Response(200, json={"status": "Failed", "error": "ffmpeg_failed: boom"})
+
+        task_id = self.submit_one(handler)["task_id_string"]
+        self.assertEqual(run(me.status_response(task_id))["status_string"], "failed")
+
+    def test_no_other_node_reports_failed(self):
+        only = [dict(WORKERS[0])]
+
+        def handler(request):
+            if request.url.path.endswith("/server-status"):
+                return httpx.Response(200, json={"media_edit": media_block()})
+            if request.method == "POST":
+                return httpx.Response(202, json={"task_id": "t1"})
+            return httpx.Response(200, json={"status": "Failed", "error": "source_download_failed: reset"})
+
+        with mock.patch.object(ai_vision_api, "_load_ai_workers", lambda: [dict(w) for w in only]):
+            task_id = self.submit_one(handler)["task_id_string"]
+            out = run(me.status_response(task_id))
+        self.assertEqual(out["status_string"], "failed")
+        self.assertIn("no other node", out["error_string"])
+
+
 class FleetTests(Base):
     def test_fleet_object(self):
         def handler(request):

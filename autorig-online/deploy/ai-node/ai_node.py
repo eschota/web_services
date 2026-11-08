@@ -54,7 +54,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional, Tuple
 
-VERSION = "ai-node-20261107-media-edit"
+VERSION = "ai-node-20261108-media-edit-retry"
 API_PREFIX = "/api-converter-glb"
 WORKLOAD_AI_VISION = "ai_vision"
 
@@ -1609,54 +1609,148 @@ def _source_suffix(url: str, content_type: str) -> str:
     return by_type.get(content_type, ".bin")
 
 
+MEDIA_DOWNLOAD_ATTEMPTS = 4
+MEDIA_DOWNLOAD_BACKOFF = (2.0, 5.0, 10.0)
+MEDIA_CONNECT_TIMEOUT = 20.0
+MEDIA_READ_TIMEOUT = 120.0
+
+
+def _set_read_timeout(response, seconds: float) -> None:
+    """urllib opens with one timeout (the connect); reads then get their own (best effort)."""
+    for path in (("fp", "raw", "_sock"), ("fp", "_sock"), ("fp", "fp", "raw", "_sock")):
+        obj = response
+        try:
+            for name in path:
+                obj = getattr(obj, name)
+            obj.settimeout(seconds)
+            return
+        except Exception:  # noqa: BLE001 - another shape of response object
+            continue
+
+
+def _download_fault(exc: BaseException) -> Tuple[bool, str]:
+    """(retryable, text). 5xx/429, timeouts, resets and dropped connections are retried; 4xx are not."""
+    import http.client
+    code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        return code >= 500 or code == 429, f"HTTP {code}"
+    reason = getattr(exc, "reason", None)
+    transient = (TimeoutError, socket.timeout, ConnectionError, http.client.HTTPException, OSError)
+    if isinstance(exc, transient) or isinstance(reason, transient):
+        return True, str(exc) or exc.__class__.__name__
+    return False, str(exc) or exc.__class__.__name__
+
+
 def download_media_source(url: str, work_dir: str, *, max_bytes: int, cancel: threading.Event,
                           deadline: float, on_progress: Optional[Callable[[float], None]] = None,
-                          allow_private: bool = False) -> Tuple[str, int]:
-    """Stream the source to work_dir/source.<ext>; (path, bytes). Never logs the URL (it may carry a key)."""
+                          allow_private: bool = False, stats: Optional[Dict[str, object]] = None,
+                          attempts: int = MEDIA_DOWNLOAD_ATTEMPTS,
+                          backoff: Tuple[float, ...] = MEDIA_DOWNLOAD_BACKOFF,
+                          connect_timeout: float = MEDIA_CONNECT_TIMEOUT,
+                          read_timeout: float = MEDIA_READ_TIMEOUT) -> Tuple[str, int]:
+    """Stream the source to work_dir/source.<ext>; (path, bytes). Never logs the URL (it may carry a key).
+
+    2026-11-08 (two M+ JPEGs failed with WinError 10060 on f7 and raptor while ~100 others went through): up to
+    `attempts` tries with `backoff` pauses on connect/read timeouts, resets and 5xx (never on 4xx); connect
+    timeout 20 s, read timeout 120 s; after a partial read the next try asks for the rest with Range and appends
+    when the server answers 206 from that offset, otherwise starts over. stats["attempts"] = tries used.
+    """
     try:
         validate_media_source_url(url, allow_private=allow_private)
     except RequestError as exc:
         raise NodeError(f"source_download_failed: {exc}") from None
     opener = urllib.request.build_opener(_MediaRedirect(allow_private))
-    request_obj = urllib.request.Request(url, headers={"User-Agent": "AutoRig-MediaEdit/1"})
-    try:
-        response = opener.open(request_obj, timeout=120)
-    except (urllib.error.URLError, OSError, RequestError, ValueError) as exc:
-        code = getattr(exc, "code", "")
-        raise NodeError(f"source_download_failed: {('HTTP %s' % code) if code else exc}") from None
-    with response:
-        content_type = (response.headers.get_content_type() or "").strip().lower()
+    stats = stats if stats is not None else {}
+    attempts = max(1, int(attempts))
+    path = ""
+    done = 0
+    total = 0
+    last = ""
+
+    def pause(attempt: int) -> None:
+        if backoff:
+            cancel.wait(backoff[min(attempt - 1, len(backoff) - 1)])
+        if cancel.is_set():
+            raise MediaCancelled("cancelled")
+
+    for attempt in range(1, attempts + 1):
+        stats["attempts"] = attempt
+        if cancel.is_set():
+            raise MediaCancelled("cancelled")
+        if time.time() > deadline:
+            raise NodeError("timeout: the source download took too long")
+        headers = {"User-Agent": "AutoRig-MediaEdit/1"}
+        if done > 0:
+            headers["Range"] = f"bytes={done}-"
         try:
-            total = int(response.headers.get("Content-Length") or 0)
-        except ValueError:
-            total = 0
-        if total > max_bytes:
-            raise NodeError(f"source_too_large: {total} bytes > {max_bytes}")
-        path = os.path.join(work_dir, "source" + _source_suffix(url, content_type))
-        done = 0
-        with open(path, "wb") as handle:
-            while True:
-                if cancel.is_set():
-                    raise MediaCancelled("cancelled")
-                if time.time() > deadline:
-                    raise NodeError("timeout: the source download took too long")
-                try:
-                    chunk = response.read(1024 * 1024)
-                except (OSError, ValueError) as exc:
-                    raise NodeError(f"source_download_failed: {exc}") from None
-                if not chunk:
-                    break
-                done += len(chunk)
-                if done > max_bytes:
-                    raise NodeError(f"source_too_large: more than {max_bytes} bytes")
-                handle.write(chunk)
-                if on_progress and total:
-                    on_progress(min(1.0, done / total))
-    if done == 0:
-        raise NodeError("source_download_empty")
-    if total and done < total:
-        raise NodeError(f"source_download_failed: got {done} of {total} bytes")
-    return path, done
+            response = opener.open(urllib.request.Request(url, headers=headers), timeout=connect_timeout)
+        except RequestError as exc:
+            raise NodeError(f"source_download_failed: {exc}") from None
+        except Exception as exc:  # noqa: BLE001 - URLError, HTTPError, OSError, http.client faults
+            retry, last = _download_fault(exc)
+            if not retry or attempt >= attempts:
+                raise NodeError(f"source_download_failed: {last} (attempt {attempt} of {attempts})") from None
+            logger.warning("media-edit source download attempt %d failed (%s); retrying", attempt, last)
+            pause(attempt)
+            continue
+        failed = ""
+        with response:
+            _set_read_timeout(response, read_timeout)
+            status = int(getattr(response, "status", 200) or 200)
+            content_type = (response.headers.get_content_type() or "").strip().lower()
+            try:
+                length = int(response.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            resumed = False
+            if done > 0 and status == 206:
+                match = re.match(r"bytes (\d+)-\d+/(\d+|\*)", str(response.headers.get("Content-Range") or ""))
+                if match and int(match.group(1)) == done:
+                    resumed = True
+                    if match.group(2) != "*":
+                        total = int(match.group(2))
+            if not resumed:
+                done = 0
+                total = length
+            if total > max_bytes:
+                raise NodeError(f"source_too_large: {total} bytes > {max_bytes}")
+            if not path:
+                path = os.path.join(work_dir, "source" + _source_suffix(url, content_type))
+            stats["resumed"] = bool(stats.get("resumed")) or resumed
+            with open(path, "ab" if resumed else "wb") as handle:
+                while True:
+                    if cancel.is_set():
+                        raise MediaCancelled("cancelled")
+                    if time.time() > deadline:
+                        raise NodeError("timeout: the source download took too long")
+                    try:
+                        chunk = response.read(1024 * 1024)
+                    except Exception as exc:  # noqa: BLE001 - timeouts, resets, IncompleteRead
+                        retry, failed = _download_fault(exc)
+                        if not retry:
+                            raise NodeError(f"source_download_failed: {failed}") from None
+                        break
+                    if not chunk:
+                        break
+                    done += len(chunk)
+                    if done > max_bytes:
+                        raise NodeError(f"source_too_large: more than {max_bytes} bytes")
+                    handle.write(chunk)
+                    if on_progress and total:
+                        on_progress(min(1.0, done / total))
+        if not failed and total and done < total:
+            failed = f"got {done} of {total} bytes"
+        if not failed:
+            if done == 0:
+                raise NodeError("source_download_empty")
+            return path, done
+        last = failed
+        if attempt >= attempts:
+            raise NodeError(f"source_download_failed: {last} (attempt {attempt} of {attempts})")
+        logger.warning("media-edit source download attempt %d broke off after %d bytes (%s); retrying",
+                       attempt, done, last)
+        pause(attempt)
+    raise NodeError(f"source_download_failed: {last}")
 
 
 # ---- ffmpeg discovery and probing
@@ -2209,6 +2303,7 @@ class MediaTask:
         self.output_meta: Dict[str, object] = {}
         self.source_meta: Dict[str, object] = {}
         self.source_bytes = 0
+        self.download_attempts = 0
         self.released = False
         self.cancel = threading.Event()
         self.process: Optional[subprocess.Popen] = None
@@ -2245,6 +2340,7 @@ class MediaTask:
             "output_name": os.path.basename(self.output_path) if self.output_path else "",
             "output_meta": dict(self.output_meta),
             "source_meta": dict(self.source_meta),
+            "download_attempts": self.download_attempts,
         }
 
 
@@ -2264,9 +2360,14 @@ def execute_media_task(task: MediaTask, *, ffmpeg: str, ffprobe: str, max_source
         source_path, size = local_source, os.path.getsize(local_source)
     else:
         task.stage = "downloading"
-        source_path, size = download_media_source(
-            str(spec["source_url"]), task.work_dir, max_bytes=max_source_bytes, cancel=task.cancel,
-            deadline=deadline, on_progress=set_progress(0.0, 20.0), allow_private=allow_private)
+        download: Dict[str, object] = {}
+        try:
+            source_path, size = download_media_source(
+                str(spec["source_url"]), task.work_dir, max_bytes=max_source_bytes, cancel=task.cancel,
+                deadline=deadline, on_progress=set_progress(0.0, 20.0), allow_private=allow_private,
+                stats=download)
+        finally:
+            task.download_attempts = int(download.get("attempts") or 0)
     task.source_bytes = size
     task.progress = max(task.progress, 20.0)
     task.stage = "probing"
@@ -2317,7 +2418,8 @@ def execute_media_task(task: MediaTask, *, ffmpeg: str, ffprobe: str, max_source
                         "bytes": os.path.getsize(output_path),
                         "fps": out.get("fps") if spec.get("media_kind") == "video" and at is None else 0,
                         "codec": out.get("codec"), "container": container,
-                        "audio": bool(out.get("has_audio"))}
+                        "audio": bool(out.get("has_audio")),
+                        "download_attempts_int": task.download_attempts}
 
 
 def make_selftest_clip(ffmpeg: str, path: str) -> None:

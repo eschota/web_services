@@ -503,3 +503,9 @@ ffprobe `ffmpeg -i` is parsed), `media_edit_work_dir` (`media-edit-work`, wiped 
 `media_edit_nvenc` (true), `media_edit_enabled` (true). The source is downloaded by the node: https only, public hosts
 (the image SSRF guard), redirects re-checked. Tests: `python -m unittest test_media_edit` (fake ffmpeg for progress /
 NVENC fallback / cancel, the real ffmpeg for flip / rotate / 9:16 smart crop / x2 / frame, HTTP end to end).
+
+Source download (2026-11-08, `ai-node-20261108-media-edit-retry`): up to 4 attempts with 2/5/10 s pauses on
+connect/read timeouts, resets and 5xx (never on 4xx), connect timeout 20 s, read timeout 120 s; after a partial read
+the next attempt asks for the rest with `Range` and appends on a matching 206, otherwise starts over. Status and
+`output_meta` carry `download_attempts` / `download_attempts_int`. The backend retries a `source_download_failed` task
+once on another node (same task id; `retried_from_node_string`). Tests: `python -m unittest test_media_download`.

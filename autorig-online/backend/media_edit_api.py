@@ -315,6 +315,10 @@ def _save(record: Dict[str, object]) -> None:
     path = _tasks_dir() / (str(record["task_id"]) + ".json")
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    try:
+        os.chmod(tmp, 0o600)                     # an active record carries the source URL (retry_body)
+    except OSError:
+        pass
     os.replace(tmp, path)
 
 
@@ -557,7 +561,7 @@ async def submit(spec: Dict[str, object], payload: Dict[str, object], tier: str)
                 if not node_task:
                     last = _error(502, "worker_no_task_id", f"Farm node {node} returned no task id")
                     continue
-                return _accepted(node, node_task, spec, tier, info)
+                return _accepted(node, node_task, spec, tier, info, body)
             reason = ""
             try:
                 reason = str((response.json() or {}).get("message") or (response.json() or {}).get("error") or "")
@@ -573,7 +577,7 @@ async def submit(spec: Dict[str, object], payload: Dict[str, object], tier: str)
 
 
 def _accepted(node: str, node_task: str, spec: Dict[str, object], tier: str,
-              info: Dict[str, object]) -> Dict[str, object]:
+              info: Dict[str, object], body: Optional[Dict[str, object]] = None) -> Dict[str, object]:
     task_id = f"me.{node}.{node_task}"
     now = time.time()
     source = urllib.parse.urlparse(str(spec["source_url"]))
@@ -584,6 +588,9 @@ def _accepted(node: str, node_task: str, spec: Dict[str, object], tier: str,
         "created_at": now, "started_at": 0.0, "finished_at": 0.0, "last_seen_at": now,
         "output_url": "", "output_path": "", "output_meta": {}, "source_meta": {}, "error": "", "encoder": "",
         "queue_position": 0, "node_version": info.get("version") or "",
+        # The node request, kept only while the task is active: one retry on another node after a failed source
+        # download (2026-11-08). It holds the source URL (maybe a signed key), so it is dropped when the task ends.
+        "retry_body": dict(body) if body else None, "retried_from": "", "download_attempts": 0,
     }
     _load_all()
     _RECORDS[task_id] = record
@@ -611,9 +618,13 @@ def public_status(record: Dict[str, object]) -> Dict[str, object]:
         "output_meta": {"w": int(meta.get("w") or 0), "h": int(meta.get("h") or 0),
                         "duration": float(meta.get("duration") or 0), "bytes": int(meta.get("bytes") or 0),
                         "fps": float(meta.get("fps") or 0), "container": meta.get("container") or "",
-                        "codec": meta.get("codec") or "", "audio": bool(meta.get("audio"))},
+                        "codec": meta.get("codec") or "", "audio": bool(meta.get("audio")),
+                        "download_attempts_int": int(meta.get("download_attempts_int")
+                                                     or record.get("download_attempts") or 0)},
         "source_meta": dict(record.get("source_meta") or {}),
         "encoder_string": record.get("encoder") or "",
+        "download_attempts_int": int(record.get("download_attempts") or 0),
+        "retried_from_node_string": record.get("retried_from") or "",
         "error_string": record.get("error") or "",
         "tier_string": record.get("tier") or "",
         "client_ref_string": record.get("client_ref") or "",
@@ -641,6 +652,8 @@ def apply_node_status(record: Dict[str, object], raw: Dict[str, object], now: Op
     record["progress"] = float(raw.get("progress") or 0)
     record["encoder"] = str(raw.get("encoder") or record.get("encoder") or "")
     record["queue_position"] = int(raw.get("queue_position") or 0)
+    if raw.get("download_attempts"):
+        record["download_attempts"] = int(raw["download_attempts"])
     if raw.get("source_meta"):
         record["source_meta"] = raw["source_meta"]
     # Backend clock, not the node's: node clocks drift (f13 ran 4 min behind, 2026-11-07); the node's own
@@ -766,8 +779,51 @@ async def advance(task_id: str) -> Optional[Dict[str, object]]:
                                       error=f"publish_failed: {str(exc)[:300]}")
             elif action == "cancel":
                 await _cancel_on_node(client, worker, record)
+            if retry_wanted(record):
+                await _retry_elsewhere(client, record)
+        if record.get("status") in TERMINAL:
+            record.pop("retry_body", None)
         _save(record)
         return record
+
+
+RETRYABLE_NODE_ERRORS = ("source_download_failed",)
+
+
+def retry_wanted(record: Dict[str, object]) -> bool:
+    """A node that could not fetch the source gets one more try on another box before the client sees it."""
+    return (record.get("status") == "failed" and not record.get("retried_from")
+            and bool(record.get("retry_body"))
+            and str(record.get("error") or "").startswith(RETRYABLE_NODE_ERRORS))
+
+
+async def _retry_elsewhere(client: httpx.AsyncClient, record: Dict[str, object]) -> bool:
+    old = str(record["node"])
+    reason = str(record.get("error") or "")[:300]
+    ranked = [(w, i) for w, i in await pick_nodes(client) if ai_vision_api._node_key(w) != old]
+    for worker, info in ranked[:2]:
+        node = ai_vision_api._node_key(worker)
+        _RECENT_PICKS.setdefault(node, deque()).append(time.monotonic())
+        try:
+            response = await client.post(ai_vision_api._ai_base(worker) + "/media-edit",
+                                         json=record["retry_body"], headers=_auth(worker), timeout=30.0)
+        except Exception:
+            continue
+        if response.status_code not in (200, 202):
+            continue
+        node_task = str((response.json() or {}).get("task_id") or "")
+        if not node_task:
+            continue
+        record.update(node=node, node_task_id=node_task, status="queued", stage="queued", progress=0.0,
+                      error="", finished_at=0.0, started_at=0.0, last_seen_at=time.time(), retried_from=old,
+                      retry_reason=reason, node_version=info.get("version") or "", output_meta={},
+                      queue_position=0)
+        logger.warning("media-edit %s: %s could not fetch the source (%s); retried on %s",
+                       record["task_id"], old, reason[:120], node)
+        return True
+    record["retried_from"] = old                 # tried: no second attempt
+    record["error"] = reason + " (no other node took the retry)"
+    return False
 
 
 async def _cancel_on_node(client: httpx.AsyncClient, worker: Dict[str, object], record: Dict[str, object]) -> None:
@@ -807,6 +863,7 @@ async def api_media_edit_cancel(task_id: str, request: Request):
                 async with httpx.AsyncClient() as client:
                     await _cancel_on_node(client, worker, record)
             record.update(status="cancelled", stage="cancelled", error="cancelled", finished_at=time.time())
+            record.pop("retry_body", None)
             _save(record)
     return public_status(record)
 
