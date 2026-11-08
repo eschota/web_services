@@ -29,6 +29,7 @@ import logging
 import math
 import os
 import pathlib
+import re
 import secrets
 import shutil
 import time
@@ -673,7 +674,7 @@ def apply_node_status(record: Dict[str, object], raw: Dict[str, object], now: Op
         return ""
     if state in ("failed", "cancelled"):
         record.update(status=state, error=str(raw.get("error") or state)[:2000],
-                      finished_at=float(raw.get("completed_at") or now))
+                      finished_at=now)          # backend clock (node clocks drift)
         return ""
     record["status"] = state
     started = float(record.get("started_at") or 0)
@@ -792,9 +793,11 @@ RETRYABLE_NODE_ERRORS = ("source_download_failed",)
 
 def retry_wanted(record: Dict[str, object]) -> bool:
     """A node that could not fetch the source gets one more try on another box before the client sees it."""
+    error = str(record.get("error") or "")
     return (record.get("status") == "failed" and not record.get("retried_from")
-            and bool(record.get("retry_body"))
-            and str(record.get("error") or "").startswith(RETRYABLE_NODE_ERRORS))
+            and bool(record.get("retry_body")) and error.startswith(RETRYABLE_NODE_ERRORS)
+            # 403/404 from the storage is the same from every box: no point moving it.
+            and not re.search(r"HTTP 4\d\d", error))
 
 
 async def _retry_elsewhere(client: httpx.AsyncClient, record: Dict[str, object]) -> bool:

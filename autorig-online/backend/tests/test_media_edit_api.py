@@ -524,6 +524,20 @@ class DownloadRetryTests(Base):
         on_disk = (me.DATA_DIR / "tasks" / (task_id + ".json")).read_text()
         self.assertNotIn("sig=x", on_disk)
 
+    def test_storage_4xx_is_not_moved(self):
+        def handler(request):
+            if request.url.path.endswith("/server-status"):
+                return httpx.Response(200, json={"media_edit": media_block()})
+            if request.method == "POST":
+                return httpx.Response(202, json={"task_id": "t-" + request.url.host})
+            return httpx.Response(200, json={"status": "Failed", "download_attempts": 1,
+                                             "error": "source_download_failed: HTTP 404 (attempt 1 of 4)"})
+
+        task_id = self.submit_one(handler)["task_id_string"]
+        out = run(me.status_response(task_id))
+        self.assertEqual((out["status_string"], out["retried_from_node_string"]), ("failed", ""))
+        self.assertGreaterEqual(out["total_seconds_float"], 0)
+
     def test_other_failures_are_not_retried(self):
         def handler(request):
             if request.url.path.endswith("/server-status"):
