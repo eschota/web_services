@@ -504,6 +504,21 @@ export function createViewer(host) {
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       o.userData.t4mats = mats;
       for (const m of mats) for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap']) if (m[k]) m[k].anisotropy = maxAniso;
+      for (const m of mats) {                               // a texture the file only points at (a path on the author's
+        const as = gltf.parser.associations.get(m);         // disk) never loads: show the shape in neutral grey, not black
+        const def = as && as.materials != null ? (gltf.parser.json.materials || [])[as.materials] : null;
+        const wants = !!(def && def.pbrMetallicRoughness && def.pbrMetallicRoughness.baseColorTexture);
+        let missing = wants && (!m.map || !m.map.image);
+        if (wants && !missing && m.map.image.width <= 2 && m.map.image.height <= 2) {   // the viewer copy puts a black
+          try {                                                                         // pixel where an image was missing
+            const cv = document.createElement('canvas'); cv.width = cv.height = 1;
+            const cx = cv.getContext('2d'); cx.drawImage(m.map.image, 0, 0, 1, 1);
+            const px = cx.getImageData(0, 0, 1, 1).data;
+            missing = px[0] + px[1] + px[2] < 12;
+          } catch (e) { missing = false; }
+        }
+        if (missing) { m.map = null; m.color.setScalar(0.72); if (m.metalness > 0.3) m.metalness = 0.1; m.needsUpdate = true; }
+      }
       verts += o.geometry.attributes.position.count;
       tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
     });
