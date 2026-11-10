@@ -82,6 +82,23 @@ function modelBox(meshes, box) {
   return box;
 }
 
+// The box of the model's bulk: the 0.4 % of sampled vertices furthest out on each side of each axis do not count
+// (a torn skin throws single vertices hundreds of heights away; a frame fitted to them shows nothing).
+function modelBoxTrim(meshes, box) {
+  const v = new THREE.Vector3(), xs = [], ys = [], zs = [];
+  for (const m of meshes) {
+    const n = m.geometry.attributes.position.count;
+    const stride = Math.max(1, Math.ceil(n / 20000));
+    for (let i = 0; i < n; i += stride) { worldPos(m, i, v); if (Number.isFinite(v.x + v.y + v.z)) { xs.push(v.x); ys.push(v.y); zs.push(v.z); } }
+  }
+  box.makeEmpty();
+  if (!xs.length) return box;
+  const cut = (a) => { a.sort((p, q) => p - q); const k = Math.floor(a.length * 0.004); return [a[k], a[a.length - 1 - k]]; };
+  const [x0, x1] = cut(xs), [y0, y1] = cut(ys), [z0, z1] = cut(zs);
+  box.min.set(x0, y0, z0); box.max.set(x1, y1, z1);
+  return box.expandByVector(box.getSize(v).multiplyScalar(0.02));
+}
+
 // Surface voxels of the model in world space: cell centres, height 0..1 and the strongest bone of each cell.
 function voxelize(meshes, box) {
   const size = box.getSize(new THREE.Vector3());
@@ -625,7 +642,7 @@ export function createViewer(host) {
         if (dur > 0) st.mixer.setTime((dur * k) / n);
         scene.updateMatrixWorld(true);
         for (const m of st.meshes) if (m.isSkinnedMesh && m.skeleton) m.skeleton.update();
-        all.union(modelBox(st.meshes, one));
+        all.union(modelBoxTrim(st.meshes, one));
       }
       st.capBox = all.isEmpty() ? st.box.clone() : all;
     }
