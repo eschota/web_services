@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
+    <!-- TASK_SEO_PLACEHOLDER -->
+    <title>Task Progress | AutoRig.online</title>
+    <meta name="theme-color" content="#0b0d11">
+    <link rel="stylesheet" href="/static/css/task4.css">
+    <link rel="modulepreload" href="/static/vendor/three-0.170.0/three.module.min.js">
+    <script type="importmap">{"imports":{"three":"/static/vendor/three-0.170.0/three.module.min.js","three/addons/":"/static/vendor/three-0.170.0/addons/"}}</script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body class="t4" data-task-page="t4">
+    <header class="t4-bar">
+        <a class="t4-logo" href="/" aria-label="AutoRig.online"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M12 6.5v6M12 12.5l-4.5 7.5M12 12.5l4.5 7.5M6.5 9.5h11"/></svg><b>AutoRig</b></a>
+        <div class="t4-title" id="t4-name">
+            <h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>
+        </div>
+        <span class="t4-chip" id="t4-cat" hidden></span>
+        <nav class="t4-actions">
+            <button class="t4-btn" id="t4-new" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 20h14"/></svg><span data-t="b_new">New</span></button>
+            <input type="file" id="t4-file" accept=".glb,.gltf,.fbx,.obj,.zip,.png,.jpg,.jpeg,.webp" hidden>
+            <button class="t4-btn" id="t4-share" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg><span data-t="b_share">Share</span></button>
+            <button class="t4-btn primary" id="t4-dl" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14"/></svg><span data-t="b_download">Download</span></button>
+            <a class="t4-user" id="t4-user" href="/auth/login"></a>
+        </nav>
+    </header>
+
+    <main class="t4-stage" id="t4-stage">
+        <div class="t4-load" id="t4-load" hidden><i></i></div>
+        <div class="t4-view" id="t4-view"></div>
+        <img class="t4-picture" id="t4-picture" alt="" hidden>
+
+        <div class="t4-status" id="t4-status" hidden aria-live="polite">
+            <i class="t4-dot" aria-hidden="true"></i>
+            <b id="t4-st-title"></b><span id="t4-st-sub"></span>
+            <div class="t4-st-bar" id="t4-st-bar" hidden><i></i></div>
+        </div>
+
+        <div class="t4-dock" id="t4-dock" hidden>
+            <div class="t4-clips" id="t4-clips"></div>
+            <div class="t4-modes" id="t4-modes">
+                <button class="t4-chipbtn on" data-mode="pbr" type="button" title="1" data-t="m_pbr">Textured</button>
+                <button class="t4-chipbtn" data-mode="clay" type="button" title="2" data-t="m_clay">Clay</button>
+                <button class="t4-chipbtn rig" data-mode="weights" type="button" title="3" data-t="m_weights">Weights</button>
+                <button class="t4-chipbtn rig" id="t4-bones" type="button" title="B" data-t="m_bones">Bones</button>
+                <button class="t4-chipbtn icon rig" id="t4-replay" type="button" data-t-title="replay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v5h5"/></svg></button>
+                <button class="t4-chipbtn icon" id="t4-reset" type="button" data-t-title="reset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
+            </div>
+        </div>
+        <div class="t4-stats" id="t4-stats"></div>
+
+        <aside class="t4-drawer" id="t4-drawer" hidden aria-label="Download">
+            <header><b data-t="dl_title">Download</b><button class="t4-x" id="t4-drawer-close" type="button" aria-label="Close">×</button></header>
+            <div id="t4-drawer-body"></div>
+        </aside>
+        <div class="t4-toast" id="t4-toast" hidden role="status"></div>
+    </main>
+
+    <section class="t4-about">
+        <div class="tv3-desc"><!-- TASK_V3_DESCRIPTION --></div>
+        <nav><a href="/">AutoRig.online</a><a href="/gallery">Gallery</a><a href="/buy-credits">Pricing</a><a href="/faq">FAQ</a><a href="/developers">API</a></nav>
+    </section>
+
+    <script src="/static/js/funnel.js"></script>
+    <script type="module" src="/static/js/t4/app.js"></script>
+</body>
+</html>
