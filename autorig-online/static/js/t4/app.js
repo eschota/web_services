@@ -17,7 +17,7 @@ const T = {
   loading: ['Loading model', 'Загрузка модели'], ready: ['Rig ready', 'Риг готов'], failed: ['Processing failed', 'Не удалось обработать'],
   review: ['Rig ready · auto-check has remarks', 'Риг готов · у автопроверки есть замечания'],
   review_tip: ['The automatic check flagged possible deformation issues. Play the clips and look at the joints.', 'Автопроверка отметила возможные дефекты деформации. Включите клипы и посмотрите суставы.'],
-  missing: ['Task not found', 'Задача не найдена'], picture: ['Generating the 3D model from the picture', 'Генерация 3D-модели по картинке'],
+  missing: ['Task not found', 'Задача не найдена'], rerig: ['Updating the rig to the new pipeline', 'Обновляем риг новым пайплайном'], picture: ['Generating the 3D model from the picture', 'Генерация 3D-модели по картинке'],
   s_intake: ['Intake', 'Приём'], s_normalization: ['Normalizing', 'Нормализация'], s_dispatch: ['Queuing', 'Постановка в очередь'],
   s_queued: ['In queue', 'В очереди'], s_starting: ['Starting', 'Запуск'], s_source: ['Reading the model', 'Чтение модели'],
   s_analysis: ['Analysing: category and parts', 'Анализ: категория и части'], s_rig: ['Rigging: bones and weights', 'Риг: кости и веса'],
@@ -108,19 +108,20 @@ $('t4-bones').onclick = () => { bonesOn = !bonesOn; viewer.setBones(bonesOn); $(
 $('t4-replay').onclick = () => viewer.replay();
 $('t4-reset').onclick = () => viewer.resetView();
 
-function modelOf(v) {
+function modelOf(v, stamp) {
   if (!v) return null;
   const p = v.params || {};
+  const bust = stamp ? `&rr=${encodeURIComponent(stamp)}` : '';
   if (v.kind === 'mt-run' && RUN.test(String(p.run || ''))) {
     return v.rigged
-      ? { url: `/api/mt/files/${p.run}/rig/rigged.glb?view=2`, rigged: true, key: `${p.run}:rig:${v.revision || ''}` }
+      ? { url: `/api/mt/files/${p.run}/rig/rigged.glb?view=2${bust}`, rigged: true, key: `${p.run}:rig:${v.revision || ''}:${stamp || ''}` }
       : { url: `/api/mt/files/${p.run}/proj/model.glb?view=2`, rigged: false, key: `${p.run}:src` };
   }
   if (v.kind === 'legacy') return { url: `/api/task-viewer/${taskId}/files/task/rig/rigged.glb`, rigged: true, key: `legacy:${v.revision || ''}` };
   return null;
 }
-async function showModel(v, finished) {
-  const m = modelOf(v);
+async function showModel(v, finished, stamp) {
+  const m = modelOf(v, stamp);
   const pic = $('t4-picture');
   if (v && v.kind === 'picture' && v.params && /^(https?:\/\/|\/)/.test(String(v.params.picture || ''))) {
     if (pic.dataset.src !== v.params.picture) { pic.dataset.src = v.params.picture; pic.src = v.params.cutout || v.params.picture; }
@@ -176,12 +177,16 @@ function render(s) {
     setStatus('work', stageText(s), `${Math.round(Number(s.progress || 0) * 100)}%${eta}`, Number(s.progress || 0));
   } else if (status === 'error') setStatus('fail', tr('failed'), '', null);
   else if (status === 'needs_review') { setStatus('warn', tr('review'), '', null); $('t4-status').title = tr('review_tip'); }
-  else if (status === 'done') { setStatus('ok', tr('ready'), '', null); setTimeout(() => { if (lastStatus === 'done') $('t4-status').hidden = true; }, 4000); }
+  else if (status === 'done') { setStatus('ok', tr('ready'), '', null); setTimeout(() => { if (lastStatus === 'done' && $('t4-status').dataset.kind === 'ok') $('t4-status').hidden = true; }, 4000); }
   if (s.viewer && s.viewer.kind === 'picture' && !finished && status !== 'error') setStatus('work', tr('picture'), `${Math.round(Number(s.progress || 0) * 100)}%`, Number(s.progress || 0));
-  showModel(s.viewer, finished);
+  // the rig is rebuilt with today's pipeline when its version is behind (re-rig on open): say so, then show the new rig
+  const rr = (s.rig_version && s.rig_version.rerig) || {};
+  const rerigBusy = finished && (rr.state === 'queued' || rr.state === 'running');
+  if (rerigBusy) setStatus('work', tr('rerig'), rr.state === 'queued' ? tr('queued') : '', null);
+  showModel(s.viewer, finished, rr.state === 'done' ? String(rr.finished_at || rr.version || '') : '');
   if (finished && lastStatus !== status) loadManifest();
   lastStatus = status;
-  return (status === 'created' || status === 'processing') ? 2500 : (status === 'error' ? 0 : 45000);
+  return (status === 'created' || status === 'processing') ? 2500 : (status === 'error' ? 0 : (rerigBusy ? 6000 : 45000));
 }
 async function poll() {
   clearTimeout(timer);
