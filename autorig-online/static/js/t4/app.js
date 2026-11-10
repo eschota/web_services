@@ -429,7 +429,11 @@ addEventListener('keydown', (e) => {
   else if (e.key === 'Escape') closeDrawer();
 });
 
-if (!UUID.test(taskId)) setStatus('fail', tr('missing'), '', null);
+const labGlb = String(params.get('glb') || '');
+if (/^\/static\/lab\/[\w.-]+\.glb$/.test(labGlb)) {      // a lab build for review: /task?glb=/static/lab/<name>.glb
+  $('t4-name').textContent = labGlb.split('/').pop();
+  viewer.load(labGlb, { rigged: true, intro: 'none' }).catch((e) => setStatus('fail', String(e.message || e), '', null));
+} else if (!UUID.test(taskId)) setStatus('fail', tr('missing'), '', null);
 else {
   poll();
   loadManifest().then(() => { if (params.get('dl') === '1') openDrawer(); });
