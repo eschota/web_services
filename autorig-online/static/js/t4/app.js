@@ -11,7 +11,7 @@ const RUN = /^[0-9a-f]{20}$/;
 const PREVIEW = /task4\.html$/.test(location.pathname);
 const taskHref = (id) => (PREVIEW ? `${location.pathname}?id=${encodeURIComponent(id)}` : `/task?id=${encodeURIComponent(id)}`);
 
-const RU = (/^\/ru(\/|$)/.test(location.pathname) || String(document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('ru'));
+const RU = /^\/ru(\/|$)/.test(location.pathname) || [document.documentElement.lang, navigator.language].some((l) => String(l || '').toLowerCase().startsWith('ru'));
 const T = {
   queued: ['In queue', 'В очереди'], ahead: ['{n} ahead', 'впереди {n}'], next: ['next', 'следующая'],
   loading: ['Loading model', 'Загрузка модели'], ready: ['Rig ready', 'Риг готов'], failed: ['Processing failed', 'Не удалось обработать'],
