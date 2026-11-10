@@ -63,6 +63,25 @@ async function fetchBuffer(url, onProgress, signal) {
   return got === total ? out.buffer : out.buffer.slice(0, got);
 }
 
+// World position of a vertex as it is drawn: a skinned mesh is placed by its bones, not by its node (a model the
+// pipeline stood upright carries the turn in a root node above the armature).
+function worldPos(mesh, i, out) {
+  if (mesh.isSkinnedMesh) mesh.getVertexPosition(i, out);
+  else out.fromBufferAttribute(mesh.geometry.attributes.position, i);
+  return out.applyMatrix4(mesh.matrixWorld);
+}
+
+function modelBox(meshes, box) {
+  const v = new THREE.Vector3();
+  box.makeEmpty();
+  for (const m of meshes) {
+    const n = m.geometry.attributes.position.count;
+    const stride = Math.max(1, Math.ceil(n / 20000));
+    for (let i = 0; i < n; i += stride) box.expandByPoint(worldPos(m, i, v));
+  }
+  return box;
+}
+
 // Surface voxels of the model in world space: cell centres, height 0..1 and the strongest bone of each cell.
 function voxelize(meshes, box) {
   const size = box.getSize(new THREE.Vector3());
@@ -96,7 +115,7 @@ function voxelize(meshes, box) {
       return [boneBase + bj, bw];
     };
     for (let i = 0; i < P.count; i += stride) {
-      v.fromBufferAttribute(P, i).applyMatrix4(m.matrixWorld);
+      worldPos(m, i, v);
       const [j, w] = top(i);
       put(v, j, w);
     }
@@ -106,9 +125,7 @@ function voxelize(meshes, box) {
     if (tris <= 60000) {
       for (let t = 0; t < tris; t++) {
         const i0 = idx ? idx.getX(t * 3) : t * 3, i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, i2 = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
-        a.fromBufferAttribute(P, i0).applyMatrix4(m.matrixWorld);
-        b.fromBufferAttribute(P, i1).applyMatrix4(m.matrixWorld);
-        c.fromBufferAttribute(P, i2).applyMatrix4(m.matrixWorld);
+        worldPos(m, i0, a); worldPos(m, i1, b); worldPos(m, i2, c);
         const n = Math.min(24, Math.ceil(Math.max(a.distanceTo(b), b.distanceTo(c), c.distanceTo(a)) / (cell * 0.7)));
         if (n < 2) continue;
         const [j, w] = top(i0);
@@ -177,7 +194,7 @@ export function createViewer(host) {
 
   const st = {
     token: 0, abort: null, root: null, meshes: [], bones: [], mixer: null, clips: [], action: null, clipName: null,
-    paused: false, mode: 'pbr', showBones: false, box: new THREE.Box3(), radius: 1, userMoved: false,
+    paused: false, mode: 'pbr', showBones: false, front: '+z', box: new THREE.Box3(), radius: 1, userMoved: false,
     vox: null, skel: null, fx: null, dirty: true, rigged: false, listeners: {},
   };
   controls.addEventListener('start', () => { st.userMoved = true; controls.autoRotate = false; });
@@ -235,7 +252,8 @@ export function createViewer(host) {
       const fitH = (size.y / 2) / Math.tan(fov / 2);
       const fitW = (Math.max(size.x, size.z) / 2) / Math.tan(fov / 2) / Math.max(camera.aspect, 0.4);
       const dist = Math.max(fitH, fitW) * 1.28 + Math.max(size.x, size.z) / 2;
-      const dir = new THREE.Vector3(0.52, 0.22, 1).normalize();
+      const yaw = { '+z': 0, '-z': Math.PI, '+x': Math.PI / 2, '-x': -Math.PI / 2 }[st.front] || 0;   // face the model's front
+      const dir = new THREE.Vector3(0.52, 0.22, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).normalize();
       controls.target.copy(center);
       camera.position.copy(center).addScaledVector(dir, dist);
       camera.near = dist / 200; camera.far = dist * 40;
@@ -491,7 +509,8 @@ export function createViewer(host) {
     });
     st.bones = [...bones];
     root.updateMatrixWorld(true);
-    st.box.setFromObject(root);
+    for (const m of st.meshes) if (m.isSkinnedMesh) m.skeleton.update();
+    modelBox(st.meshes, st.box);
     if (st.box.isEmpty()) st.box.set(new THREE.Vector3(-1, 0, -1), new THREE.Vector3(1, 2, 1));
     fit(false);
     st.clips = (gltf.animations || []).filter((c) => !INTERNAL_CLIPS.has(c.name));
@@ -547,7 +566,14 @@ export function createViewer(host) {
     replay() { if (st.root && st.rigged) { stopFx(true); if (st.action) { st.action.stop(); st.action = null; st.mixer.stopAllAction(); } startBuild(false); } },
     skip() { if (st.fx && st.fx.kind === 'build') stopFx(false); },
     resetView() { st.userMoved = false; fit(true); st.dirty = true; },
+    setFront(axis) { if (['+z', '-z', '+x', '-x'].includes(axis) && axis !== st.front) { st.front = axis; if (st.root && !st.userMoved) fit(true); st.dirty = true; } },
     get building() { return !!(st.fx && st.fx.kind === 'build'); },
+    get debug() {
+      const live = modelBox(st.meshes, new THREE.Box3());
+      const r = (v) => [v.x, v.y, v.z].map((x) => Math.round(x * 1000) / 1000);
+      return { rest: [r(st.box.min), r(st.box.max)], live: [r(live.min), r(live.max)], cam: r(camera.position), target: r(controls.target), front: st.front,
+        roots: st.root ? st.root.children.map((c) => [c.name, r(c.position), c.quaternion.toArray().map((x) => Math.round(x * 1000) / 1000)]) : [] };
+    },
     get hasModel() { return !!st.root; },
   };
 }

@@ -70,6 +70,7 @@ const fmtN = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${Math.
 
 // ------------------------------------------------------------------ viewer
 const viewer = createViewer($('t4-view'));
+window.__t4viewer = viewer;                              // for support and lab checks from the console
 let modelKey = '', modelBusy = false, lastState = null, manifest = null;
 
 viewer.on('model', (info) => {
@@ -114,7 +115,7 @@ function modelOf(v, stamp) {
   const bust = stamp ? `&rr=${encodeURIComponent(stamp)}` : '';
   if (v.kind === 'mt-run' && RUN.test(String(p.run || ''))) {
     return v.rigged
-      ? { url: `/api/mt/files/${p.run}/rig/rigged.glb?view=2${bust}`, rigged: true, key: `${p.run}:rig:${v.revision || ''}:${stamp || ''}` }
+      ? { url: `/api/mt/files/${p.run}/rig/rigged.glb?view=2${bust}`, rigged: true, key: `${p.run}:rig:${v.revision || ''}:${stamp || ''}`, rig: `/api/mt/files/${p.run}/rig/rig.json${bust ? `?${bust.slice(1)}` : ''}` }
       : { url: `/api/mt/files/${p.run}/proj/model.glb?view=2`, rigged: false, key: `${p.run}:src` };
   }
   if (v.kind === 'legacy') return { url: `/api/task-viewer/${taskId}/files/task/rig/rigged.glb`, rigged: true, key: `legacy:${v.revision || ''}` };
@@ -138,6 +139,10 @@ async function showModel(v, finished, stamp) {
   const bar = $('t4-load');
   try {
     if (!viewer.hasModel) { bar.hidden = false; bar.firstElementChild.style.width = '4%'; }
+    if (m.rig) {                                          // the rig says where the character faces: the camera stands in front
+      const doc = await Promise.race([api(m.rig), new Promise((res) => setTimeout(() => res(null), 2500))]);
+      if (doc && doc.body && doc.body.forward_axis) viewer.setFront(String(doc.body.forward_axis));
+    }
     await viewer.load(m.url, { rigged: m.rigged, intro, onProgress: (f) => {
       bar.firstElementChild.style.width = `${Math.round(4 + f * 96)}%`;
       if (finished) setStatus('work', tr('loading'), `${Math.round(f * 100)}%`, null);
