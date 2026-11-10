@@ -202,6 +202,7 @@ export function createViewer(host) {
   const emit = (name, data) => { const f = st.listeners[name]; if (f) try { f(data); } catch (e) { console.error(e); } };
 
   function resize() {
+    if (st.capture) return;
     const w = Math.max(1, host.clientWidth), h = Math.max(1, host.clientHeight);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
@@ -558,6 +559,7 @@ export function createViewer(host) {
   const clock = new THREE.Clock();
   function frame() {
     requestAnimationFrame(frame);
+    if (st.capture) return;                               // preview capture renders its own frames (shot)
     const dt = Math.min(clock.getDelta(), 0.1);
     const moving = !!st.fx || (st.mixer && st.action && !st.paused) || controls.autoRotate;
     if (st.mixer) st.mixer.update(dt);
@@ -571,8 +573,94 @@ export function createViewer(host) {
   }
   requestAnimationFrame(frame);
 
+  // ---------------------------------------------------------------- preview capture (/static/capture4.html)
+  // One deterministic frame: the clip time and the camera orbit are set per call, so a slow GPU never drops a frame
+  // and a clip of n loops closes on itself. Returns a JPEG data URL of w x h.
+  let capOut = null;
+  function shot({ time = 0, yaw = 0, pitch = 9, w = 1080, h = 1920, clip = null, quality = 0.9, label = '' } = {}) {
+    if (!st.root) return null;
+    if (!st.capture) {
+      st.capture = true;
+      if (st.fx) stopFx(true);
+      controls.enabled = false;
+      const c = document.createElement('canvas');
+      c.width = 4; c.height = 256;
+      const g = c.getContext('2d');
+      const gr = g.createLinearGradient(0, 0, 0, 256);
+      gr.addColorStop(0, '#39424f'); gr.addColorStop(0.55, '#1c212b'); gr.addColorStop(1, '#0b0d11');
+      g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
+      const bg = new THREE.CanvasTexture(c);
+      bg.colorSpace = THREE.SRGBColorSpace;
+      scene.background = bg;
+      capOut = document.createElement('canvas');
+      st.root.traverse((o) => {                           // a white model without textures burns out: light clay
+        for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+          if (m && m.isMeshStandardMaterial && !m.map && m.color && Math.min(m.color.r, m.color.g, m.color.b) > 0.85) {
+            m.color.setScalar(0.6); m.roughness = Math.max(m.roughness, 0.62); m.metalness = Math.min(m.metalness, 0.1);
+          }
+        }
+      });
+    }
+    if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
+      renderer.setPixelRatio(1);
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      capOut.width = w; capOut.height = h;
+    }
+    if (st.mixer && clip && clip !== st.clipName) {
+      const c = st.clips.find((x) => x.name === clip);
+      if (c) {
+        st.mixer.stopAllAction();
+        st.action = st.mixer.clipAction(c);
+        st.action.reset().setEffectiveWeight(1).play();
+        st.clipName = clip; st.paused = false; st.mixer.timeScale = 1;
+      }
+    }
+    if (st.capClip !== st.clipName || !st.capBox) {       // frame the clip's own extent, not the rest pose's arm span
+      st.capClip = st.clipName;
+      const all = new THREE.Box3(), one = new THREE.Box3();
+      const dur = st.mixer && st.action ? st.action.getClip().duration : 0;
+      const n = dur > 0 ? 8 : 1;
+      for (let k = 0; k < n; k++) {
+        if (dur > 0) st.mixer.setTime((dur * k) / n);
+        scene.updateMatrixWorld(true);
+        for (const m of st.meshes) if (m.isSkinnedMesh && m.skeleton) m.skeleton.update();
+        all.union(modelBox(st.meshes, one));
+      }
+      st.capBox = all.isEmpty() ? st.box.clone() : all;
+    }
+    if (st.mixer) st.mixer.setTime(time);
+    const size = st.capBox.getSize(new THREE.Vector3()), center = st.capBox.getCenter(new THREE.Vector3());
+    const fov = (camera.fov * Math.PI) / 180;
+    const wide = Math.hypot(size.x, size.z);              // the model turns under the orbit: its diagonal must fit
+    const fitH = ((size.y / 2) / Math.tan(fov / 2)) * 1.24;
+    const fitW = ((wide / 2) / Math.tan(fov / 2) / camera.aspect) * 1.1;
+    const dist = Math.max(fitH, fitW) + wide / 4;
+    const front = { '+z': 0, '-z': Math.PI, '+x': Math.PI / 2, '-x': -Math.PI / 2 }[st.front] || 0;
+    const a = front + (yaw * Math.PI) / 180, p = (pitch * Math.PI) / 180;
+    camera.position.set(center.x + Math.sin(a) * Math.cos(p) * dist, center.y + Math.sin(p) * dist,
+      center.z + Math.cos(a) * Math.cos(p) * dist);
+    camera.near = dist / 200; camera.far = dist * 40;
+    camera.updateProjectionMatrix();
+    camera.lookAt(center);
+    scene.updateMatrixWorld();
+    updateSkeleton();
+    renderer.render(scene, camera);
+    const g = capOut.getContext('2d');
+    g.drawImage(renderer.domElement, 0, 0, w, h);
+    if (label) {
+      g.font = `600 ${Math.round(h * 0.019)}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+      g.textAlign = 'center';
+      g.fillStyle = 'rgba(255,255,255,.5)';
+      g.fillText(label, w / 2, h - Math.round(h * 0.03));
+    }
+    return capOut.toDataURL('image/jpeg', quality);
+  }
+
   return {
     load,
+    shot,
+    get clips() { return st.clips.map((c) => ({ name: c.name, duration: c.duration })); },
     on(name, fn) { st.listeners[name] = fn; },
     playClip,
     togglePause() { setPaused(!st.paused); },
