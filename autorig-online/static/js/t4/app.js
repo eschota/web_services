@@ -116,7 +116,7 @@ function modelOf(v) {
       ? { url: `/api/mt/files/${p.run}/rig/rigged.glb?view=2`, rigged: true, key: `${p.run}:rig:${v.revision || ''}` }
       : { url: `/api/mt/files/${p.run}/proj/model.glb?view=2`, rigged: false, key: `${p.run}:src` };
   }
-  if (v.kind === 'legacy') return { url: `/api/task/${taskId}/prepared.glb`, rigged: true, key: 'legacy' };
+  if (v.kind === 'legacy') return { url: `/api/task-viewer/${taskId}/files/task/rig/rigged.glb`, rigged: true, key: `legacy:${v.revision || ''}` };
   return null;
 }
 async function showModel(v, finished) {
@@ -137,7 +137,11 @@ async function showModel(v, finished) {
   const bar = $('t4-load');
   try {
     if (!viewer.hasModel) { bar.hidden = false; bar.firstElementChild.style.width = '4%'; }
-    await viewer.load(m.url, { rigged: m.rigged, intro, onProgress: (f) => { bar.firstElementChild.style.width = `${Math.round(4 + f * 96)}%`; } });
+    await viewer.load(m.url, { rigged: m.rigged, intro, onProgress: (f) => {
+      bar.firstElementChild.style.width = `${Math.round(4 + f * 96)}%`;
+      if (finished) setStatus('work', tr('loading'), `${Math.round(f * 100)}%`, null);
+    } });
+    if (finished && lastState) { lastStatus = ''; render(lastState); }
     modelKey = m.key;
     try { if (m.rigged) sessionStorage.setItem(seenKey, '1'); } catch (e) { /* private mode */ }
   } catch (e) {

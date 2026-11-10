@@ -499,13 +499,13 @@ export function createViewer(host) {
     buildSkeleton();
     buildVoxels();
     applyMode();
+    const info = { rigged: !!rigged, verts, tris: Math.round(tris), bones: st.bones.length, clips: st.clips.map((c) => ({ name: c.name, duration: c.duration })) };
+    emit('model', info);
     if (!rigged) startScan();
     else if (intro === 'none') { setBonesVisible(st.showBones); startDefaultClip(); }
     else startBuild(intro === 'fast');
     controls.autoRotate = !rigged && !st.userMoved;
     st.dirty = true;
-    const info = { rigged: !!rigged, verts, tris: Math.round(tris), bones: st.bones.length, clips: st.clips.map((c) => ({ name: c.name, duration: c.duration })) };
-    emit('model', info);
     return info;
   }
 
