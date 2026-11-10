@@ -28,7 +28,7 @@ const T = {
   b_new: ['New', 'Новая'], b_share: ['Share', 'Ссылка'], b_download: ['Download', 'Скачать'], signin: ['Sign in', 'Войти'],
   copied: ['Link copied', 'Ссылка скопирована'], uploading: ['Uploading…', 'Загрузка…'],
   pick: ['Pick a 3D model (GLB, FBX, OBJ, ZIP) or a picture', 'Выберите 3D-модель (GLB, FBX, OBJ, ZIP) или картинку'],
-  dl_title: ['Download', 'Скачать'], dl_notready: ['The rig is not ready yet.', 'Риг ещё не готов.'],
+  dl_title: ['Download', 'Скачать'], dl_classic: ['Open the download page', 'Открыть страницу скачивания'], dl_notready: ['The rig is not ready yet.', 'Риг ещё не готов.'],
   dl_anim: ['With animations', 'С анимациями'], dl_mixamo: ['Mixamo bone names', 'Имена костей Mixamo'],
   dl_signin: ['Sign in to download', 'Войдите, чтобы скачать'], dl_signin_go: ['Sign in with Google', 'Войти через Google'],
   dl_notowner: ['Only the owner of this task can download it. Upload your own model — it takes a few minutes.', 'Скачать может только владелец задачи. Загрузите свою модель — это несколько минут.'],
@@ -288,6 +288,10 @@ function renderDrawer() {
   const body = $('t4-drawer-body');
   body.innerHTML = '';
   if (!manifest) { body.append(el('p', { class: 't4-muted' }, '…')); return; }
+  if (!manifest.available && manifest.legacy_url) {       // a task of the old pipeline: its files are on the classic page
+    body.append(el('a', { class: 't4-btn primary wide', href: manifest.legacy_url, onclick: () => funnel('download_click', { props: { target: 'classic' } }) }, tr('dl_classic')));
+    return;
+  }
   if (!manifest.available) { body.append(el('p', { class: 't4-muted' }, tr('dl_notready'))); return; }
   const access = manifest.access || {}, opts = manifest.options || {};
   const grid = el('div', { class: 't4-targets' });
