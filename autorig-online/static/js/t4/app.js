@@ -11,13 +11,13 @@ const RUN = /^[0-9a-f]{20}$/;
 const PREVIEW = /task4\.html$/.test(location.pathname);
 const taskHref = (id) => (PREVIEW ? `${location.pathname}?id=${encodeURIComponent(id)}` : `/task?id=${encodeURIComponent(id)}`);
 
-const RU = /^\/ru(\/|$)/.test(location.pathname) || [document.documentElement.lang, navigator.language].some((l) => String(l || '').toLowerCase().startsWith('ru'));
+// The page language is the server's decision (profile, /ru/ url ...; English by default), never the browser's alone
+const SRV_LANG = String((window.__AUTORIG_LANG__ && window.__AUTORIG_LANG__.lang) || '').toLowerCase();
+const RU = /^\/ru(\/|$)/.test(location.pathname) || SRV_LANG === 'ru';
 const T = {
   queued: ['In queue', 'В очереди'], ahead: ['{n} ahead', 'впереди {n}'], next: ['next', 'следующая'],
   loading: ['Loading model', 'Загрузка модели'], ready: ['Rig ready', 'Риг готов'], failed: ['Processing failed', 'Не удалось обработать'],
-  review: ['Rig ready · auto-check has remarks', 'Риг готов · у автопроверки есть замечания'],
-  review_tip: ['The automatic check flagged possible deformation issues. Play the clips and look at the joints.', 'Автопроверка отметила возможные дефекты деформации. Включите клипы и посмотрите суставы.'],
-  missing: ['Task not found', 'Задача не найдена'], rerig: ['Updating the rig to the new pipeline', 'Обновляем риг новым пайплайном'], picture: ['Generating the 3D model from the picture', 'Генерация 3D-модели по картинке'],
+  missing: ['Task not found', 'Задача не найдена'], rerig: ['Improving the rig', 'Улучшаем риг'], picture: ['Generating the 3D model from the picture', 'Генерация 3D-модели по картинке'],
   s_intake: ['Intake', 'Приём'], s_normalization: ['Normalizing', 'Нормализация'], s_dispatch: ['Queuing', 'Постановка в очередь'],
   s_queued: ['In queue', 'В очереди'], s_starting: ['Starting', 'Запуск'], s_source: ['Reading the model', 'Чтение модели'],
   s_analysis: ['Analysing: category and parts', 'Анализ: категория и части'], s_rig: ['Rigging: bones and weights', 'Риг: кости и веса'],
@@ -176,8 +176,8 @@ function render(s) {
     const eta = Number(s.eta_s) > 0 ? ` · ~${Math.ceil(Number(s.eta_s) / 60)} min` : '';
     setStatus('work', stageText(s), `${Math.round(Number(s.progress || 0) * 100)}%${eta}`, Number(s.progress || 0));
   } else if (status === 'error') setStatus('fail', tr('failed'), '', null);
-  else if (status === 'needs_review') { setStatus('warn', tr('review'), '', null); $('t4-status').title = tr('review_tip'); }
-  else if (status === 'done') { setStatus('ok', tr('ready'), '', null); setTimeout(() => { if (lastStatus === 'done' && $('t4-status').dataset.kind === 'ok') $('t4-status').hidden = true; }, 4000); }
+  else if (finished) {                                   // done or needs_review: the customer sees a ready rig either way
+    setStatus('ok', tr('ready'), '', null); setTimeout(() => { if ($('t4-status').dataset.kind === 'ok') $('t4-status').hidden = true; }, 4000); }
   if (s.viewer && s.viewer.kind === 'picture' && !finished && status !== 'error') setStatus('work', tr('picture'), `${Math.round(Number(s.progress || 0) * 100)}%`, Number(s.progress || 0));
   // the rig is rebuilt with today's pipeline when its version is behind (re-rig on open): say so, then show the new rig
   const rr = (s.rig_version && s.rig_version.rerig) || {};
