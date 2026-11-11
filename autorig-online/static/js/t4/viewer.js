@@ -594,7 +594,7 @@ export function createViewer(host) {
   // One deterministic frame: the clip time and the camera orbit are set per call, so a slow GPU never drops a frame
   // and a clip of n loops closes on itself. Returns a JPEG data URL of w x h.
   let capOut = null;
-  function shot({ time = 0, yaw = 0, pitch = 9, w = 1080, h = 1920, clip = null, quality = 0.9, label = '' } = {}) {
+  function shot({ time = 0, yaw = 0, pitch = 9, w = 1080, h = 1920, clip = null, quality = 0.9, label = '', labelScale = 1, labelTop = false } = {}) {
     if (!st.root) return null;
     if (!st.capture) {
       st.capture = true;
@@ -621,9 +621,9 @@ export function createViewer(host) {
     if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
       renderer.setPixelRatio(1);
       renderer.setSize(w, h, false);
-      camera.aspect = w / h;
-      capOut.width = w; capOut.height = h;
     }
+    camera.aspect = w / h;
+    if (capOut.width !== w || capOut.height !== h) { capOut.width = w; capOut.height = h; }   // also when the canvas already had this size
     if (st.mixer && clip && clip !== st.clipName) {
       const c = st.clips.find((x) => x.name === clip);
       if (c) {
@@ -665,11 +665,12 @@ export function createViewer(host) {
     renderer.render(scene, camera);
     const g = capOut.getContext('2d');
     g.drawImage(renderer.domElement, 0, 0, w, h);
-    if (label) {
-      g.font = `600 ${Math.round(h * 0.019)}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    if (label) {                                          // labelTop: a review clip names the animation at the top
+      const px = Math.round(h * 0.019 * (labelScale || 1));
+      g.font = `600 ${px}px system-ui, -apple-system, "Segoe UI", sans-serif`;
       g.textAlign = 'center';
-      g.fillStyle = 'rgba(255,255,255,.5)';
-      g.fillText(label, w / 2, h - Math.round(h * 0.03));
+      g.fillStyle = labelTop ? 'rgba(255,255,255,.88)' : 'rgba(255,255,255,.5)';
+      g.fillText(label, w / 2, labelTop ? Math.round(h * 0.03) + px : h - Math.round(h * 0.03));
     }
     return capOut.toDataURL('image/jpeg', quality);
   }
