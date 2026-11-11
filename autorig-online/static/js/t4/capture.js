@@ -11,11 +11,13 @@ const ORDER = [/^run(ning)?$/i, /run/i, /gallop/i, /trot/i, /^walk(ing)?$/i, /wa
 
 (async () => {
   try {
-    if (!/^[0-9a-f]{20}$/.test(run)) throw new Error('no run');
+    const lab = String(q.get('glb') || '');               // a lab build for review: ?glb=/static/lab/<name>.glb
+    const isLab = /^\/static\/lab\/[\w.-]+\.glb$/.test(lab);
+    if (!isLab && !/^[0-9a-f]{20}$/.test(run)) throw new Error('no run');
     const base = `/api/mt/files/${run}/rig/`;
     const viewer = createViewer(document.getElementById('v'));
-    const rig = await fetch(`${base}rig.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    await viewer.load(`${base}rigged.glb?view=2`, { rigged: true, intro: 'none' });
+    const rig = isLab ? null : await fetch(`${base}rig.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    await viewer.load(isLab ? lab : `${base}rigged.glb?view=2`, { rigged: true, intro: 'none' });
     const front = rig && rig.body && rig.body.forward_axis ? String(rig.body.forward_axis) : '+z';
     viewer.setFront(front);
     cap.front = front;
