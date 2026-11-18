@@ -1,0 +1,77 @@
+dialog.ab-vision {
+  width: min(39rem, calc(100vw - 26px));
+  padding: clamp(14px, 3vw, 22px);
+}
+
+.ab-vision .ab-vision-side {
+  grid-template-columns: auto minmax(9rem, 15rem);
+  align-items: center;
+  justify-content: start;
+  gap: 9px;
+  margin-block: 12px;
+}
+
+.ab-vision-work {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 9.6rem);
+  align-items: start;
+  gap: 14px;
+}
+
+.ab-vision-work figure { margin: 0; min-width: 0; }
+.ab-vision-work figcaption { margin-block: 6px; color: var(--muted); font-size: .77rem; text-align: center; }
+.ab-vision-area canvas {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: min(36vh, 260px);
+  margin-inline: auto;
+  outline: 1px solid #d5d1c3;
+  border-radius: 3px;
+  background: #fff;
+  cursor: crosshair;
+  touch-action: none;
+}
+.ab-vision-area canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ab-vision-area canvas[aria-disabled="true"] { cursor: wait; }
+
+.ab-vision-token {
+  display: grid;
+  place-items: center;
+  min-height: 88px;
+  padding: 7px;
+  overflow: hidden;
+  border: 1px solid #d5d1c3;
+  border-radius: 4px;
+  background: #fff;
+}
+.ab-vision-token canvas { width: auto; height: auto; max-height: 100px; max-width: 100%; }
+.ab-vision-empty { padding: 4px; color: var(--muted); font-size: .76rem; text-align: center; }
+.ab-vision-rotate { display: flex; justify-content: center; gap: 5px; }
+.ab-vision-rotate button { min-height: 29px; min-width: 33px; padding: 0 4px; font-size: 1.1rem; }
+
+.ab-vision .ab-vision-consent {
+  margin-block: 14px 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--accent-wash);
+  color: var(--ink);
+  font-size: .81rem;
+}
+.ab-vision-result:empty { display: none; }
+.ab-vision-result[data-status="error"] { color: #963c30; }
+.ab-vision-result[data-status="ready"] { color: #2e633f; font-weight: 550; }
+.ab-vision .ab-actions { margin-top: 11px; }
+.ab-vision .ab-actions button:disabled, .ab-vision-rotate button:disabled {
+  cursor: default;
+  opacity: .52;
+  pointer-events: none;
+}
+
+@media (max-width: 520px) {
+  .ab-vision-work { grid-template-columns: minmax(0, 1fr) minmax(82px, .55fr); gap: 10px; }
+  .ab-vision-area canvas { max-height: min(32vh, 230px); }
+  .ab-vision-token { min-height: 67px; }
+  .ab-vision-token canvas { max-height: 75px; }
+  .ab-vision-work figcaption { font-size: .72rem; }
+}
