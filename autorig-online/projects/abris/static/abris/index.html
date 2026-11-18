@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/static/abris/editor.css">
   <link rel="stylesheet" href="/static/abris/vision.css">
   <script type="module" src="/static/abris/app.mjs"></script>
+  <meta name="robots" content="noindex,follow">
 </head>
 <body>
   <svg xmlns="http://www.w3.org/2000/svg" class="icon-library" aria-hidden="true">
@@ -74,6 +75,10 @@
         </button>
         <p id="file-summary" class="file-summary" hidden></p>
         <button id="demo-btn" class="demo-control" type="button" title="Открыть демонстрационный проект"><svg class="icon" aria-hidden="true"><use href="#icon-plan"/></svg><span>Открыть пример</span><svg class="icon small" aria-hidden="true"><use href="#icon-chevron-right"/></svg></button>
+      </div>
+      <div class="notice">
+        <a id="obmero-migration" href="https://obmero.online/ru/editor/">Открыть Obmero ↗</a>
+        <p class="file-summary">Для переноса черновика нажмите «Сохранить», затем загрузите файл JSON в Obmero.</p>
       </div>
       <div id="notice" class="notice" hidden></div>
     </aside>
