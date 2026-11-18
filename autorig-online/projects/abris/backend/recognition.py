@@ -35,7 +35,7 @@ class Token:
 
     @property
     def vertical(self):
-        return self.rotation_deg != 0
+        return abs(self.rotation_deg) > 45
 
 
 def _pages(data):
@@ -373,7 +373,7 @@ def _ocr_header(image, bottom, ocr):
         r"(?:договор|договорa)\s*(?:№|N[%o°]?)?\s*([А-ЯA-ZЁ0-9][А-ЯA-ZЁ0-9/-]{3,30})", content, re.I
     )
     address = re.search(r"адрес\s*:\s*([^\n]+)", content, re.I)
-    customer = re.search(r"заказчик\s*:\s*((?:[А-ЯЁ][а-яё-]+\s+){1,2}[А-ЯЁ][а-яё-]+)", content)
+    customer = re.search(r"(?i:заказчик)\s*:\s*((?:[А-ЯЁ][а-яё-]+\s+){1,2}[А-ЯЁ][а-яё-]+)", content)
     result = {}
     if cadastral:
         result["cadastral_number"] = re.sub(r"\s+", "", cadastral.group())
@@ -406,15 +406,136 @@ def _htr():
         return None, None
 
 
-def _ocr_tokens(image, ink, walls, ocr):
+def _oblique_groups(ink, rooms):
+    size = max(ink.shape)
+    separated = cv.erode(ink, np.ones((2, 2), np.uint8))
+    _, _, stats, centers = cv.connectedComponentsWithStats(separated, connectivity=8)
+    glyphs = []
+    for bounds, center in zip(stats[1:], centers[1:]):
+        x, y, w, h, area = bounds.tolist()
+        if not size * 0.008 <= h <= size * 0.037 or not 0.19 <= w / h <= 2:
+            continue
+        if area < h * w * 0.12:
+            continue
+        cx, cy = center
+        if not any(a <= cx <= c and b <= cy <= d for a, b, c, d in (room["box"] for room in rooms)):
+            continue
+        glyphs.append(((x, y, x + w, y + h), (cx, cy)))
+    if len(glyphs) < 3 or len(glyphs) > 340:
+        return []
+    glyphs.sort(key=lambda glyph: glyph[1][0])
+    points = np.asarray([point for _, point in glyphs])
+    heights = np.asarray([box[3] - box[1] for box, _ in glyphs])
+    proposals = []
+    for first, (box, center) in enumerate(glyphs[:-2]):
+        x, y = center
+        height = heights[first]
+        near = np.flatnonzero(
+            (points[:, 0] - x >= 0.22 * height)
+            & (points[:, 0] - x <= 1.55 * height)
+            & (np.abs(points[:, 1] - y) <= 1.45 * height)
+            & (heights >= 0.65 * height)
+            & (heights <= 1.55 * height)
+        )
+        for middle in near[:9]:
+            step = points[middle] - points[first]
+            baseline = math.degrees(math.atan2(step[1], step[0]))
+            if not 14 <= abs(baseline) <= 71 or not 0.33 * height <= np.linalg.norm(step) <= 1.55 * height:
+                continue
+            offset = points - points[middle]
+            projection = (offset @ step) / np.dot(step, step)
+            off_axis = np.abs(offset[:, 0] * step[1] - offset[:, 1] * step[0]) / np.linalg.norm(step)
+            matches = np.flatnonzero(
+                (projection >= 0.52)
+                & (projection <= 1.63)
+                & (off_axis <= height * 0.25)
+                & (heights >= 0.65 * height)
+                & (heights <= 1.55 * height)
+                & (offset[:, 0] > 0)
+            )
+            if matches.size == 0:
+                continue
+            third = min(matches, key=lambda idx: off_axis[idx] / height + abs(projection[idx] - 1) * 0.3)
+            chain = [box, glyphs[middle][0], glyphs[third][0]]
+            delta = points[third] - points[first]
+            angle = math.degrees(math.atan2(delta[1], delta[0]))
+            if not 14 <= abs(angle) <= 71:
+                continue
+            bounds = (
+                min(b[0] for b in chain),
+                min(b[1] for b in chain),
+                max(b[2] for b in chain),
+                max(b[3] for b in chain),
+            )
+            error = off_axis[third] / height + abs(projection[third] - 1) * 0.3
+            proposals.append((error, bounds, angle))
+    distinct = []
+    for _, box, angle in sorted(proposals):
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        if any(_rect_overlap(box, other) >= 0.42 * area for other, _ in distinct):
+            continue
+        distinct.append((box, angle))
+        if len(distinct) == 12:
+            break
+    return distinct
+
+
+def _oblique_crop(ink, box, angle):
+    x1, y1, x2, y2 = box
+    patch = ink[y1:y2, x1:x2]
+    edge = math.ceil(math.hypot(x2 - x1, y2 - y1)) + 4
+    affine = cv.getRotationMatrix2D(((x2 - x1) / 2, (y2 - y1) / 2), angle, 1)
+    affine[:, 2] += ((edge - patch.shape[1]) / 2, (edge - patch.shape[0]) / 2)
+    rotated = cv.warpAffine(patch, affine, (edge, edge), flags=cv.INTER_LINEAR)
+    x, y, w, h = cv.boundingRect(rotated)
+    if h < 4 or not 1.12 <= w / h <= 4.2:
+        return None
+    scale = min(47 / h, 211 / w)
+    return 255 - cv.resize(
+        rotated[y : y + h, x : x + w], None, fx=scale, fy=scale, interpolation=cv.INTER_CUBIC
+    )
+
+
+def _oblique_tokens(ink, rooms, ocr, ordinary):
+    candidates = []
+    for (x1, y1, x2, y2), angle in _oblique_groups(ink, rooms):
+        box = (max(0, x1 - 3), max(0, y1 - 3), min(ink.shape[1], x2 + 2), min(ink.shape[0], y2 + 2))
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        if any(token.confidence >= 0.72 and _rect_overlap(token.box, box) > 0.55 * area for token in ordinary):
+            continue
+        patch = _oblique_crop(ink, box, angle)
+        if patch is not None:
+            candidates.append((box, angle, patch))
+    if not candidates:
+        return []
+    # One OCR process per page, with one straightened candidate per line.
+    row_height = 76
+    sheet = np.full((row_height * len(candidates), 241), 255, dtype=np.uint8)
+    for row, (_, _, patch) in enumerate(candidates):
+        y = row * row_height + 11
+        h, w = patch.shape
+        sheet[y : y + h, 12 : 12 + w] = patch
+    values = []
+    for text, confidence, (_, y, _, h) in ocr.words(sheet, 6, numbers=True):
+        row = (y + h // 2) // row_height
+        if row >= len(candidates) or confidence < 0.49 or not re.fullmatch(r"[0-9]{3,4}", text):
+            continue
+        if not 100 <= int(text) <= 2500:
+            continue
+        box, angle, _ = candidates[row]
+        values.append(Token(text, box, min(0.58, round(confidence * 0.72, 2)), -round(angle)))
+    return values
+
+
+def _ocr_tokens(image, ink, walls, ocr, rooms=()):
     if not ocr.available or ocr.warned:
         return []
     gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     background = cv.morphologyEx(gray, cv.MORPH_CLOSE, np.ones((23, 23), np.uint8))
     normalized = cv.divide(gray, background, scale=255)
     normalized[walls > 0] = 255
-    cleaned = ink & (255 - walls)
-    cleaned = cv.morphologyEx(cleaned, cv.MORPH_CLOSE, np.ones((2, 2), np.uint8))
+    ink_without_walls = ink & (255 - walls)
+    cleaned = cv.morphologyEx(ink_without_walls, cv.MORPH_CLOSE, np.ones((2, 2), np.uint8))
     height, width = ink.shape
     size = max(height, width)
     tokens = []
@@ -448,6 +569,7 @@ def _ocr_tokens(image, ink, walls, ocr):
                     tokens.append(token)
                 elif tokens[overlaps[0]].confidence < token.confidence:
                     tokens[overlaps[0]] = token
+    tokens.extend(_oblique_tokens(ink_without_walls, rooms, ocr, tokens))
     return tokens
 
 
@@ -922,6 +1044,90 @@ def _box_local(box, x, y):
     return [box[0] - x, box[1] - y, box[2] - x, box[3] - y]
 
 
+def _section_shapes(ink, rooms):
+    size = max(ink.shape)
+    joined = cv.morphologyEx(ink, cv.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    contours, _ = cv.findContours(joined, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
+    candidates = []
+    for contour in contours:
+        x, y, w, h = cv.boundingRect(contour)
+        if not size * 0.04 <= w <= size * 0.8 or not size * 0.032 <= h <= size * 0.47:
+            continue
+        area = cv.contourArea(contour)
+        if not 0.38 <= area / (w * h) <= 0.67:
+            continue
+        box = (x, y, x + w, y + h)
+        if any(_rect_overlap(box, room["box"]) > w * h * 0.18 for room in rooms):
+            continue
+        triangle = cv.approxPolyDP(contour, cv.arcLength(contour, True) * 0.062, True)
+        if len(triangle) != 3 or cv.contourArea(triangle) < area * 0.60:
+            continue
+        points = triangle.reshape(-1, 2).astype(float)
+        edges = points - np.roll(points, 1, axis=0)
+        angles = np.degrees(np.arctan2(np.abs(edges[:, 1]), np.abs(edges[:, 0])))
+        if np.any(angles < 14) and np.any((angles >= 19) & (angles <= 70)):
+            candidates.append((area, box))
+    shapes = []
+    for area, box in sorted(candidates, reverse=True):
+        if any(_rect_overlap(box, other) > area * 0.55 for other in shapes):
+            continue
+        shapes.append(box)
+        if len(shapes) == 4:
+            break
+    return shapes
+
+
+def _section_height(gray, ocr):
+    if not ocr.available or ocr.warned:
+        return None
+    gray = cv.resize(gray, None, fx=1.75, fy=1.75, interpolation=cv.INTER_CUBIC)
+    lines = []
+    for text, confidence, (x, y, _, h) in ocr.words(gray, 11):
+        if confidence < 0.26:
+            continue
+        cy = y + h / 2
+        line = next((words for at, words in lines if abs(at - cy) <= h * 0.65), None)
+        if line is None:
+            line = []
+            lines.append((cy, line))
+        line.append((x, text))
+    for _, line in lines:
+        words = " ".join(text for _, text in sorted(line))
+        match = re.search(r"(?<![а-яa-z0-9])(?:[hн]|высота)\s*(?:=|:)?\s*(\d{2,4})(?!\d)", words, re.I)
+        if match and 30 <= int(match[1]) <= 1200:
+            return int(match[1])
+    return None
+
+
+def _jpeg_url(image, quality=87):
+    encoded = cv.imencode(".jpg", image, [cv.IMWRITE_JPEG_QUALITY, quality])[1].tobytes()
+    return "data:image/jpeg;base64," + base64.b64encode(encoded).decode("ascii")
+
+
+def _section_hints(image, ink, rooms, ocr, page_number):
+    height, width = ink.shape
+    page_size = max(ink.shape)
+    hints = []
+    for x1, y1, x2, y2 in _section_shapes(ink, rooms):
+        x_pad = round(min(page_size * 0.086, (x2 - x1) * 0.99))
+        y_pad = round(min(page_size * 0.036, (y2 - y1) * 0.43))
+        box = (max(0, x1 - x_pad), max(0, y1 - y_pad), min(width, x2 + x_pad), min(height, y2 + y_pad))
+        a, b, c, d = box
+        crop = image[b:d, a:c]
+        height_cm = _section_height(cv.cvtColor(crop, cv.COLOR_BGR2GRAY), ocr)
+        hints.append(
+            {
+                "type": "SECTION_HINT",
+                "source_page": page_number,
+                "page_bbox_px": list(box),
+                "shape_bbox_px": [x1, y1, x2, y2],
+                "height_cm": height_cm,
+                "image": _jpeg_url(crop),
+            }
+        )
+    return hints
+
+
 def _make_floor(
     image, ink, walls, group, tokens, labels, window_marks, stair_marks, ocr, floor_number, page_number
 ):
@@ -935,7 +1141,7 @@ def _make_floor(
         x2 = min(width, max(room["box"][2] for room in group) + pad)
         y2 = min(height, max(room["box"][3] for room in group) + pad)
     selected = image[y1:y2, x1:x2]
-    jpg = cv.imencode(".jpg", selected, [cv.IMWRITE_JPEG_QUALITY, 87])[1].tobytes()
+
     result = {
         "floor_id": f"floor_{floor_number}",
         "title": _ocr_title(image, group, ocr) or f"Этаж {floor_number}",
@@ -944,7 +1150,7 @@ def _make_floor(
         "page_bbox_px": [x1, y1, x2, y2],
         "image_width": x2 - x1,
         "image_height": y2 - y1,
-        "image": "data:image/jpeg;base64," + base64.b64encode(jpg).decode("ascii"),
+        "image": _jpeg_url(selected),
         "rooms": [],
         "walls": [],
     }
@@ -1009,6 +1215,7 @@ def recognize(data: bytes, filename: str) -> dict:
     floors = []
     ocr = _Tesseract()
     has_candidates = False
+    section_hints = []
     for page_number, page in enumerate(_pages(data), 1):
         height, width = page.shape[:2]
         if min(width, height) < 32:
@@ -1027,8 +1234,9 @@ def recognize(data: bytes, filename: str) -> dict:
         if page_number == 1:
             first_y = min((room["box"][1] for room in rooms), default=ink.shape[0] // 4)
             project_meta = _ocr_header(page, first_y, ocr)
+        section_hints.extend(_section_hints(page, ink, rooms, ocr, page_number))
         text_walls = _wall_mask(ink, 0.075) if rooms else None
-        tokens = _ocr_tokens(page, ink, text_walls, ocr) if rooms else []
+        tokens = _ocr_tokens(page, ink, text_walls, ocr, rooms) if rooms else []
         window_marks = _window_marks(ink) if rooms else []
         stair_marks = _stairs_marks(ink) if rooms else []
         labels = _semantic_labels(page, text_walls, ocr) if rooms else []
@@ -1053,6 +1261,8 @@ def recognize(data: bytes, filename: str) -> dict:
             if any(previous["title"] == floor["title"] for previous in floors):
                 floor["title"] = f"Этаж {floor_number}"
             floors.append(floor)
+    if section_hints:
+        project_meta["section_hints"] = section_hints
     warnings = []
     if has_candidates:
         warnings.append("Проверьте контуры, проёмы и предложенные промеры по исходному скану.")

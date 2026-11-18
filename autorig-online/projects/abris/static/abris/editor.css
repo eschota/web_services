@@ -25,7 +25,8 @@
 .abris-ed-room[data-status="missing"],
 .abris-ed-room[data-status="review"],
 .abris-ed-room[data-status="schematic"],
-.abris-ed-room[data-status="polygon"] { --room-color: #925113; }
+.abris-ed-room[data-status="polygon"],
+.abris-ed-room[data-status="diagonals"] { --room-color: #925113; }
 .abris-ed-room[data-status="error"] { --room-color: #a93936; }
 .abris-ed-room[data-active="yes"] { --room-color: var(--accent, #3637b8); }
 
@@ -93,6 +94,28 @@ polygon.abris-ed-room-shape {
 .abris-ed-room-number-text {
   fill: var(--room-color);
   font-weight: 720;
+  pointer-events: none;
+}
+
+.abris-ed-vertex {
+  fill: var(--paper, #fcf9f3);
+  stroke: var(--room-color);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.abris-ed-vertex-number {
+  fill: var(--room-color);
+  font-weight: 720;
+  pointer-events: none;
+}
+
+.abris-ed-diagonal {
+  stroke: var(--accent, #3637b8);
+  stroke-dasharray: 5 4;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
 
@@ -180,8 +203,19 @@ polygon.abris-ed-room-shape {
 .abris-ed-status[data-status="missing"],
 .abris-ed-status[data-status="review"],
 .abris-ed-status[data-status="schematic"],
-.abris-ed-status[data-status="polygon"] { color: #814b00; }
-.abris-ed-status[data-status="ok"] { color: #295849; }
+.abris-ed-status[data-status="polygon"],
+.abris-ed-status[data-status="diagonals"] { color: #814b00; }
+.abris-ed-status[data-status="ok"],
+.abris-ed-status[data-status="measured"] { color: #295849; }
+
+.abris-ed-diagonals summary {
+  margin-bottom: 5px;
+  cursor: pointer;
+  font-size: .8rem;
+}
+
+.abris-ed-rectify { display: flex; flex-wrap: wrap; gap: 5px; }
+.abris-ed-rectify p { flex-basis: 100%; }
 
 .abris-ed-field {
   min-width: 0;

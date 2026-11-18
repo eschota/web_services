@@ -32,8 +32,8 @@ function sideEdges(room) {
   const sides = ['top', 'right', 'bottom', 'left'];
   return points.map((a, i) => ({
     a, b: points[(i + 1) % points.length], room,
-    type: room.wall_types?.[sides[i]],
-    thickness_cm: room.wall_thickness_cm?.[sides[i]],
+    type: room.polygon_px ? room.edge_wall_types?.[i] : room.wall_types?.[sides[i]],
+    thickness_cm: room.polygon_px ? room.edge_wall_thickness_cm?.[i] : room.wall_thickness_cm?.[sides[i]],
   }));
 }
 
@@ -264,6 +264,14 @@ function faceRoom(polygon, allEdges, id) {
     confidence:1, verified:false, openings:[], symbols:[], wall_types:{}, wall_thickness_cm:{} };
   if (!isRect) {
     room.polygon_px = polygon;
+    room.edge_wall_types = [];
+    room.edge_wall_thickness_cm = [];
+    for (const [index,a] of polygon.entries()) {
+      const side = {a,b:polygon[(index + 1) % polygon.length]};
+      const owner = allEdges.find(edge => segmentMatch(edge,side));
+      room.edge_wall_types[index] = owner?.wall?.type ?? owner?.type ?? null;
+      room.edge_wall_thickness_cm[index] = owner?.wall?.thickness_cm ?? owner?.thickness_cm ?? null;
+    }
     return room;
   }
   const sides = ['top','right','bottom','left'];

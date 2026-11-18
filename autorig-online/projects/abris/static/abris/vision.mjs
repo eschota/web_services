@@ -39,13 +39,15 @@ function sampleImage(ctx, image, bounds, area, dest) {
 function tokenCanvas(image, scope, crop, rotation) {
   const w = crop[2] - crop[0];
   const h = crop[3] - crop[1];
-  const scale = Math.min(6, (MAX_CROP - 20) / Math.max(w, h));
-  const sideways = rotation % 180 !== 0;
+  const angle = rotation * Math.PI / 180;
+  const sin = Math.abs(Math.sin(angle)), cos = Math.abs(Math.cos(angle));
+  const spanX = w*cos+h*sin, spanY=w*sin+h*cos;
+  const scale = Math.min(6, (MAX_CROP - 20) / Math.max(spanX,spanY));
   const scaledW = Math.max(1, Math.floor(w * scale));
   const scaledH = Math.max(1, Math.floor(h * scale));
   const token = document.createElement('canvas');
-  token.width = Math.max(56, (sideways ? scaledH : scaledW) + 20);
-  token.height = Math.max(56, (sideways ? scaledW : scaledH) + 20);
+  token.width = Math.min(MAX_CROP,Math.max(56,Math.ceil(spanX*scale)+20));
+  token.height = Math.min(MAX_CROP,Math.max(56,Math.ceil(spanY*scale)+20));
   const ctx = token.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, token.width, token.height);
@@ -155,7 +157,8 @@ export async function openVision({ floor, room, side, apply }) {
   const controls = element('div', { class: 'ab-vision-rotate' });
   const turnLeft = element('button', { type: 'button', title: 'Повернуть влево на 90°', 'aria-label': 'Повернуть влево на 90°' }, '↶');
   const turnRight = element('button', { type: 'button', title: 'Повернуть вправо на 90°', 'aria-label': 'Повернуть вправо на 90°' }, '↷');
-  controls.append(turnLeft, turnRight);
+  const degrees=element('input',{type:'number',min:'-180',max:'180',step:'1','aria-label':'Угол поворота, градусы',title:'Угол поворота, градусы'});
+  controls.append(turnLeft,degrees,turnRight);
   preview.append(tokenSlot, element('figcaption', {}, 'Фрагмент для отправки'), controls);
   work.append(mapFigure, preview);
   const consent = element('p', { class: 'ab-vision-consent' }, 'На GPU-ферму AutoRig отправится только показанный фрагмент с цифрами.');
@@ -205,6 +208,8 @@ export async function openVision({ floor, room, side, apply }) {
     sideMenu.disabled = locked;
     turnLeft.disabled = locked || !token;
     turnRight.disabled = locked || !token;
+    degrees.disabled=locked || !token;
+    degrees.value=String(rotation>180 ? rotation-360 : rotation);
     accept.hidden = suggestion === null || locked;
     map.setAttribute('aria-disabled', String(locked));
   }
@@ -224,7 +229,7 @@ export async function openVision({ floor, room, side, apply }) {
     crop = accepted(candidate) ? candidate : null;
     const rotated = crop && crop[3] - crop[1] > (crop[2] - crop[0]) * 1.24;
     const saved = room.measurement_rotations_deg?.[selectedSide];
-    rotation = [0,90,-90,180,-180,270].includes(saved) ? (saved+360)%360 : rotated ? (selectedSide === 'right' ? 270 : 90) : 0;
+    rotation = Number.isFinite(saved) ? (saved+360)%360 : rotated ? (selectedSide === 'right' ? 270 : 90) : 0;
     updateCrop();
   }
 
@@ -248,6 +253,7 @@ export async function openVision({ floor, room, side, apply }) {
   sideMenu.onchange = chooseSide;
   turnLeft.onclick = () => { rotation = (rotation + 270) % 360; updateCrop(); };
   turnRight.onclick = () => { rotation = (rotation + 90) % 360; updateCrop(); };
+  degrees.onchange=()=>{ if (degrees.value && degrees.checkValidity()) { rotation=(degrees.valueAsNumber+360)%360; updateCrop(); } };
   map.addEventListener('pointerdown', event => {
     if (request || event.button !== 0 || start) return;
     map.setPointerCapture(event.pointerId);

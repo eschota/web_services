@@ -49,6 +49,8 @@ dialog.ab-vision {
 .ab-vision-empty { padding: 4px; color: var(--muted); font-size: .76rem; text-align: center; }
 .ab-vision-rotate { display: flex; justify-content: center; gap: 5px; }
 .ab-vision-rotate button { min-height: 29px; min-width: 33px; padding: 0 4px; font-size: 1.1rem; }
+.ab-vision-rotate {flex-wrap:wrap}
+.ab-vision-rotate input[type=number] {width:58px; padding:3px; text-align:center}
 
 .ab-vision .ab-vision-consent {
   margin-block: 14px 0;

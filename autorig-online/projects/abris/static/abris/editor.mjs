@@ -1,4 +1,5 @@
 import { inPolygon, insertWallTopology, snapToWalls } from './topology.mjs';
+import { polygonLabelPoint, requiresPolygonDiagonals, triangulate, usesMeasuredPolygon } from './polygon.mjs';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const SIDES = { top: 'Верх', bottom: 'Низ', left: 'Слева', right: 'Справа' };
@@ -33,7 +34,9 @@ const BOUNDS = [0, 0, 1000, 700];
 const wallDefault = type => ({ WALL_CAPITAL: 25, WALL_PARTITION: 12, VERANDA: 3, AUX: 0 })[type] ?? 12;
 const STATUS = { missing: 'Нужен промер по каждой оси', review: 'Проверьте промеры на абрисе',
   error: 'Невязка больше 10 см', ok: 'Промеры в допуске', schematic: 'Подтвердите положение на холсте',
-  polygon: 'Контур из отрезков. Печать требует промеров по его граням.' };
+  polygon: 'Нужны промеры всех граней',
+  diagonals: 'Нужны диагонали из вершины 1',
+  measured: 'Промеры контура введены' };
 const lowConfidence = value => num(value, 1) < .85;
 const needsRoomCheck = room => lowConfidence(room.confidence) ||
   Object.keys(SIDES).some(side => room.raw_measurements_cm?.[side] > 0 && lowConfidence(room.measurement_confidences?.[side]));
@@ -71,6 +74,7 @@ function button(parent, label, action, className = '') {
 
 function field(parent, text, control) {
   const label = el('label', { class: 'abris-ed-field' });
+  control.setAttribute('aria-label',text);
   label.append(el('span', {}, text), control);
   parent.append(label);
   return control;
@@ -120,6 +124,19 @@ function roomSide(bounds, side) {
   }[side];
 }
 
+function polygonLine(room, index) {
+  const points = room.polygon_px;
+  return [...points[index], ...points[(index + 1) % points.length]];
+}
+
+function diagonalIndexes(room) {
+  return Array.from({length:Math.max(0,room.polygon_px.length - 3)}, (_, i) => i + 2);
+}
+
+const edgeLabel = (room, index) => (index + 1) + '–' + ((index + 1) % room.polygon_px.length + 1);
+const diagonalLabel = index => '1–' + (index + 1);
+const hasEdge = (room, index) => Number.isInteger(index) && index >= 0 && index < (room.polygon_px?.length ?? 0);
+
 function fromLine(line, t) {
   const [x1, y1, x2, y2] = line;
   return [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t];
@@ -148,7 +165,11 @@ function line([x1, y1, x2, y2], attributes) {
 }
 
 function roomStatus(room) {
-  if (room.polygon_px?.length >= 3) return 'polygon';
+  if (usesMeasuredPolygon(room)) {
+    if (!room.polygon_px.every((_, i) => room.edge_lengths_cm?.[i] > 0)) return 'polygon';
+    if (requiresPolygonDiagonals(room.polygon_px) && diagonalIndexes(room).some(i => !(room.diagonals_cm?.[i] > 0))) return 'diagonals';
+    return !room.verified && needsRoomCheck(room) ? 'review' : 'measured';
+  }
   if (room.schematic) return 'schematic';
   const { top, bottom, left, right } = room.raw_measurements_cm || {};
   if (!(top > 0 || bottom > 0) || !(left > 0 || right > 0)) return 'missing';
@@ -177,6 +198,7 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
   let view;
   let fitWidth;
   let visionBusy = false;
+  const labelPoints = new WeakMap();
 
   stage.classList.add('abris-editor-stage');
   inspector.classList.add('abris-editor-inspector');
@@ -243,19 +265,23 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
   }
 
   function openingPosition(room, opening) {
+    const polygon = usesMeasuredPolygon(room);
+    if (polygon && !hasEdge(room, opening.edge_index)) return null;
     const side = opening.wall in SIDES ? opening.wall : 'top';
-    const measure = num(room.raw_measurements_cm?.[side]);
+    const measure = polygon ? num(room.edge_lengths_cm?.[opening.edge_index]) : num(room.raw_measurements_cm?.[side]);
     const width = num(opening.width_cm, 80);
     let center = num(opening.t, .5);
     if (measure > 0 && opening.offset_cm != null) center = (opening.offset_cm + width / 2) / measure;
     else if (measure > 0 && opening.offset_right_cm != null) center = 1 - (opening.offset_right_cm + width / 2) / measure;
-    const lineCoord = roomSide(room.bbox_px, side);
+    const lineCoord = polygon ? polygonLine(room,opening.edge_index) : roomSide(room.bbox_px, side);
     const fraction = measure > 0 ? clamp(width / measure / 2, .025, .5) : .12;
-    return { side, lineCoord, fraction, center: clamp(center, fraction, 1 - fraction) };
+    return { lineCoord, fraction, center: clamp(center, fraction, 1 - fraction) };
   }
 
   function drawOpening(group, room, opening) {
-    const { side, lineCoord, fraction, center } = openingPosition(room, opening);
+    const position = openingPosition(room, opening);
+    if (!position) return;
+    const { lineCoord, fraction, center } = position;
     const active = selection?.kind === 'opening' && selection?.objectId === opening.id && selectedRoom() === room;
     const [cx, cy] = fromLine(lineCoord, center);
     const start = fromLine(lineCoord, center - fraction);
@@ -269,30 +295,51 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
     hit.append(line(span, { class: 'abris-ed-opening-track' }));
     hit.append(line(span, { class: 'abris-ed-opening-stripe' }));
     const d = px(6);
+    const direction = [lineCoord[2] - lineCoord[0], lineCoord[3] - lineCoord[1]];
+    const magnitude = Math.hypot(...direction);
+    if (!magnitude) return;
+    const dx = -direction[1] / magnitude * d, dy = direction[0] / magnitude * d;
     if (opening.type === 'WINDOW_STD' || opening.type === 'DOOR_GLAZED') {
-      const dx = side === 'left' || side === 'right' ? d * .55 : 0;
-      const dy = dx ? 0 : d * .55;
-      hit.append(line([start[0] + dx, start[1] + dy, end[0] + dx, end[1] + dy], { class: 'abris-ed-opening-stripe' }));
+      hit.append(line([start[0] + dx*.55, start[1] + dy*.55, end[0] + dx*.55, end[1] + dy*.55], { class:'abris-ed-opening-stripe' }));
     }
     if (opening.type === 'DOOR_SINGLE' || opening.type === 'DOOR_DOUBLE') {
-      const dx = side === 'left' ? d : side === 'right' ? -d : 0;
-      const dy = side === 'top' ? d : side === 'bottom' ? -d : 0;
       hit.append(line([start[0], start[1], cx + dx, cy + dy], { class: 'abris-ed-opening-stripe' }));
     }
     group.append(hit);
+  }
+
+  function drawPolygonEdges(group, room, active) {
+    for (const [index] of room.polygon_px.entries()) {
+      const chosen = selection?.kind === 'edge' && selection?.index === index && active;
+      const edge = polygonLine(room,index);
+      group.append(line(edge, { class:'abris-ed-side', 'data-ed-kind':'edge', 'data-index':index,
+        'data-wall-type':room.edge_wall_types?.[index], 'data-active':chosen ? 'yes' : 'no' }));
+    }
+    if (!active) return;
+    if (selection?.kind === 'diagonal') {
+      const point = room.polygon_px[selection.index];
+      if (point) group.append(line([...room.polygon_px[0], ...point], { class:'abris-ed-diagonal' }));
+    }
+    for (const [index,[x,y]] of room.polygon_px.entries()) {
+      group.append(svg('circle', { class:'abris-ed-vertex', cx:x, cy:y, r:px(7) }));
+      group.append(svg('text', { class:'abris-ed-vertex-number', x, y, 'font-size':px(8),
+        'text-anchor':'middle', 'dominant-baseline':'central' }, index + 1));
+    }
   }
 
   function drawRoom(room) {
     if (!Array.isArray(room.bbox_px) || room.bbox_px.length !== 4) return;
     const active = selectedRoom() === room;
     const [l,t,r,b] = room.bbox_px;
-    const polygon = room.polygon_px;
+    const polygon = usesMeasuredPolygon(room) ? room.polygon_px : null;
     let middleX = midpoint(l, r);
     let middleY = midpoint(t, b);
     if (polygon && !inPolygon([middleX,middleY],polygon)) {
-      const average = polygon.reduce(([x,y], point) => [x + point[0]/polygon.length, y + point[1]/polygon.length], [0,0]);
-      if (inPolygon(average, polygon)) [middleX,middleY] = average;
-      else [middleX,middleY] = polygon[0];
+      if (!labelPoints.has(polygon)) {
+        const triangles = triangulate(polygon);
+        labelPoints.set(polygon, triangles.length ? polygonLabelPoint(polygon,triangles) : polygon[0]);
+      }
+      [middleX,middleY] = labelPoints.get(polygon);
     }
     const group = svg('g', { 'data-room': room.id, class: 'abris-ed-room', 'data-status': roomStatus(room), 'data-active': active ? 'yes' : 'no' });
     group.append(roomShape(room.bbox_px,polygon,{ class:'abris-ed-room-shape', 'data-ed-kind':'room' }));
@@ -305,8 +352,8 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
         }));
       }
       drawMeasurements(group, room);
-      for (const opening of room.openings || []) drawOpening(group, room, opening);
-    }
+    } else drawPolygonEdges(group,room,active);
+    for (const opening of room.openings || []) drawOpening(group, room, opening);
     const radius = Math.min(px(13), (r - l) / 5, (b - t) / 5);
     if (radius >= px(3)) {
       group.append(svg('circle', { cx: middleX, cy: middleY, r: radius, class: 'abris-ed-room-number', 'data-ed-kind': 'room' }));
@@ -519,13 +566,146 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
     trigger.disabled = visionBusy;
   }
 
+  function roomVerification(room, polygon = false) {
+    if (!(polygon || needsRoomCheck(room) || room.verified || room.schematic)) return;
+    if (room.verified && !room.schematic) {
+      info(inspector,'Помещение проверено');
+      return;
+    }
+    button(inspector,'Подтвердить',() => {
+      const current = roomStatus(room);
+      if (['missing','error','polygon','diagonals'].includes(current)) return notify('Проверьте промеры перед подтверждением.');
+      const before = { verified:room.verified, schematic:room.schematic };
+      const after = { verified:true, schematic:false };
+      change('edit', { entity:'room', field:'verified' }, before, after, () => Object.assign(room,after));
+      drawInspector();
+    }, 'abris-ed-confirm');
+  }
+
+  function roomElements(room) {
+    const elements = [...(room.openings || []).map(item => ['opening', item, OPENINGS[item.type]]),
+      ...(room.symbols || []).map(item => ['symbol', item, SYMBOLS[item.type]?.[0]])];
+    if (!elements.length) return;
+    heading(inspector, 'Элементы');
+    const list = el('div', { class: 'abris-ed-items' });
+    for (const [kind, item, title] of elements) {
+      button(list, title || 'Элемент', () => select({ kind, roomId: room.id, objectId: item.id }));
+    }
+    inspector.append(list);
+  }
+
+  function polygonMeasure(parent, room, index, diagonal = false, current = false) {
+    const key = diagonal ? 'diagonals_cm' : 'edge_lengths_cm';
+    const label = diagonal ? 'Диагональ ' + diagonalLabel(index) : 'Грань ' + edgeLabel(room,index);
+    return numeric(parent,label + ', см',room[key]?.[index],value => {
+      change('edit',{entity:'measurement',field:key,index},room[key]?.[index] ?? null,value,() => {
+        (room[key] ||= diagonal ? {} : [])[index] = value;
+      });
+      const status = inspector.querySelector('.abris-ed-status');
+      if (status) {
+        status.dataset.status = roomStatus(room);
+        status.textContent = STATUS[status.dataset.status];
+      }
+    },{current});
+  }
+
+  function fullSideForEdge(room, index) {
+    const edge = polygonLine(room,index);
+    const span = Math.hypot(edge[0]-edge[2],edge[1]-edge[3]);
+    const tolerance = Math.max(0.1,span*.005);
+    for (const side of Object.keys(SIDES)) {
+      const rect = roomSide(room.bbox_px,side);
+      const forward = Math.hypot(edge[0]-rect[0],edge[1]-rect[1]) < tolerance &&
+        Math.hypot(edge[2]-rect[2],edge[3]-rect[3]) < tolerance;
+      const reverse = Math.hypot(edge[0]-rect[2],edge[1]-rect[3]) < tolerance &&
+        Math.hypot(edge[2]-rect[0],edge[3]-rect[1]) < tolerance;
+      if (forward || reverse) return { side, reverse };
+    }
+    return null;
+  }
+
+  function rectifiedOpening(room, opening) {
+    const next = { ...opening };
+    delete next.edge_index;
+    if (!hasEdge(room,opening.edge_index) && Object.hasOwn(SIDES,opening.wall)) return next;
+    const exact = hasEdge(room,opening.edge_index) ? fullSideForEdge(room,opening.edge_index) : null;
+    if (exact) {
+      next.wall = exact.side;
+      if (exact.reverse) {
+        next.offset_cm = opening.offset_right_cm ?? null;
+        next.offset_right_cm = opening.offset_cm ?? null;
+        next.t = 1 - (opening.t ?? .5);
+      }
+      return next;
+    }
+    const position = openingPosition(room,opening);
+    const [x,y] = position ? fromLine(position.lineCoord, position.center) : fromLine(roomSide(room.bbox_px,'top'), .5);
+    const sides = Object.keys(SIDES).map(side => ({ side, ...distanceToLine({x,y},roomSide(room.bbox_px,side)) }));
+    const nearest = sides.reduce((best,side) => side.distance < best.distance ? side : best);
+    return { ...next, wall:nearest.side, t:nearest.t, offset_cm:null, offset_right_cm:null,
+      confidence:Math.min(num(next.confidence,1),.75), verified:false };
+  }
+
+  function rectifyRoom(room) {
+    const converted = {
+      ...room, raw_measurements_cm:{ ...room.raw_measurements_cm },
+      wall_types:{ ...room.wall_types }, wall_thickness_cm:{ ...room.wall_thickness_cm },
+      openings:(room.openings || []).map(opening => rectifiedOpening(room,opening)), verified:false,schematic:false,
+    };
+    for (const [index] of room.polygon_px.entries()) {
+      const match = fullSideForEdge(room,index);
+      if (!match) continue;
+      const { side } = match;
+      if (!(converted.raw_measurements_cm[side] > 0) && room.edge_lengths_cm?.[index] > 0) {
+        converted.raw_measurements_cm[side] = room.edge_lengths_cm[index];
+      }
+      if (room.edge_wall_types?.[index]) converted.wall_types[side] = room.edge_wall_types[index];
+      if (room.edge_wall_thickness_cm?.[index] != null) converted.wall_thickness_cm[side] = room.edge_wall_thickness_cm[index];
+    }
+    const fields = ['polygon_px','edge_lengths_cm','diagonals_cm','edge_wall_types','edge_wall_thickness_cm'];
+    for (const key of fields) delete converted[key];
+    change('rectify',{entity:'room'},room,converted,() => {
+      for (const key of fields) delete room[key];
+      Object.assign(room,converted);
+    });
+    select({kind:'room',roomId:room.id});
+  }
+
+  function polygonInspector(room) {
+    const grid = el('div', {class:'abris-ed-grid'});
+    inspector.append(grid);
+    for (const [index] of room.polygon_px.entries()) polygonMeasure(grid,room,index);
+    const diagonals = diagonalIndexes(room);
+    if (diagonals.length) {
+      const required = requiresPolygonDiagonals(room.polygon_px);
+      const details = el('details', {class:'abris-ed-diagonals'});
+      if (required) details.open = true;
+      details.append(el('summary',{},required ? 'Диагонали из вершины 1' : 'Диагонали для проверки'));
+      const inputs = el('div',{class:'abris-ed-grid'});
+      details.append(inputs);
+      for (const index of diagonals) polygonMeasure(inputs,room,index,true);
+      inspector.append(details);
+    }
+    roomVerification(room,true);
+    roomElements(room);
+    const rectify = button(inspector,'Сделать прямоугольником',() => {
+      rectify.hidden = true;
+      const box = el('div',{class:'abris-ed-rectify'});
+      info(box,'Границы заменятся прямоугольником. Сохранятся точные промеры его сторон. Привязки остальных проёмов потребуется проверить.');
+      button(box,'Заменить контур',() => rectifyRoom(room),'abris-ed-confirm');
+      button(box,'Отмена',() => { box.remove(); rectify.hidden = false; });
+      inspector.insertBefore(box,rectify);
+    });
+  }
+
   function roomInspector(room) {
     const number = roomNumber(room);
     heading(inspector, number ? 'Помещение ' + number : 'Терраса');
     const status = roomStatus(room);
     const chip = el('p', { class: 'abris-ed-status', 'data-status': status }, STATUS[status]);
     inspector.append(chip);
-    if (room.polygon_px) {
+    if (usesMeasuredPolygon(room)) {
+      polygonInspector(room);
       button(inspector, 'Удалить помещение', removeSelection, 'abris-ed-danger');
       return;
     }
@@ -533,17 +713,7 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
     inspector.append(grid);
     for (const side of Object.keys(SIDES)) measureField(grid, room, side);
     visionButton(room);
-    if (needsRoomCheck(room) || room.verified || room.schematic) {
-      if (room.verified && !room.schematic) info(inspector, 'Помещение проверено');
-      else button(inspector, 'Подтвердить', () => {
-        const current = roomStatus(room);
-        if (current === 'missing' || current === 'error') return notify('Проверьте промеры перед подтверждением.');
-        const before = { verified:room.verified, schematic:room.schematic };
-        const after = { verified:true, schematic:false };
-        change('edit', { entity:'room', field:'verified' }, before, after, () => Object.assign(room,after));
-        drawInspector();
-      }, 'abris-ed-confirm');
-    }
+    roomVerification(room);
     checked(inspector, 'Открытая терраса, без номера', room.is_heated === false, checkedValue => {
       setValue(room, 'is_heated', !checkedValue, { entity: 'room' });
       drawInspector();
@@ -553,16 +723,7 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
       button(sideRow, label, () => select({ kind: 'side', roomId: room.id, side }));
     }
     inspector.append(sideRow);
-    const elements = [...(room.openings || []).map(item => ['opening', item, OPENINGS[item.type]]),
-      ...(room.symbols || []).map(item => ['symbol', item, SYMBOLS[item.type]?.[0]])];
-    if (elements.length) {
-      heading(inspector, 'Элементы');
-      const list = el('div', { class: 'abris-ed-items' });
-      for (const [kind, item, title] of elements) {
-        button(list, title || 'Элемент', () => select({ kind, roomId: room.id, objectId: item.id }));
-      }
-      inspector.append(list);
-    }
+    roomElements(room);
     button(inspector, 'Удалить помещение', removeSelection, 'abris-ed-danger');
   }
 
@@ -588,22 +749,54 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
     if (wall) button(inspector, 'Удалить стену', removeSelection, 'abris-ed-danger');
   }
 
+  function polygonEdgeInspector(room, diagonal, focus) {
+    const index = selection.index;
+    backToRoom(room);
+    const input = polygonMeasure(inspector, room, index, diagonal, true);
+    if (focus) input.focus({preventScroll:true});
+    if (diagonal) return;
+    const update = (key,value) => {
+      change('edit',{entity:'wall',field:key,index},room[key]?.[index],value,() => {
+        (room[key] ||= [])[index] = value;
+      });
+    };
+    const type = room.edge_wall_types?.[index] || 'WALL_CAPITAL';
+    options(inspector,'Тип',WALLS,type,value => {
+      update('edge_wall_types',value);
+      drawInspector();
+    });
+    numeric(inspector,'Толщина, см',room.edge_wall_thickness_cm?.[index] ?? wallDefault(type),
+      value => update('edge_wall_thickness_cm',value),{min:0,max:300});
+  }
+
   function openingInspector(room, opening) {
     backToRoom(room);
     heading(inspector, 'Проём');
     const detail = { entity: 'opening', object_id: opening.id };
     let confirm;
-    const validOpening = () => opening.width_cm > 0 && Object.hasOwn(SIDES, opening.wall) && Object.hasOwn(OPENINGS, opening.type);
+    const polygon = usesMeasuredPolygon(room);
+    const validOpening = () => opening.width_cm > 0 && Object.hasOwn(OPENINGS, opening.type) &&
+      (polygon ? hasEdge(room,opening.edge_index) : Object.hasOwn(SIDES,opening.wall));
     const update = (key, value) => {
       change('edit', { ...detail, field:key }, opening[key], value, () => {
         opening[key] = value;
         opening.verified = false;
+        if (key === 'edge_index') {
+          opening.offset_cm = null;
+          opening.offset_right_cm = null;
+        }
       });
       if (confirm) confirm.disabled = !validOpening();
       else if (lowConfidence(opening.confidence)) drawInspector();
     };
     options(inspector, 'Условный знак', OPENINGS, opening.type, value => update('type', value));
-    options(inspector, 'Стена', SIDES, opening.wall, value => update('wall', value));
+    if (polygon) {
+      const edges = Object.fromEntries(room.polygon_px.map((_,index) => [index,'Грань ' + edgeLabel(room,index)]));
+      options(inspector,'Грань',{ ...edges, '':'Выберите грань' },opening.edge_index ?? '',value => {
+        update('edge_index',value !== '' ? Number(value) : null);
+        drawInspector();
+      });
+    } else options(inspector, 'Стена', SIDES, opening.wall, value => update('wall', value));
     const grid = el('div', { class: 'abris-ed-grid' });
     inspector.append(grid);
     numeric(grid, 'Ширина, см', opening.width_cm, value => update('width_cm', value), { max: 10000 });
@@ -663,6 +856,8 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
       }
     } else if (wall || (room && selection.kind === 'side')) {
       wallInspector(room, wall);
+    } else if (room && usesMeasuredPolygon(room) && (selection.kind === 'edge' || selection.kind === 'diagonal')) {
+      polygonEdgeInspector(room, selection.kind === 'diagonal', focus);
     } else if (selectedOpening()) {
       openingInspector(room, selectedOpening());
     } else if (selectedSymbol()) {
@@ -691,6 +886,7 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
       side: mark.dataset.side,
       objectId: mark.dataset.object,
       corner: Number(mark.dataset.corner),
+      index: Number(mark.dataset.index),
     } : null;
   }
 
@@ -706,14 +902,16 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
     const candidates = roomHint ? [roomHint] : rooms();
     let match;
     for (const room of candidates) {
-      if (room.polygon_px) continue;
-      for (const side of Object.keys(SIDES)) {
-        const edge = distanceToLine(point, roomSide(room.bbox_px, side));
-        if ((!match || edge.distance < match.distance) && edge.distance <= px(20)) match = { room, side, ...edge };
+      const edges = usesMeasuredPolygon(room)
+        ? room.polygon_px.map((_,index) => [{ edge_index:index },polygonLine(room,index)])
+        : Object.keys(SIDES).map(side => [{ wall:side },roomSide(room.bbox_px,side)]);
+      for (const [attachment, line] of edges) {
+        const edge = distanceToLine(point,line);
+        if ((!match || edge.distance < match.distance) && edge.distance <= px(20)) match = { room, attachment, ...edge };
       }
     }
     if (!match) return notify('Нажмите на стену помещения.');
-    const opening = { id: id('opening'), wall: match.side, type: 'WINDOW_STD', width_cm: 100, t: match.t, confidence: 1 };
+    const opening = { id:id('opening'), ...match.attachment, type:'WINDOW_STD', width_cm:100, t:match.t, confidence:1 };
     select({ kind: 'room', roomId: match.room.id });
     change('add', { entity: 'opening', object_id: opening.id }, null, opening, () => { (match.room.openings ||= []).push(opening); });
     select({ kind: 'opening', roomId: match.room.id, objectId: opening.id });
@@ -742,7 +940,9 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
     let dy = distance;
     for (const room of rooms()) {
       if (room === roomToSkip) continue;
-      for (const [vx,vy] of [[room.bbox_px[0],room.bbox_px[1]], [room.bbox_px[2],room.bbox_px[3]]]) {
+      const vertices = usesMeasuredPolygon(room) ? room.polygon_px
+        : [[room.bbox_px[0],room.bbox_px[1]], [room.bbox_px[2],room.bbox_px[3]]];
+      for (const [vx,vy] of vertices) {
         if (Math.abs(vx - point.x) < dx) {
           dx = Math.abs(vx - point.x);
           x = vx;
@@ -758,7 +958,11 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
 
   function snapWall(point) {
     const aligned = snap(point);
-    const [x,y] = snapToWalls([aligned.x,aligned.y],walls(),px(8));
+    const polygonEdges = rooms().filter(usesMeasuredPolygon).flatMap(room => room.polygon_px.map((_,i) => {
+      const [x1,y1,x2,y2] = polygonLine(room,i);
+      return {x1,y1,x2,y2};
+    }));
+    const [x,y] = snapToWalls([aligned.x,aligned.y],[...walls(),...polygonEdges],px(8));
     return { x,y };
   }
 
@@ -895,6 +1099,7 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
         result.room.verified = false;
         result.room.schematic = false;
         if (result.polygon) result.room.polygon_px = result.polygon;
+        else if (action.kind === 'resize') delete result.room.polygon_px;
       });
       drawInspector();
     }
@@ -1002,6 +1207,10 @@ export function mountEditor({ stage, inspector, onChange, onSelect, onVision, no
         select({ kind:'opening', roomId, objectId:openingId });
       } else if (room.symbols?.some(item => item.id === issue.object_id)) {
         select({ kind:'symbol', roomId, objectId:issue.object_id });
+      } else if (usesMeasuredPolygon(room) && diagonalIndexes(room).includes(issue.diagonal_index)) {
+        select({ kind:'diagonal', roomId, index:issue.diagonal_index }, true);
+      } else if (usesMeasuredPolygon(room) && hasEdge(room,issue.edge_index)) {
+        select({ kind:'edge', roomId, index:issue.edge_index }, true);
       } else if (Object.hasOwn(SIDES, issue.side)) {
         select({ kind:'measurement', roomId, side:issue.side }, true);
       } else {

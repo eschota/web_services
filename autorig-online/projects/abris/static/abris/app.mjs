@@ -51,7 +51,7 @@ async function reviewWithVision(room, side) {
       (room.raw_measurements_cm ||= {})[key]=n;
       (room.measurement_confidences ||= {})[key]=1;
       (room.raw_measurement_boxes_px ||= {})[key]=result.bbox_px;
-      (room.measurement_rotations_deg ||= {})[key]=result.rotation===270 ? -90 : result.rotation || 0;
+      (room.measurement_rotations_deg ||= {})[key]=result.rotation>180 ? result.rotation-360 : result.rotation || 0;
       changed({kind:'edit',entity:'measurement',room_id:room.id,field:key,before,after:n,
         source:'vision_review',bbox_px:result.bbox_px});
       editor.render(project,floorIndex); editor.selectRoom(room.id);
@@ -168,7 +168,7 @@ function field(parent,label,value,type='text') {
 async function exportTraining() {
   const samples=[];
   for (const f of project.floors) {
-    if (!f.image) continue;
+    if (!f.image || !f.training_group) continue;
     const img = new Image(); img.src=f.image; await img.decode();
     for (const room of f.rooms) for (const side of ['top','bottom','left','right']) {
       const bounds = room.raw_measurement_boxes_px?.[side];
@@ -179,12 +179,14 @@ async function exportTraining() {
       const w=Math.min(img.width-x,Math.ceil(bounds[2]+2)-x), h=Math.min(img.height-y,Math.ceil(bounds[3]+2)-y);
       if (w<2 || h<2 || w*h>100000) continue;
       const angle = room.measurement_rotations_deg?.[side] ?? (['top','bottom'].includes(side) ? 0 : null);
-      if (![0,-90,90,180,-180].includes(angle)) continue;
-      const c=document.createElement('canvas'), vertical=Math.abs(angle)===90;
-      c.width=vertical ? h : w; c.height=vertical ? w : h;
-      const ctx=c.getContext('2d'); ctx.translate(c.width/2,c.height/2); ctx.rotate(angle*Math.PI/180);
+      if (!Number.isFinite(angle)) continue;
+      const c=document.createElement('canvas'), radians=angle*Math.PI/180;
+      const cos=Math.abs(Math.cos(radians)),sin=Math.abs(Math.sin(radians));
+      c.width=Math.ceil(w*cos+h*sin); c.height=Math.ceil(w*sin+h*cos);
+      const ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
+      ctx.translate(c.width/2,c.height/2); ctx.rotate(radians);
       ctx.drawImage(img,x,y,w,h,-w/2,-h/2,w,h);
-      samples.push({image:c.toDataURL('image/png'),label:String(value),group:f.training_group || f.floor_id});
+      samples.push({image:c.toDataURL('image/png'),label:String(value),group:f.training_group});
     }
   }
   if (!samples.length) throw new Error('Пока нет подтверждённых цифр с координатами на скане.');
@@ -203,6 +205,19 @@ function metadata() {
   h.step = '0.01'; h.min = '0.2'; h.max = '100';
   const calibration = field(form,'Калибровка подложки, см/пиксель (если известна)',floor().cm_per_px,'number');
   calibration.step='any'; calibration.min='0.0001'; calibration.max='10000';
+  const hints = m.section_hints || [];
+  if (hints.length) {
+    const reference=make('details'); reference.append(make('summary','Разрезы и высоты на исходных листах'));
+    for (const hint of hints) {
+      const figure=make('figure',null,'ab-section');
+      if (hint.image) { const img=make('img'); img.alt='Разрез на обмерном листе'; img.src=hint.image; figure.append(img); }
+      figure.append(make('figcaption', 'Лист '+(hint.source_page ?? '—')+
+        (hint.height_cm!=null ? ' · h = '+hint.height_cm+' см' : ' · высота требует проверки')));
+      if (hint.height_cm!=null) figure.append(action('Указать эту высоту для этажа',()=>{h.value=String(hint.height_cm/100);}));
+      reference.append(figure);
+    }
+    form.append(reference);
+  }
   const ok = make('button','Сохранить','ab-primary'); ok.type = 'submit'; form.append(ok);
   form.addEventListener('submit',e => {
     e.preventDefault();
@@ -309,6 +324,8 @@ async function loadFiles(files) {
       }
       merged.dataset_corrections ||= [];
       merged.dataset_corrections.push(...(part.dataset_corrections || []));
+      merged.project_meta.section_hints ||= [];
+      merged.project_meta.section_hints.push(...(part.project_meta.section_hints || []));
     }
     if (merged.floors.length > 100) throw new Error('В одном проекте можно открыть до 100 этажей.');
     project = merged; floorIndex = selected; isExample = false; solved = null; view = 'scan';
@@ -369,7 +386,8 @@ function saveProject() {
       if (!r) return raw;
       const geometryOK=!(finished.issues || []).some(issue=>issue.severity==='error' && (!issue.room_id || issue.room_id===raw.id));
       return {...raw,room_number:r.number,solved_dimensions_m:geometryOK ? r.solved_dimensions_m : null,
-        solved_origin_m:geometryOK ? [r.x,r.y] : null,area_m2:geometryOK ? r.area_m2 : null};
+        solved_origin_m:geometryOK ? [r.x,r.y] : null,area_m2:geometryOK ? r.area_m2 : null,
+        ...(geometryOK && r.polygon ? {solved_polygon_m:r.polygon} : {})};
     })};
   })};
   saveFile((project.name || 'Абрис') + '.abris.json',JSON.stringify(document,null,2),'application/json;charset=utf-8');

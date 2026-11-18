@@ -8,7 +8,7 @@ import cv2 as cv
 import numpy as np
 from PIL import Image
 
-from recognition import RecognitionError, Token, _openings, recognize
+from recognition import RecognitionError, Token, _Tesseract, _ocr_header, _openings, recognize
 
 
 def sample_floor():
@@ -36,10 +36,26 @@ def encode(image, fmt, **options):
     return target.getvalue()
 
 
+def angled_plan_with_section():
+    image = np.full((900, 1200, 3), 255, np.uint8)
+    cv.rectangle(image, (120, 160), (670, 680), (30, 30, 30), 3)
+    label = np.full((105, 155), 255, np.uint8)
+    cv.putText(label, "405", (33, 64), cv.FONT_HERSHEY_SIMPLEX, 1.28, 20, 3)
+    tilt = cv.getRotationMatrix2D((77, 52), 29, 1)
+    label = cv.warpAffine(label, tilt, (155, 105), borderValue=255)
+    image[220:325, 300:455] = cv.cvtColor(label, cv.COLOR_GRAY2BGR)
+    roof = np.array([(780, 595), (880, 455), (980, 595)], dtype=np.int32)
+    cv.polylines(image, [roof], True, (40, 40, 40), 3)
+    cv.putText(image, "h = 208", (965, 548), cv.FONT_HERSHEY_SIMPLEX, 0.75, (30, 30, 30), 2)
+    return cv.imencode(".png", image)[1].tobytes()
+
+
 class TestRecognition(unittest.TestCase):
     def test_rasters_detect_shapes_without_inventing_measurements(self):
         image = sample_floor()
-        with patch("recognition.shutil.which", return_value=None), patch.dict("os.environ", {"TESSDATA_PREFIX": ""}):
+        with patch("recognition.shutil.which", return_value=None), patch.dict(
+            "os.environ", {"TESSDATA_PREFIX": ""}
+        ):
             for fmt in ("JPEG", "PNG", "TIFF"):
                 with self.subTest(fmt=fmt):
                     result = recognize(encode(image, fmt), f"floor.{fmt.lower()}")
@@ -59,7 +75,9 @@ class TestRecognition(unittest.TestCase):
         image = sample_floor()
         blank = Image.new("RGB", image.size, "white")
         data = encode(image, "PDF", save_all=True, append_images=[blank])
-        with patch("recognition.shutil.which", return_value=None), patch.dict("os.environ", {"TESSDATA_PREFIX": ""}):
+        with patch("recognition.shutil.which", return_value=None), patch.dict(
+            "os.environ", {"TESSDATA_PREFIX": ""}
+        ):
             result = recognize(data, "test.pdf")
         self.assertEqual([floor["source_page"] for floor in result["floors"]], [1, 2])
         self.assertTrue(result["floors"][0]["rooms"])
@@ -70,9 +88,44 @@ class TestRecognition(unittest.TestCase):
         roof = np.array([(220, 690), (600, 310), (980, 690)], dtype=np.int32)
         cv.polylines(image, [roof], True, (40, 40, 40), 3)
         data = cv.imencode(".png", image)[1].tobytes()
-        with patch("recognition.shutil.which", return_value=None), patch.dict("os.environ", {"TESSDATA_PREFIX": ""}):
+        with patch("recognition.shutil.which", return_value=None), patch.dict(
+            "os.environ", {"TESSDATA_PREFIX": ""}
+        ):
             result = recognize(data, "roof.png")
         self.assertFalse(result["floors"][0]["rooms"])
+        self.assertEqual(result["project_meta"]["section_hints"][0]["type"], "SECTION_HINT")
+        self.assertIsNone(result["project_meta"]["section_hints"][0]["height_cm"])
+
+    def test_angle_correction_and_height_ocr_with_tesseract(self):
+        if not _Tesseract().available:
+            self.skipTest("Tesseract language data unavailable")
+        result = recognize(angled_plan_with_section(), "tilted.png")
+        self.assertEqual(len(result["floors"]), 1)
+        self.assertEqual(len(result["floors"][0]["rooms"]), 1)
+        room = result["floors"][0]["rooms"][0]
+        self.assertEqual(room["raw_measurements_cm"]["top"], 405)
+        self.assertLessEqual(abs(room["measurement_rotations_deg"]["top"] - 29), 8)
+        self.assertLess(room["measurement_confidences"]["top"], 0.60)
+        x1, y1, x2, y2 = room["raw_measurement_boxes_px"]["top"]
+        self.assertGreater(x2, x1)
+        self.assertGreater(y2, y1)
+        hints = result["project_meta"]["section_hints"]
+        self.assertEqual(len(hints), 1)
+        self.assertEqual(hints[0]["type"], "SECTION_HINT")
+        self.assertEqual(hints[0]["height_cm"], 208)
+
+    def test_customer_heading_case_is_independent_of_name_case(self):
+        image = np.full((700, 900, 3), 255, np.uint8)
+        for title in ("Заказчик:", "ЗАКАЗЧИК:", "заказчик:"):
+            with self.subTest(title=title):
+                ocr = _Tesseract()
+                ocr.available = True
+                words = [
+                    (text, 0.99, (offset * 100, 10, 96, 16))
+                    for offset, text in enumerate((title, "Примеров", "Иван", "Петрович"))
+                ]
+                with patch.object(ocr, "words", return_value=words):
+                    self.assertEqual(_ocr_header(image, 100, ocr)["customer"], "Примеров Иван Петрович")
 
     def test_nearby_glazing_label_switches_door_class(self):
         room = {"box": (50, 50, 550, 350)}

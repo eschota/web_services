@@ -27,7 +27,10 @@ function boundedList(x, max, name) {
   return items(x, max);
 }
 function cleanRoom(raw, index, ids) {
-  const bounds = box(raw.bbox_px);
+  const points = Array.isArray(raw.polygon_px) && raw.polygon_px.length>=3 && raw.polygon_px.length<=200 &&
+    raw.polygon_px.every(p=>Array.isArray(p) && p.length===2 && p.every(v=>coord(v)!=null)) ? raw.polygon_px.map(p=>p.map(Number)) : null;
+  const bounds = box(raw.bbox_px) || (points && box([Math.min(...points.map(p=>p[0])),Math.min(...points.map(p=>p[1])),
+    Math.max(...points.map(p=>p[0])),Math.max(...points.map(p=>p[1]))]));
   const output = {
     id: cleanId(raw.id, 'room', ids), bbox_px: bounds || [50+210*index,100,240+210*index,290],
     schematic: !bounds || raw.schematic === true, is_heated: raw.is_heated !== false,
@@ -41,15 +44,29 @@ function cleanRoom(raw, index, ids) {
     confidence: num(raw.confidence, 0, 1) ?? 0, verified: raw.verified === true,
     openings: [], symbols: []
   };
-  if (Array.isArray(raw.polygon_px) && raw.polygon_px.length >= 3 && raw.polygon_px.length <= 200 &&
-      raw.polygon_px.every(p => Array.isArray(p) && p.length === 2 && p.every(v => coord(v) != null))) output.polygon_px = raw.polygon_px.map(p => p.map(Number));
+  if (points) output.polygon_px = points;
+  if (output.polygon_px) {
+    const count=output.polygon_px.length;
+    if (Array.isArray(raw.edge_lengths_cm)) output.edge_lengths_cm = raw.edge_lengths_cm.slice(0,count).map(v=>num(v,0.1,100000));
+    if (Array.isArray(raw.edge_wall_types)) output.edge_wall_types = raw.edge_wall_types.slice(0,count).map(v=>WALL.has(v)?v:null);
+    if (Array.isArray(raw.edge_wall_thickness_cm)) output.edge_wall_thickness_cm = raw.edge_wall_thickness_cm.slice(0,count).map(v=>num(v,0,1000));
+    if (raw.diagonals_cm && typeof raw.diagonals_cm==='object') {
+      output.diagonals_cm = {};
+      for (let i=2; i<count-1; i++) {
+        const value=num(raw.diagonals_cm[i],0.1,100000);
+        if (value!=null) output.diagonals_cm[i]=value;
+      }
+    }
+  }
   output.local_measurements_cm = items(raw.local_measurements_cm,60).filter(m=>num(m.value_cm,0.1,100000)!=null)
     .map(m=>({label:cleanText(m.label,90),value_cm:Number(m.value_cm),bbox_px:box(m.bbox_px)}));
   for (const o of boundedList(raw.openings, 100, 'Проёмы')) {
-    if (!SIDES.includes(o.wall) || !OPENING.has(o.type)) continue;
+    const edge = Number.isInteger(o.edge_index) && o.edge_index>=0 && o.edge_index<(output.polygon_px?.length ?? 0) ? o.edge_index : null;
+    if ((!SIDES.includes(o.wall) && edge===null) || !OPENING.has(o.type)) continue;
     const op = {id: cleanId(o.id, 'opening', ids), wall: o.wall, type: o.type, width_cm: num(o.width_cm, 0.1, 10000), t: num(o.t, 0, 1) ?? 0.5, confidence: num(o.confidence, 0, 1) ?? 0, verified:o.verified===true,raw_label:cleanText(o.raw_label,60)};
     for (const field of ['offset_cm', 'offset_right_cm']) if (num(o[field], 0, 100000) != null) op[field] = Number(o[field]);
     for (const field of ['bbox_px','width_bbox_px']) if (box(o[field])) op[field] = box(o[field]);
+    if (edge!=null) op.edge_index=edge;
     output.openings.push(op);
   }
   for (const s of boundedList(raw.symbols, 100, 'Условные знаки')) {
@@ -83,6 +100,13 @@ export async function readProject(raw, fallbackName) {
     height_m:num(meta.height_m,0.2,100) ?? null,
     ...Object.fromEntries(['contract_number','customer','cadastral_number','address'].map(k => [k,cleanText(meta[k],350)]))
   },floors:[], dataset_corrections:[]};
+  project.project_meta.section_hints=[];
+  for (const hint of boundedList(meta.section_hints,50,'Разрезы')) {
+    if (hint.type!=='SECTION_HINT') continue;
+    project.project_meta.section_hints.push({type:'SECTION_HINT',source_page:num(hint.source_page,1,10000),
+      page_bbox_px:box(hint.page_bbox_px),shape_bbox_px:box(hint.shape_bbox_px),
+      height_cm:num(hint.height_cm,1,10000),image:await safeImage(hint.image)});
+  }
   const floorIds = new Set(), images = new Map();
   for (const [i, f] of raw.floors.entries()) {
     if (!f || typeof f !== 'object') throw new Error('Некорректная запись этажа.');

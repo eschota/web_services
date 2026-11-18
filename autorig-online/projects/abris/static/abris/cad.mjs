@@ -1,3 +1,8 @@
+import {
+  boundsOfPoints, mapPolygonPoint, pointInPolygon, polygonIntersectionArea, polygonLabelPoint,
+  signedArea, solveMeasuredPolygon, usesMeasuredPolygon,
+} from "./polygon.mjs";
+
 const SIDES = ["top", "right", "bottom", "left"];
 const MIN_MEASUREMENT_CM = 15;
 const MAX_MEASUREMENT_CM = 10000;
@@ -52,7 +57,7 @@ function checkBBox(bounds) {
     && bounds[2] > bounds[0] && bounds[3] > bounds[1];
 }
 
-function recordIssue(issues, severity, code, floor, room, detail, opening, side, objectId) {
+function recordIssue(issues, severity, code, floor, room, detail, opening, side, objectId, location = {}) {
   const place = room ? `${floor.title}, ${room.number ? `пом. ${room.number}` : "открытый контур"}` : floor.title;
   issues.push({
     severity,
@@ -63,6 +68,7 @@ function recordIssue(issues, severity, code, floor, room, detail, opening, side,
     side,
     object_id: objectId,
     message: `${place}. ${detail}`,
+    ...location,
   });
 }
 
@@ -106,6 +112,24 @@ function prepareRooms(floor, nextNumber, issues) {
     if (lowConfidence(room.confidence) && room.verified !== true) {
       recordIssue(issues, "error", "room-confidence", floor, room,
         "Сверьте контур с абрисом и подтвердите помещение.");
+    }
+    if (usesMeasuredPolygon(room)) {
+      const geometry = solveMeasuredPolygon(room);
+      for (const { severity, code, message, edge_index, diagonal_index } of geometry.issues) {
+        recordIssue(issues, severity, code, floor, room, message, null, undefined, undefined, { edge_index, diagonal_index });
+      }
+      if (room.polygon_px.every((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite))) {
+        const bounds = boundsOfPoints(room.polygon_px);
+        if (checkBBox(bounds)) room.bbox_px = bounds;
+      }
+      if (checkBBox(room.bbox_px)) {
+        room.polygon_fit = geometry;
+        room.discrepancy_cm = geometry.points ? Math.max(...geometry.residuals_cm.map(Math.abs)) : 0;
+        room.measurements = [geometry.width, geometry.length].map((value) => ({ value: value ?? null, weight: 1, spread: 0 }));
+        if (room.schematic) syntheticCount += 1;
+        rooms.push(room);
+        continue;
+      }
     }
     const sideNames = { top: "сверху", right: "справа", bottom: "снизу", left: "слева" };
     for (const side of SIDES) {
@@ -193,28 +217,53 @@ function wallThickness(room, side, fallback) {
 }
 
 function sharedWall(first, second) {
-  const types = [first.room.wall_types[first.side], second.room.wall_types[second.side]];
+  const types = [first.type, second.type];
   const main = types.includes("WALL_CAPITAL");
   const open = types.every((type) => type === "VERANDA" || type === "AUX");
-  const explicit = [first, second].flatMap((edge) => {
-    const value = edge.room.wall_thickness_cm?.[edge.side];
+  const explicit = [first, second].flatMap(({ thickness }) => {
+    const value = thickness;
     return validRange(value, 1, 150) ? [value / 100] : [];
   });
   const thickness = open ? 0 : coordinate(explicit.length ? average(explicit) : main ? 0.28 : 0.12);
   return { type: open ? "VERANDA" : main ? "WALL_CAPITAL" : "WALL_PARTITION", thickness };
 }
 
+function polygonSideRange(room, axis, side) {
+  if (!room.polygon_fit) return undefined;
+  const points = room.polygon_fit.points;
+  if (!points) return null;
+  const coordinate = side ? (axis ? room.polygon_fit.length : room.polygon_fit.width) : 0;
+  let longest = null;
+  for (const [index, start] of points.entries()) {
+    const next = (index + 1) % points.length;
+    const end = points[next];
+    if (Math.abs(start[axis] - coordinate) > EPSILON || Math.abs(end[axis] - coordinate) > EPSILON) continue;
+    const [first, second] = [room.polygon_px[index][1 - axis], room.polygon_px[next][1 - axis]];
+    if (!longest || Math.abs(second - first) > longest.range[1] - longest.range[0]) {
+      longest = { range: [Math.min(first, second), Math.max(first, second)], index };
+    }
+  }
+  return longest;
+}
+
 function solveAxis(rooms, axis, factor, tolerance, floor, issues) {
   const edges = rooms.flatMap((room) => {
     const perpendicular = 1 - axis;
     const names = axis ? ["top", "bottom"] : ["left", "right"];
-    return names.map((side, localIndex) => ({
-      room,
-      side,
-      end: Boolean(localIndex),
-      pixel: room.bbox_px[axis + localIndex * 2],
-      perpendicular: [room.bbox_px[perpendicular], room.bbox_px[perpendicular + 2]],
-    }));
+    return names.map((side, localIndex) => {
+      const outer = polygonSideRange(room, axis, localIndex);
+      return {
+        room,
+        side,
+        end: Boolean(localIndex),
+        pixel: room.bbox_px[axis + localIndex * 2],
+        perpendicular: outer?.range ?? [room.bbox_px[perpendicular], room.bbox_px[perpendicular + 2]],
+        linkable: outer !== null,
+        polygonIndex: outer?.index,
+        type: outer ? room.edge_wall_types?.[outer.index] : room.wall_types[side],
+        thickness: outer ? room.edge_wall_thickness_cm?.[outer.index] : room.wall_thickness_cm?.[side],
+      };
+    });
   });
   const parents = edges.map((_, index) => index);
   const delta = new Float64Array(edges.length);
@@ -225,22 +274,25 @@ function solveAxis(rooms, axis, factor, tolerance, floor, issues) {
     delta[index] += delta[parent];
     return parents[index];
   };
-  const constrain = (first, second, difference) => {
+  const constrain = (first, second, difference, sameRoom = false) => {
     const firstParent = anchors(first);
     const secondParent = anchors(second);
     if (firstParent === secondParent) return Math.abs(delta[second] - delta[first] - difference) < 0.011;
-    if (anchors(first ^ 1) === secondParent || anchors(second ^ 1) === firstParent) return false;
+    if (!sameRoom && (anchors(first ^ 1) === secondParent || anchors(second ^ 1) === firstParent)) return false;
     parents[secondParent] = firstParent;
     delta[secondParent] = difference + delta[first] - delta[second];
     return true;
   };
+  for (const [index, room] of rooms.entries()) {
+    if (room.polygon_fit?.points) constrain(index * 2, index * 2 + 1, room.measurements[axis].value, true);
+  }
 
   const alignments = [];
   const partitions = [];
   for (const [firstIndex, first] of edges.entries()) {
     for (let secondIndex = firstIndex + 1; secondIndex < edges.length; secondIndex += 1) {
       const second = edges[secondIndex];
-      if (first.room === second.room) continue;
+      if (first.room === second.room || !first.linkable || !second.linkable) continue;
       const distance = Math.abs(first.pixel - second.pixel);
       const [firstStart, firstEnd] = first.perpendicular;
       const [secondStart, secondEnd] = second.perpendicular;
@@ -255,7 +307,7 @@ function solveAxis(rooms, axis, factor, tolerance, floor, issues) {
       const later = first.end ? second : first;
       const gap = later.pixel - earlier.pixel;
       const wall = sharedWall(first, second);
-      const bothMain = [first, second].every(({ room, side }) => room.wall_types[side] === "WALL_CAPITAL");
+      const bothMain = first.type === "WALL_CAPITAL" && second.type === "WALL_CAPITAL";
       const measuredLimit = bothMain ? Math.min(tolerance * 4, 1.5 * wall.thickness / factor) : 0;
       const gapLimit = Math.max(10, tolerance * 1.9, measuredLimit);
       if (gap >= -0.65 * tolerance && gap <= gapLimit
@@ -292,8 +344,13 @@ function solveAxis(rooms, axis, factor, tolerance, floor, issues) {
       continue;
     }
     for (const edge of [first, second]) {
-      edge.room.effective_thickness_m[edge.side] = thickness;
-      edge.room.wall_types[edge.side] ??= type;
+      if (edge.polygonIndex === undefined) {
+        edge.room.effective_thickness_m[edge.side] = thickness;
+        edge.room.wall_types[edge.side] ??= type;
+      } else {
+        (edge.room.effective_edge_thickness_m ??= {})[edge.polygonIndex] = thickness;
+        (edge.room.inferred_edge_wall_types ??= {})[edge.polygonIndex] = type;
+      }
     }
   }
 
@@ -363,14 +420,27 @@ function overlap(a, b, c, d) {
   return Math.min(b, d) - Math.max(a, c);
 }
 
+function roomOutline(room) {
+  return room.polygon_fit?.points ? room.polygon : [
+    [room.x, room.y], [room.x + room.width, room.y],
+    [room.x + room.width, room.y + room.length], [room.x, room.y + room.length],
+  ];
+}
+
+const RECTANGLE_TRIANGLES = [[0, 1, 2], [0, 2, 3]];
+
 function checkRoomGeometry(rooms, floor, issues) {
-  for (const [index, first] of rooms.entries()) {
-    for (const second of rooms.slice(index + 1)) {
-      if (overlap(first.x, first.x + first.width, second.x, second.x + second.width) > 0.015
-          && overlap(first.y, first.y + first.length, second.y, second.y + second.length) > 0.015) {
-        recordIssue(issues, "error", "room-overlap", floor, first,
-          `Площадь пересекается с ${second.number ? `помещением ${second.number}` : "открытым контуром"}. Проверьте контуры и промеры.`);
-      }
+  const validRooms = rooms.filter((room) => !room.polygon_fit || room.polygon_fit.points);
+  for (const [index, first] of validRooms.entries()) {
+    for (const second of validRooms.slice(index + 1)) {
+      if (overlap(first.x, first.x + first.width, second.x, second.x + second.width) <= 0.015
+          || overlap(first.y, first.y + first.length, second.y, second.y + second.length) <= 0.015) continue;
+      if ((first.polygon_fit || second.polygon_fit) && polygonIntersectionArea(
+        roomOutline(first), first.polygon_fit?.triangles ?? RECTANGLE_TRIANGLES,
+        roomOutline(second), second.polygon_fit?.triangles ?? RECTANGLE_TRIANGLES, 0.000225,
+      ) <= 0.000225) continue;
+      recordIssue(issues, "error", "room-overlap", floor, first,
+        `Площадь пересекается с ${second.number ? `помещением ${second.number}` : "открытым контуром"}. Проверьте контуры и промеры.`);
     }
   }
 }
@@ -379,13 +449,19 @@ function placeOpenings(room, floor, issues) {
   const placed = [];
   for (const opening of room.openings ?? []) {
     const { wall } = opening;
-    const span = wall === "top" || wall === "bottom" ? room.width : room.length;
+    const polygon = room.polygon_fit;
+    const edgeIndex = opening.edge_index;
+    const useEdge = Boolean(polygon);
+    const correctSide = useEdge ? Number.isInteger(edgeIndex) && edgeIndex >= 0 && edgeIndex < room.polygon_px.length
+      : SIDES.includes(wall);
+    const span = useEdge ? polygon.edgeLengths?.[edgeIndex] : wall === "top" || wall === "bottom" ? room.width : room.length;
     const width = finite(opening.width_cm) / 100;
     const type = opening.type === "DOOR_SIMPLE" ? "DOOR_SINGLE" : opening.type;
-    if (!SIDES.includes(wall) || !OPENING_TYPES.has(type)) {
+    if (!correctSide || !OPENING_TYPES.has(type)) {
       recordIssue(issues, "error", "opening-type", floor, room, "Укажите стену и тип проёма.", opening);
       continue;
     }
+    if (span === undefined) continue;
     if (width < 0.05 || width > span + EPSILON) {
       recordIssue(issues, "error", "opening-width", floor, room, "Проверьте ширину проёма.", opening);
       continue;
@@ -400,7 +476,7 @@ function placeOpenings(room, floor, issues) {
       recordIssue(issues, "error", "opening-offset", floor, room, "Привязка выводит проём за стену или противоречит второму отступу.", opening);
       continue;
     }
-    if (placed.some((previous) => previous.wall === wall
+    if (placed.some((previous) => (useEdge ? previous.edge_index === edgeIndex : previous.wall === wall)
         && overlap(previous.offset_m, previous.offset_m + previous.width_m, offset, offset + width) > 0.005)) {
       recordIssue(issues, "error", "opening-overlap", floor, room, "Проёмы перекрываются. Проверьте ширины и отступы.", opening);
       continue;
@@ -411,6 +487,36 @@ function placeOpenings(room, floor, issues) {
     placed.push({ ...opening, type, offset_m: Math.max(0, offset), width_m: width });
   }
   return placed;
+}
+
+function solveRoomSymbols(room, floor, issues) {
+  return (room.symbols ?? []).map((symbol) => {
+    const issue = (message) => recordIssue(issues, "error", "symbol-measurements", floor, room,
+      message, null, undefined, symbol.id);
+    if (!validRange(symbol.width_cm, 1, 1500) || !validRange(symbol.depth_cm, 1, 1500)
+        || symbol.width_cm > room.width * 100 + EPSILON || symbol.depth_cm > room.length * 100 + EPSILON) {
+      issue("Проверьте габариты условного знака.");
+      return symbol;
+    }
+    if (!room.polygon_fit?.points) return symbol;
+    const [left, top, right, bottom] = room.bbox_px;
+    const u = validRange(symbol.u, 0, 1) ? symbol.u : 0.5;
+    const v = validRange(symbol.v, 0, 1) ? symbol.v : 0.5;
+    const position = mapPolygonPoint([left + u * (right - left), top + v * (bottom - top)], room.polygon_px, room.polygon);
+    if (!position) {
+      issue("Переместите условный знак внутрь контура.");
+      return symbol;
+    }
+    const fitted = { ...symbol, position_m: position };
+    const { x, y, width, depth } = symbolBounds(fitted, room);
+    const footprint = [[x, y], [x + width, y], [x + width, y + depth], [x, y + depth]];
+    const inside = polygonIntersectionArea(room.polygon, room.polygon_fit.triangles, footprint, RECTANGLE_TRIANGLES);
+    if (inside + EPSILON < width * depth) {
+      issue("Условный знак пересекает контур комнаты. Проверьте положение и габариты.");
+      return symbol;
+    }
+    return fitted;
+  });
 }
 
 function solveFloor(input, floorIndex, nextNumber, issues) {
@@ -451,37 +557,25 @@ function solveFloor(input, floorIndex, nextNumber, issues) {
       room.discrepancy_cm = Math.max(room.discrepancy_cm, Math.round(correction));
       return measured;
     });
-    [room.width, room.length] = solvedSizes;
-    room.area_m2 = coordinate(room.width * room.length);
+    const polygon = room.polygon_fit;
+    [room.width, room.length] = polygon?.points ? [polygon.width, polygon.length] : solvedSizes;
+    room.area_m2 = polygon ? (polygon.points ? coordinate(polygon.area) : null) : coordinate(room.width * room.length);
     room.solved_dimensions_m = { width: room.width, length: room.length, discrepancy_cm: room.discrepancy_cm };
-    if (room.polygon_px?.length > 3 && room.polygon_px.every(
+    if (polygon?.points) {
+      room.polygon = polygon.points.map(([x, y]) => [room.x + x, room.y + y]);
+      room.edge_lengths_m = polygon.edgeLengths;
+      room.solved_dimensions_m.edge_lengths = polygon.edgeLengths;
+      room.solved_dimensions_m.area_m2 = room.area_m2;
+    } else if (polygon && room.polygon_px.every(
       (point) => Array.isArray(point) && point.length === 2 && point.every((value) => finite(value) !== null)
     )) {
       const [left, top, right, bottom] = room.bbox_px;
-      const inset = Math.min(right - left, bottom - top) * 0.022 + 1;
-      const closeToEdges = ([x, y]) => Math.min(Math.abs(x - left), Math.abs(x - right),
-        Math.abs(y - top), Math.abs(y - bottom)) <= inset;
-      const boundsArea = (right - left) * (bottom - top);
-      const contourArea = Math.abs(room.polygon_px.reduce((area, point, index, points) => {
-        const next = points[(index + 1) % points.length];
-        return area + (point[0] * next[1] - point[1] * next[0]) / 2;
-      }, 0));
-      if (contourArea < boundsArea * 0.96 || !room.polygon_px.every(closeToEdges)) {
-        room.polygon = room.polygon_px.map(([x, y]) => [
-          room.x + (x - left) * room.width / (right - left),
-          room.y + (y - top) * room.length / (bottom - top),
-        ]);
-        recordIssue(issues, "error", "polygon-measurements", floor, room,
-          "Непрямоугольный контур показан схематично. Для масштабного экспорта разбейте его на измеренные прямоугольные участки.");
-      }
+      room.polygon = room.polygon_px.map(([x, y]) => [
+        room.x + (x - left) * room.width / (right - left),
+        room.y + (y - top) * room.length / (bottom - top),
+      ]);
     }
-    for (const symbol of room.symbols ?? []) {
-      if (!validRange(symbol.width_cm, 1, 1500) || !validRange(symbol.depth_cm, 1, 1500)
-          || symbol.width_cm > room.width * 100 + EPSILON || symbol.depth_cm > room.length * 100 + EPSILON) {
-        recordIssue(issues, "error", "symbol-measurements", floor, room,
-          "Проверьте габариты условного знака.", null, undefined, symbol.id);
-      }
-    }
+    room.symbols = solveRoomSymbols(room, floor, issues);
     room.openings = placeOpenings(room, floor, issues);
     for (const side of SIDES) {
       const type = room.wall_types[side];
@@ -663,6 +757,127 @@ function drawExteriorJoints(draw, bands) {
   }
 }
 
+function polygonWallBands(room) {
+  const winding = Math.sign(signedArea(room.polygon));
+  return room.polygon.map((start, edge) => {
+    const end = room.polygon[(edge + 1) % room.polygon.length];
+    const span = room.edge_lengths_m[edge];
+    const along = [(end[0] - start[0]) / span, (end[1] - start[1]) / span];
+    const outward = [along[1] * winding, -along[0] * winding];
+    const rawType = room.edge_wall_types?.[edge];
+    const type = WALL_TYPES.has(rawType) ? rawType
+      : room.inferred_edge_wall_types?.[edge] ?? (room.number === null ? "VERANDA" : "WALL_CAPITAL");
+    const explicit = room.edge_wall_thickness_cm?.[edge];
+    const fallback = type === "WALL_PARTITION" ? 0.12 : 0.28;
+    const thickness = type === "VERANDA" || type === "AUX" ? 0 : room.effective_edge_thickness_m?.[edge]
+      ?? (validRange(explicit, 1, 150) ? explicit / 100 : fallback);
+    const field = (distance, width) => [
+      start[0] + distance * along[0] + width * outward[0],
+      start[1] + distance * along[1] + width * outward[1],
+    ];
+    const openings = room.openings.filter((item) => item.edge_index === edge)
+      .map((item) => ({ ...item, from: item.offset_m, to: item.offset_m + item.width_m }));
+    return { room, start, span, along, outward, type, thickness, field, openings };
+  });
+}
+
+function polygonAxisBand(band) {
+  const horizontal = Math.abs(band.along[1]) < EPSILON;
+  if (!horizontal && Math.abs(band.along[0]) >= EPSILON) return null;
+  const axis = horizontal ? 0 : 1;
+  const face = band.start[1 - axis];
+  const outer = band.field(0, band.thickness)[1 - axis];
+  const left = band.start[axis];
+  const right = band.field(band.span, 0)[axis];
+  const openings = band.openings.map((item) => {
+    const [first, second] = [band.field(item.from, 0)[axis], band.field(item.to, 0)[axis]];
+    return { ...item, from: Math.min(first, second), to: Math.max(first, second) };
+  });
+  return { room: band.room, horizontal, face, outer, start: Math.min(left, right), end: Math.max(left, right), openings, type: band.type };
+}
+
+function rectangleBandAsEdge(band) {
+  const start = band.horizontal ? [band.start, band.face] : [band.face, band.start];
+  const direction = Math.sign(band.outer - band.face);
+  const field = (distance, width) => band.horizontal
+    ? [band.start + distance, band.face + width * direction] : [band.face + width * direction, band.start + distance];
+  return {
+    ...band, start, span: band.end - band.start, field,
+    outward: band.horizontal ? [0, direction] : [direction, 0],
+    openings: band.openings.map((opening) => ({ ...opening, from: opening.from - band.start, to: opening.to - band.start })),
+  };
+}
+
+function sharedPolygonOpenings(band, other) {
+  if (band.room === other.room || band.thickness <= 0 || other.thickness <= 0) return [];
+  const dot = ([x, y], [u, v]) => x * u + y * v;
+  if (dot(band.outward, other.outward) > -1 + EPSILON) return [];
+  const local = ([x, y]) => [x - band.start[0], y - band.start[1]];
+  const offset = dot(local(other.start), band.outward);
+  if (Math.abs(offset - band.thickness) >= 0.015 || Math.abs(offset - other.thickness) >= 0.015) return [];
+  return other.openings.flatMap((opening) => {
+    const first = dot(local(other.field(opening.from, 0)), band.along);
+    const second = dot(local(other.field(opening.to, 0)), band.along);
+    const from = Math.min(first, second);
+    const to = Math.max(first, second);
+    return overlap(from, to, 0, band.span) > EPSILON ? [{ ...opening, from, to }] : [];
+  });
+}
+
+function polygonCorner(first, next) {
+  const firstEnd = first.field(first.span, first.thickness);
+  const nextStart = next.field(0, next.thickness);
+  if (!first.thickness || !next.thickness) return [firstEnd, nextStart];
+  const cross = ([x, y], [u, v]) => x * v - y * u;
+  const denominator = cross(first.along, next.along);
+  if (Math.abs(denominator) <= EPSILON) return [firstEnd, nextStart];
+  const delta = [nextStart[0] - firstEnd[0], nextStart[1] - firstEnd[1]];
+  const distance = cross(delta, next.along) / denominator;
+  const limit = Math.max(first.thickness, next.thickness) * 4;
+  if (Math.abs(distance) > limit) return [firstEnd, nextStart];
+  const corner = first.field(first.span + distance, first.thickness);
+  return [corner, corner];
+}
+
+function drawPolygonWall(draw, band, corners, otherBands) {
+  if (band.type === "AUX") return;
+  const { field, span, thickness } = band;
+  const layer = wallLayer(band.type);
+  const openings = [...band.openings, ...otherBands.flatMap((other) => sharedPolygonOpenings(band, other))]
+    .sort((first, second) => first.from - second.from);
+  const projectedDistance = ([x, y]) => (x - band.start[0]) * band.along[0] + (y - band.start[1]) * band.along[1];
+  const first = projectedDistance(corners.start);
+  const last = projectedDistance(corners.end);
+  const wallLine = (from, to, depth) => {
+    if (to > from + EPSILON) draw.line(layer, ...field(from, depth), ...field(to, depth));
+  };
+  let inner = 0;
+  let outer = first;
+  for (const opening of openings) {
+    const from = clamp(opening.from, 0, span);
+    const to = clamp(opening.to, 0, span);
+    wallLine(inner, from, 0);
+    if (thickness) wallLine(outer, Math.min(from, last), thickness);
+    if (to > inner + EPSILON && opening.from >= -EPSILON && opening.to <= span + EPSILON) {
+      drawOpening(draw, field, opening, 0, thickness);
+    }
+    inner = Math.max(inner, to);
+    outer = Math.max(outer, to);
+  }
+  wallLine(inner, span, 0);
+  if (thickness) wallLine(outer, last, thickness);
+}
+
+function drawPolygonRoom(draw, bands, otherBands) {
+  const corners = bands.map((band, index) => polygonCorner(band, bands[(index + 1) % bands.length]));
+  for (const [index, band] of bands.entries()) {
+    const previousCorner = corners[(index + bands.length - 1) % bands.length];
+    const nextCorner = corners[index];
+    drawPolygonWall(draw, band, { start: previousCorner[1], end: nextCorner[0] }, otherBands);
+    draw.line(wallLayer(band.type), ...nextCorner[0], ...nextCorner[1]);
+  }
+}
+
 function drawFreeWall(draw, wall) {
   if (wall.type === "AUX") return;
   const { x1, y1, x2, y2 } = wall;
@@ -689,6 +904,9 @@ function symbolBounds(symbol, room) {
   const depth = Math.min(room.length, symbol.depth_cm / 100);
   const u = validRange(symbol.u, 0, 1) ? symbol.u : 0.5;
   const v = validRange(symbol.v, 0, 1) ? symbol.v : 0.5;
+  if (symbol.position_m) {
+    return { x: symbol.position_m[0] - width / 2, y: symbol.position_m[1] - depth / 2, width, depth };
+  }
   const x = room.x + clamp(room.width * u - width / 2, 0, room.width - width);
   const y = room.y + clamp(room.length * v - depth / 2, 0, room.length - depth);
   return { x, y, width, depth };
@@ -766,17 +984,52 @@ function dimensionText(draw, room, size, technicalPassport) {
   }
 }
 
+function dimensionTextPolygon(draw, room, bands, size, technicalPassport) {
+  const [x, y] = polygonLabelPoint(room.polygon, room.polygon_fit.triangles);
+  if (room.number !== null) {
+    draw.text("TEXT_ROOM", x, y, String(room.number), size * 1.22);
+    if (technicalPassport) draw.text("TEXT_ROOM", x, y + size * 1.27, `${display(room.area_m2)} м²`, size);
+  }
+  for (const band of bands) {
+    if (band.type === "AUX" || band.span <= size * 2.6) continue;
+    const midpoint = band.field(band.span / 2, -size * 0.85);
+    if (!pointInPolygon(midpoint, room.polygon)) continue;
+    const angle = Math.atan2(band.along[1], band.along[0]) * 180 / Math.PI;
+    const rotation = angle <= -90 ? angle + 180 : angle > 90 ? angle - 180 : angle;
+    draw.text("TEXT_DIM", ...midpoint, display(band.span), size, rotation);
+    if (technicalPassport && band.thickness > 0 && band.span > size * 4) {
+      const inward = band.field(band.span / 2, -size * 1.92);
+      if (pointInPolygon(inward, room.polygon)) draw.text("TEXT_DIM", ...inward, `t=${display(band.thickness)}`, size * 0.82, rotation);
+    }
+  }
+}
+
 function modelGeometry(floor, size, technicalPassport) {
   const draw = drawing();
   const bands = floor.rooms.flatMap((room) => room.polygon
     ? [] : SIDES.map((side) => makeWallBand(room, side)));
-  for (const band of bands) drawWallBand(draw, band, bands);
+  const polygons = new Map(floor.rooms.filter((room) => room.polygon_fit?.points)
+    .map((room) => [room.id, polygonWallBands(room)]));
+  const polygonEdges = [...polygons.values()].flat();
+  const aligned = polygonEdges.map(polygonAxisBand).filter(Boolean);
+  const allBands = [...bands, ...aligned];
+  const edgeBands = [...bands.map(rectangleBandAsEdge), ...polygonEdges];
+  for (const band of bands) drawWallBand(draw, band, allBands);
   drawExteriorJoints(draw, bands);
   for (const wall of floor.walls) drawFreeWall(draw, wall);
   for (const room of floor.rooms) {
     if (room.polygon) {
-      for (const [index, point] of room.polygon.entries()) {
-        draw.line("VERANDA", ...point, ...room.polygon[(index + 1) % room.polygon.length]);
+      const walls = polygons.get(room.id);
+      if (walls) {
+        drawPolygonRoom(draw, walls, edgeBands);
+        for (const symbol of room.symbols) {
+          if (symbol.position_m) drawSymbol(draw, symbol, room);
+        }
+        dimensionTextPolygon(draw, room, walls, size, technicalPassport);
+      } else {
+        for (const [index, point] of room.polygon.entries()) {
+          draw.line("VERANDA", ...point, ...room.polygon[(index + 1) % room.polygon.length]);
+        }
       }
       continue;
     }
